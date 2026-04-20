@@ -1,5 +1,9 @@
-import sqlite3, os
-DB_PATH = os.path.join(os.path.dirname(__file__), "accounting.db")
+import sqlite3, os, sys
+
+# 数据库存放在用户目录下，打包后路径稳定，多平台兼容
+_APP_DIR = os.path.join(os.path.expanduser("~"), "智一会计")
+os.makedirs(_APP_DIR, exist_ok=True)
+DB_PATH = os.path.join(_APP_DIR, "accounting.db")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
