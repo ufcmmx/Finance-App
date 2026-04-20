@@ -1,8 +1,13 @@
 import sqlite3, os, sys
 
-# 数据库存放在用户目录下，打包后路径稳定，多平台兼容
-_APP_DIR = os.path.join(os.path.expanduser("~"), "智一会计")
-os.makedirs(_APP_DIR, exist_ok=True)
+# 数据库存放在程序同目录（开发时在脚本旁，打包后在 exe 旁）
+if getattr(sys, 'frozen', False):
+    # PyInstaller 打包后，exe 所在目录
+    _APP_DIR = os.path.dirname(sys.executable)
+else:
+    # 开发时，main.py / db.py 所在目录
+    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
 DB_PATH = os.path.join(_APP_DIR, "accounting.db")
 
 def get_db():
@@ -34,6 +39,7 @@ def init_db():
         parent_code TEXT,
         level INTEGER DEFAULT 1,
         is_leaf INTEGER DEFAULT 1,
+        is_frozen INTEGER DEFAULT 0,
         opening_debit REAL DEFAULT 0,
         opening_credit REAL DEFAULT 0,
         UNIQUE(client_id, code),
@@ -122,8 +128,28 @@ def init_db():
         FOREIGN KEY(entry_id) REFERENCES voucher_entries(id) ON DELETE CASCADE,
         FOREIGN KEY(dimension_id) REFERENCES aux_dimensions(id)
     );
+    CREATE TABLE IF NOT EXISTS voucher_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER,
+        name TEXT NOT NULL,
+        entries TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
     """)
-    conn.commit(); conn.close()
+    conn.commit()
+    # Run migrations
+    _migrate_db(conn)
+    conn.close()
+
+def _migrate_db(conn):
+    """Apply schema migrations"""
+    c = conn.cursor()
+    # Check if is_frozen column exists in accounts table
+    c.execute("PRAGMA table_info(accounts)")
+    columns = {row[1] for row in c.fetchall()}
+    if 'is_frozen' not in columns:
+        c.execute("ALTER TABLE accounts ADD COLUMN is_frozen INTEGER DEFAULT 0")
+        conn.commit()
 
 # 企业会计准则（2006）完整科目表
 STANDARD_ACCOUNTS = [

@@ -10,7 +10,7 @@ from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side,
 
 # ── Stylesheet ──────────────────────────────────────────────────────────────
 SS = """
-* { font-family:'PingFang SC','Microsoft YaHei',sans-serif; font-size:13px; color:#1e2130; }
+* { font-family:'Microsoft YaHei','PingFang SC',sans-serif; font-size:13px; color:#1e2130; }
 QMainWindow,QWidget#root { background:#f0f2f5; }
 /* Sidebar */
 QWidget#sidebar { background:#1c2340; }
@@ -43,6 +43,7 @@ QPushButton#btn_gray:hover { background:#e8e8e8; }
 QLineEdit,QDateEdit,QComboBox,QDoubleSpinBox,QSpinBox,QTextEdit {
     background:#fff; border:1px solid #d9d9d9; border-radius:5px;
     padding:6px 10px; }
+QSpinBox,QDoubleSpinBox { qproperty-buttonSymbols: NoButtons; }
 QLineEdit:focus,QDateEdit:focus,QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }
 QComboBox::drop-down { border:none; width:22px; }
 /* Tables */
@@ -244,6 +245,10 @@ class VoucherDialog(QDialog):
         self.setMinimumSize(860, 580)
         self._accounts = self._fetch_accounts()
         self._templates = VOUCHER_TEMPLATES
+        from PySide6.QtCore import QStringListModel
+        self._account_completion_model = QStringListModel(
+            [f"{a['code']}  {a['full_name']}" for a in self._accounts], self)
+        self._row_completers = []
         self._build()
         if voucher_id: self._load_voucher()
         else: self._add_row(); self._add_row()
@@ -315,9 +320,9 @@ class VoucherDialog(QDialog):
         # Add/del row buttons
         row_btns = QHBoxLayout()
         b_add = QPushButton("＋ 增行"); b_add.setObjectName("btn_outline")
-        b_add.clicked.connect(self._add_row)
+        b_add.clicked.connect(lambda: self._add_row())
         b_del = QPushButton("－ 删行"); b_del.setObjectName("btn_gray")
-        b_del.clicked.connect(self._del_row)
+        b_del.clicked.connect(lambda: self._del_row())
         row_btns.addWidget(b_add); row_btns.addWidget(b_del); row_btns.addStretch()
         L.addLayout(row_btns)
         L.addWidget(sep())
@@ -342,26 +347,58 @@ class VoucherDialog(QDialog):
         summary_edit = QLineEdit(summary)
         summary_edit.setPlaceholderText("摘要...")
 
-        acct_combo = QComboBox()
-        acct_combo.setEditable(True); acct_combo.setInsertPolicy(QComboBox.NoInsert)
-        acct_combo.addItem("")
-        for a in self._accounts:
-            acct_combo.addItem(f"{a['code']}  {a['full_name']}", a['code'])
-        acct_combo.completer().setFilterMode(Qt.MatchContains)
-        acct_combo.completer().setCaseSensitivity(Qt.CaseInsensitive)
-        if acct_code:
-            for j in range(acct_combo.count()):
-                if acct_combo.itemData(j) == acct_code:
-                    acct_combo.setCurrentIndex(j); break
+        # ── 科目搜索框（自定义 completer，支持编号/名称任意位置模糊匹配） ──
+        acct_edit = QLineEdit()
+        acct_edit.setPlaceholderText("输入编号或名称搜索...")
+        acct_edit._code = acct_code  # store selected code
 
-        # Aux widget — shows one combo per bound dimension for the selected account
+        # Build display list and lookup maps
+        display_list = [f"{a['code']}  {a['full_name']}" for a in self._accounts]
+        code_by_display = {f"{a['code']}  {a['full_name']}": a['code'] for a in self._accounts}
+        display_by_code = {a['code']: f"{a['code']}  {a['full_name']}" for a in self._accounts}
+
+        from PySide6.QtWidgets import QCompleter
+        completer = QCompleter(self._account_completion_model, acct_edit)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        completer.popup().setMinimumWidth(380)
+        acct_edit.setCompleter(completer)
+        acct_edit._completer = completer
+        self._row_completers.append(completer)
+
+        # Restore pre-filled value
+        if acct_code and acct_code in display_by_code:
+            acct_edit.setText(display_by_code[acct_code])
+
+        def on_acct_selected(text):
+            code = code_by_display.get(text, "")
+            acct_edit._code = code
+            rebuild_aux(code)
+
+        def on_acct_edited(text):
+            # If user cleared the field, clear code
+            if not text:
+                acct_edit._code = ""
+                rebuild_aux("")
+            # If exact match, update code
+            if text in code_by_display:
+                acct_edit._code = code_by_display[text]
+                rebuild_aux(acct_edit._code)
+            if text:
+                completer.setCompletionPrefix(text)
+                completer.complete()
+
+        completer.activated.connect(on_acct_selected)
+        acct_edit.textChanged.connect(on_acct_edited)
+
+        # ── 辅助核算 ──
         aux_container = QWidget()
         aux_layout = QHBoxLayout(aux_container)
         aux_layout.setContentsMargins(2,2,2,2); aux_layout.setSpacing(4)
-        aux_container._combos = []   # list of (dim_id, QComboBox)
+        aux_container._combos = []
 
         def rebuild_aux(code, saved=None):
-            # Remove old combos
             for w in aux_container._combos:
                 w[1].setParent(None)
             aux_container._combos.clear()
@@ -373,8 +410,6 @@ class VoucherDialog(QDialog):
                     display = f"{it['code']} {it['name']}" if it['code'] else it['name']
                     cb.addItem(display, it["id"])
                 cb.setToolTip(dim["dim_name"])
-                cb.setPlaceholderText(dim["dim_name"])
-                # Restore saved value
                 if saved:
                     for sv_dim, sv_id, sv_name in saved:
                         if sv_dim == dim["dim_id"]:
@@ -387,29 +422,52 @@ class VoucherDialog(QDialog):
                 aux_layout.addWidget(QLabel("—"))
 
         rebuild_aux(acct_code, aux_data)
-        acct_combo.currentIndexChanged.connect(
-            lambda _, ac=acct_combo, cont=aux_container, alay=aux_layout:
-                rebuild_aux(ac.currentData() or ""))
 
+        # ── 借方金额 ──
         d_spin = QDoubleSpinBox(); d_spin.setRange(0,999999999); d_spin.setDecimals(2)
         d_spin.setSpecialValueText(""); d_spin.setValue(debit)
+        d_spin.valueChanged.connect(self._update_totals)
+
+        # ── 贷方金额（支持 = 键自动补平） ──
         cr_spin = QDoubleSpinBox(); cr_spin.setRange(0,999999999); cr_spin.setDecimals(2)
         cr_spin.setSpecialValueText(""); cr_spin.setValue(credit)
-
-        d_spin.valueChanged.connect(self._update_totals)
         cr_spin.valueChanged.connect(self._update_totals)
 
+        # Patch keyPressEvent on cr_spin to handle "=" auto-balance
+        _row_ref = [i]  # mutable ref so lambda can find the row
+        orig_key = cr_spin.keyPressEvent
+        def cr_key(event, _cr=cr_spin):
+            if event.text() == "=":
+                self._auto_balance_credit(_cr)
+            else:
+                orig_key(event)
+        cr_spin.keyPressEvent = cr_key
+
         self.table.setCellWidget(i,0,summary_edit)
-        self.table.setCellWidget(i,1,acct_combo)
+        self.table.setCellWidget(i,1,acct_edit)
         self.table.setCellWidget(i,2,aux_container)
         self.table.setCellWidget(i,3,d_spin)
         self.table.setCellWidget(i,4,cr_spin)
         self._update_totals()
 
+    def _auto_balance_credit(self, target_spin):
+        """按 = 键时，将 target_spin 设为令借贷平衡所需的金额。"""
+        td = tc_other = 0
+        for i in range(self.table.rowCount()):
+            dw = self.table.cellWidget(i,3); cw = self.table.cellWidget(i,4)
+            if dw: td += dw.value()
+            if cw and cw is not target_spin: tc_other += cw.value()
+        needed = max(0, round(td - tc_other, 2))
+        target_spin.setValue(needed)
+        self._update_totals()
+
     def _del_row(self):
         row = self.table.currentRow()
+        if row < 0:
+            row = self.table.rowCount() - 1
         if row >= 0 and self.table.rowCount() > 1:
-            self.table.removeRow(row); self._update_totals()
+            self.table.removeRow(row)
+            self._update_totals()
 
     def _update_totals(self):
         td = tc = 0
@@ -424,20 +482,124 @@ class VoucherDialog(QDialog):
         self.lbl_balance.setStyleSheet(f"color:{'#52c41a' if balanced else '#ff4d4f'};font-weight:bold;")
         self.lbl_cn.setText(cn_amount(td))
 
+    def _load_templates_from_db(self):
+        """Load user-saved templates from database, merged with built-in templates."""
+        conn = get_db(); c = conn.cursor()
+        try:
+            c.execute("SELECT name, entries FROM voucher_templates WHERE client_id=? OR client_id IS NULL ORDER BY id",
+                      (self.client_id,))
+            db_tmpls = c.fetchall()
+        except Exception:
+            db_tmpls = []
+        conn.close()
+        import json
+        user_tmpls = []
+        for row in db_tmpls:
+            try:
+                entries = json.loads(row["entries"])
+                user_tmpls.append((row["name"], entries))
+            except Exception:
+                pass
+        # Merge: built-in first, then user-saved
+        self._templates = list(VOUCHER_TEMPLATES) + user_tmpls
+
     def _show_template_menu(self):
+        self._load_templates_from_db()
         menu = QMenu(self)
         for name, _ in self._templates:
             menu.addAction(name)
         menu.addSeparator()
-        menu.addAction("存为模板")
+        b_save_tpl = menu.addAction("📌 存为模板...")
+        b_del_tpl  = menu.addAction("🗑 删除模板...")
         act = menu.exec(self.sender().mapToGlobal(self.sender().rect().bottomLeft()))
-        if act:
-            for name, entries in self._templates:
-                if act.text() == name:
-                    self.table.setRowCount(0)
-                    for s, code, _, d, cr in entries:
+        if not act: return
+
+        if act is b_save_tpl:
+            self._save_as_template()
+            return
+        if act is b_del_tpl:
+            self._delete_template()
+            return
+
+        # Apply selected template
+        for name, entries in self._templates:
+            if act.text() == name:
+                self.table.setRowCount(0)
+                for entry in entries:
+                    # Support both old tuple format and new dict format
+                    if isinstance(entry, dict):
+                        self._add_row(entry.get("summary",""), entry.get("code",""),
+                                      entry.get("name",""), entry.get("debit",0), entry.get("credit",0))
+                    else:
+                        s, code, _, d, cr = entry
                         self._add_row(s, code, "", d, cr)
-                    break
+                break
+
+    def _save_as_template(self):
+        """Save current voucher entries as a reusable template."""
+        import json
+        # Collect current entries
+        entries = []
+        for i in range(self.table.rowCount()):
+            sw = self.table.cellWidget(i,0); aw = self.table.cellWidget(i,1)
+            dw = self.table.cellWidget(i,3); cw = self.table.cellWidget(i,4)
+            code = getattr(aw, '_code', "") or "" if aw else ""
+            summary = sw.text().strip() if sw else ""
+            d = dw.value() if dw else 0
+            cr = cw.value() if cw else 0
+            if not code and d == 0 and cr == 0: continue
+            # Find account name
+            aname = ""
+            for a in self._accounts:
+                if a['code'] == code: aname = a['full_name']; break
+            entries.append({"summary": summary, "code": code, "name": aname,
+                            "debit": d, "credit": cr})
+        if not entries:
+            QMessageBox.warning(self, "提示", "请先填写凭证分录再保存为模板"); return
+
+        name, ok = QInputDialog.getText(self, "保存为模板", "模板名称：",
+                                         text=entries[0].get("summary","") or "新模板")
+        if not ok or not name.strip(): return
+        name = name.strip()
+
+        # Check duplicate name
+        all_names = [t[0] for t in self._templates]
+        if name in all_names:
+            if QMessageBox.question(self, "覆盖确认", f"模板【{name}】已存在，是否覆盖？",
+                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+            conn = get_db()
+            conn.execute("DELETE FROM voucher_templates WHERE name=? AND (client_id=? OR client_id IS NULL)",
+                         (name, self.client_id))
+            conn.commit(); conn.close()
+
+        conn = get_db()
+        conn.execute("INSERT INTO voucher_templates(client_id, name, entries) VALUES(?,?,?)",
+                     (self.client_id, name, json.dumps(entries, ensure_ascii=False)))
+        conn.commit(); conn.close()
+        QMessageBox.information(self, "成功", f"已保存模板：{name}")
+
+    def _delete_template(self):
+        """Delete a user-saved template."""
+        conn = get_db(); c = conn.cursor()
+        try:
+            c.execute("SELECT id, name FROM voucher_templates WHERE client_id=? OR client_id IS NULL ORDER BY id",
+                      (self.client_id,))
+            user_tmpls = c.fetchall()
+        except Exception:
+            user_tmpls = []
+        conn.close()
+        if not user_tmpls:
+            QMessageBox.information(self, "提示", "没有可删除的自定义模板（内置模板不能删除）")
+            return
+        names = [r["name"] for r in user_tmpls]
+        name, ok = QInputDialog.getItem(self, "删除模板", "选择要删除的模板：", names, editable=False)
+        if not ok or not name: return
+        conn = get_db()
+        conn.execute("DELETE FROM voucher_templates WHERE name=? AND (client_id=? OR client_id IS NULL)",
+                     (name, self.client_id))
+        conn.commit(); conn.close()
+        QMessageBox.information(self, "成功", f"已删除模板：{name}")
 
     def _load_voucher(self):
         conn = get_db(); c = conn.cursor()
@@ -472,7 +634,7 @@ class VoucherDialog(QDialog):
             auxw= self.table.cellWidget(i,2)
             dw  = self.table.cellWidget(i,3); cw  = self.table.cellWidget(i,4)
             if not aw: continue
-            code = aw.currentData() or ""
+            code = getattr(aw, '_code', "") or ""
             d = dw.value() if dw else 0; cr = cw.value() if cw else 0
             if not code and d == 0 and cr == 0: continue
             if not code: QMessageBox.warning(self,"提示",f"第{i+1}行科目不能为空"); return
@@ -1241,6 +1403,12 @@ class VoucherPage(QWidget):
         hdr.addWidget(b_dl); L.addLayout(hdr)
         # Filter row
         fr = QHBoxLayout(); fr.setSpacing(10)
+        fr.addWidget(lbl("期间段:"))
+        self.bal_start_period = QComboBox(); self.bal_start_period.setMinimumWidth(100)
+        self.bal_end_period = QComboBox(); self.bal_end_period.setMinimumWidth(100)
+        fr.addWidget(self.bal_start_period); fr.addWidget(lbl("至")); fr.addWidget(self.bal_end_period)
+        b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary"); b_refresh.clicked.connect(self._load_balance)
+        fr.addWidget(b_refresh); fr.addSpacing(20)
         self.bal_aux = QCheckBox("辅助核算科目"); self.bal_detail = QCheckBox("明细科目")
         self.bal_zero = QCheckBox("0值科目")
         fr.addWidget(self.bal_aux); fr.addWidget(self.bal_detail); fr.addWidget(self.bal_zero)
@@ -1259,14 +1427,18 @@ class VoucherPage(QWidget):
 
     def _load_balance(self):
         if not self.client_id: return
+        start_period = self.bal_start_period.currentData()
+        end_period = self.bal_end_period.currentData()
+        if not start_period or not end_period: return
+
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
         accts = {r['code']:dict(r) for r in c.fetchall()}
-        # Aggregate voucher entries for current period
+        # Aggregate voucher entries for period range
         c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? GROUP BY e.account_code""",
-                  (self.client_id, self.period))
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ? GROUP BY e.account_code""",
+                  (self.client_id, start_period, end_period))
         activity = {r['account_code']:(r['td'] or 0, r['tc'] or 0) for r in c.fetchall()}
         conn.close()
 
@@ -1311,7 +1483,12 @@ class VoucherPage(QWidget):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(10)
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("明细账", bold=True, size=15)); hdr.addStretch()
-        hdr.addWidget(lbl("科目:")); self.ldg_acct = QComboBox(); self.ldg_acct.setMinimumWidth(220)
+        hdr.addWidget(lbl("期间段:"))
+        self.ldg_start_period = QComboBox(); self.ldg_start_period.setMinimumWidth(100)
+        self.ldg_end_period = QComboBox(); self.ldg_end_period.setMinimumWidth(100)
+        hdr.addWidget(self.ldg_start_period); hdr.addWidget(lbl("至")); hdr.addWidget(self.ldg_end_period)
+        hdr.addSpacing(10); hdr.addWidget(lbl("科目:"))
+        self.ldg_acct = QComboBox(); self.ldg_acct.setMinimumWidth(220)
         b_query = QPushButton("查询"); b_query.setObjectName("btn_primary"); b_query.clicked.connect(self._load_ledger)
         hdr.addWidget(self.ldg_acct); hdr.addWidget(b_query)
         L.addLayout(hdr)
@@ -1326,6 +1503,10 @@ class VoucherPage(QWidget):
 
     def _load_ledger(self):
         if not self.client_id: return
+        start_period = self.ldg_start_period.currentData()
+        end_period = self.ldg_end_period.currentData()
+        if not start_period or not end_period: return
+
         # Populate account combo
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT code,name FROM accounts WHERE client_id=? ORDER BY code",(self.client_id,))
@@ -1345,8 +1526,8 @@ class VoucherPage(QWidget):
         acct = c.fetchone()
         c.execute("""SELECT v.date,e.summary,e.debit,e.credit FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? AND e.account_code=? ORDER BY v.date,v.voucher_no,e.line_no""",
-                  (self.client_id, self.period, sel_code))
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ? AND e.account_code=? ORDER BY v.date,v.voucher_no,e.line_no""",
+                  (self.client_id, start_period, end_period, sel_code))
         entries = c.fetchall(); conn.close()
 
         direction = acct['direction'] if acct else '借'
@@ -1386,6 +1567,14 @@ class VoucherPage(QWidget):
         self.client_id = client_id; self.client_name = client_name; self.period = period
         self.client_lbl.setText(f"【{client_name}】")
         self._refresh_periods()
+        # Initialize period ranges for balance and ledger
+        self._init_period_ranges()
+        # Auto refresh current tab
+        idx = self.stack.currentIndex()
+        if idx == 0: self._load_vouchers()
+        elif idx == 1: self._load_balance()
+        elif idx == 2: self._load_ledger()
+        elif idx == 3 and self.client_id: self._aux_page.set_client(self.client_id, self.period)
 
     def _refresh_periods(self):
         self.period_combo.blockSignals(True)
@@ -1401,6 +1590,45 @@ class VoucherPage(QWidget):
                 self.period_combo.setCurrentIndex(i); break
         self.period = target
         self.period_combo.blockSignals(False)
+
+    def _init_period_ranges(self):
+        """Initialize period range selectors for balance and ledger pages"""
+        # Balance page periods
+        self.bal_start_period.clear()
+        self.bal_end_period.clear()
+        now = datetime.now()
+        periods = []
+        for y in range(now.year, now.year-3, -1):
+            for m in range(12,0,-1):
+                period_str = f"{y}-{m:02d}"
+                display_str = f"{y}年{m:02d}期"
+                periods.append((period_str, display_str))
+
+        for period_str, display_str in periods:
+            self.bal_start_period.addItem(display_str, period_str)
+            self.bal_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        current_period = f"{now.year}-{now.month:02d}"
+        for i in range(self.bal_start_period.count()):
+            if self.bal_start_period.itemData(i) == current_period:
+                self.bal_start_period.setCurrentIndex(i)
+                self.bal_end_period.setCurrentIndex(i)
+                break
+
+        # Ledger page periods
+        self.ldg_start_period.clear()
+        self.ldg_end_period.clear()
+        for period_str, display_str in periods:
+            self.ldg_start_period.addItem(display_str, period_str)
+            self.ldg_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        for i in range(self.ldg_start_period.count()):
+            if self.ldg_start_period.itemData(i) == current_period:
+                self.ldg_start_period.setCurrentIndex(i)
+                self.ldg_end_period.setCurrentIndex(i)
+                break
 
     def _on_period_change(self):
         self.period = self.period_combo.currentData() or self.period
@@ -1524,7 +1752,14 @@ class AccountPage(QWidget):
         if tf != "全部类型": sql += " AND type=?"; params.append(tf)
         sql += " ORDER BY code"
         c.execute(sql, params)
-        rows = c.fetchall(); conn.close()
+        rows = c.fetchall()
+        
+        # Check which accounts have been used
+        used_accounts = set()
+        c.execute("SELECT DISTINCT account_code FROM voucher_entries")
+        for row in c.fetchall():
+            used_accounts.add(row['account_code'])
+        conn.close()
 
         self.tbl.setRowCount(len(rows))
         type_colors = {"资产":"#3d6fdb","负债":"#e05252","所有者权益":"#722ed1",
@@ -1537,6 +1772,16 @@ class AccountPage(QWidget):
             code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignCenter)
             name_it = QTableWidgetItem(indent + r["name"])
             if level == 1: name_it.setFont(QFont("",weight=QFont.Bold))
+            
+            # If account is frozen, show gray text
+            try:
+                is_frozen = r['is_frozen']
+            except (KeyError, IndexError):
+                is_frozen = 0
+            if is_frozen:
+                code_it.setForeground(QColor("#ccc"))
+                name_it.setForeground(QColor("#ccc"))
+            
             type_it = QTableWidgetItem(r["type"] or "")
             type_it.setForeground(QColor(type_colors.get(r["type"],"#888")))
             type_it.setTextAlignment(Qt.AlignCenter)
@@ -1550,6 +1795,15 @@ class AccountPage(QWidget):
             pal.setColor(QPalette.Window, QColor("#ffffff"))
             bw.setPalette(pal)
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(8)
+            
+            # If frozen, show frozen status
+            if is_frozen:
+                frozen_lbl = lbl("已冻结", color="#ccc", bold=True)
+                bl.addWidget(frozen_lbl)
+                bl.addStretch()
+                self.tbl.setCellWidget(i,4,bw)
+                continue
+            
             b_sub = QPushButton("＋ 子科目"); b_sub.setObjectName("btn_outline")
             b_sub.setMinimumWidth(88)
             b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
@@ -1557,12 +1811,23 @@ class AccountPage(QWidget):
             b_ed.setMinimumWidth(68)
             b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
             bl.addWidget(b_sub); bl.addWidget(b_ed)
+            
             if level > 1:
-                b_del = QPushButton("🗑 删除"); b_del.setObjectName("btn_red")
-                b_del.setMinimumWidth(68)
-                b_del.setToolTip("删除此科目")
-                b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
-                bl.addWidget(b_del)
+                is_used = r['code'] in used_accounts
+                if is_used:
+                    # Account has been used, show freeze button instead of delete
+                    b_freeze = QPushButton("❄ 冻结"); b_freeze.setObjectName("btn_outline")
+                    b_freeze.setMinimumWidth(68)
+                    b_freeze.setToolTip("冻结此科目，不再允许使用")
+                    b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
+                    bl.addWidget(b_freeze)
+                else:
+                    # Account not used, show delete button
+                    b_del = QPushButton("🗑 删除"); b_del.setObjectName("btn_red")
+                    b_del.setMinimumWidth(68)
+                    b_del.setToolTip("删除此科目")
+                    b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
+                    bl.addWidget(b_del)
             bl.addStretch()
             self.tbl.setCellWidget(i,4,bw)
 
@@ -1571,6 +1836,17 @@ class AccountPage(QWidget):
         if dlg.exec(): self.load()
 
     def _add_sub(self, parent_acct):
+        # Check if parent account has been used (has voucher entries)
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (parent_acct['code'],))
+        used_count = c.fetchone()[0]
+        conn.close()
+        
+        if used_count > 0:
+            QMessageBox.warning(self, "无法添加下级科目", 
+                f"上级科目 【{parent_acct['code']} {parent_acct['name']}】 已有凭证使用，不允许添加下级科目。")
+            return
+        
         dlg = AccountEditDialog(self, self.client_id, parent_acct=parent_acct)
         if dlg.exec(): self.load()
 
@@ -1578,14 +1854,67 @@ class AccountPage(QWidget):
         dlg = AccountEditDialog(self, self.client_id, account=r)
         if dlg.exec(): self.load()
 
+    def _freeze(self, aid):
+        """Freeze an account to prevent further use"""
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        acct = c.fetchone()
+        conn.close()
+        
+        if acct:
+            # Second confirmation for freezing
+            reply = QMessageBox.question(self, "冻结确认", 
+                f"确认冻结科目 【{acct['code']} {acct['name']}】 吗？\n\n冻结后将不再允许使用此科目。",
+                QMessageBox.Yes | QMessageBox.No)
+            
+            if reply == QMessageBox.Yes:
+                conn = get_db()
+                conn.execute("UPDATE accounts SET is_frozen=1 WHERE id=?", (aid,))
+                conn.commit(); conn.close()
+                QMessageBox.information(self, "成功", f"科目 【{acct['code']} {acct['name']}】 已冻结。")
+                self.load()
+
     def _del(self, aid):
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=(SELECT code FROM accounts WHERE id=?)",(aid,))
-        if c.fetchone()[0] > 0:
-            conn.close()
-            QMessageBox.warning(self,"无法删除","该科目已有凭证记录，不能删除。"); return
-        conn.execute("DELETE FROM accounts WHERE id=?",(aid,)); conn.commit(); conn.close()
-        self.load()
+        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        acct = c.fetchone()
+        if not acct: conn.close(); return
+        
+        acct_code, acct_name = acct['code'], acct['name']
+        
+        # Check if account has been used
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (acct_code,))
+        used_count = c.fetchone()[0]
+        conn.close()
+        
+        if used_count > 0:
+            # Account has been used, offer freeze or delete confirmation
+            msg_box = QMessageBox(QMessageBox.Warning, "科目已使用", 
+                f"科目 【{acct_code} {acct_name}】 已有凭证使用。\n\n选择操作：")
+            btn_freeze = msg_box.addButton("冻结科目", QMessageBox.AcceptRole)
+            btn_cancel = msg_box.addButton("取消", QMessageBox.RejectRole)
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == btn_freeze:
+                # Freeze the account
+                conn = get_db()
+                conn.execute("UPDATE accounts SET is_frozen=1 WHERE id=?", (aid,))
+                conn.commit(); conn.close()
+                QMessageBox.information(self, "成功", f"科目 【{acct_code} {acct_name}】 已冻结，不再允许使用。")
+                self.load()
+            return
+        
+        # Account not used, show delete confirmation dialog
+        reply = QMessageBox.question(self, "二次确认", 
+            f"确认删除科目 【{acct_code} {acct_name}】 吗？\n\n此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            conn = get_db()
+            conn.execute("DELETE FROM accounts WHERE id=?", (aid,))
+            conn.commit(); conn.close()
+            QMessageBox.information(self, "成功", f"科目 【{acct_code} {acct_name}】 已删除。")
+            self.load()
 
     def _import_excel(self):
         """Import historical vouchers from Excel."""
@@ -3034,6 +3363,111 @@ class AuditPage(QWidget):
         self.load()
 
 
+class SystemPage(QWidget):
+    """系统管理：数据备份/恢复、关于"""
+
+    def __init__(self):
+        super().__init__()
+        L = QVBoxLayout(self); L.setContentsMargins(40,32,40,32); L.setSpacing(24)
+        L.addWidget(lbl("系统管理", bold=True, size=18))
+
+        # ── 数据备份 ──
+        grp1 = QFrame(); grp1.setObjectName("card")
+        g1 = QVBoxLayout(grp1); g1.setContentsMargins(24,20,24,20); g1.setSpacing(12)
+        g1.addWidget(lbl("数据备份", bold=True, size=14))
+        g1.addWidget(lbl(
+            f"数据库位置：{self._db_path()}\n"
+            "备份会将当前数据库完整复制到你指定的位置，建议定期备份到云盘或移动硬盘。",
+            color="#666"))
+        row1 = QHBoxLayout(); row1.setSpacing(12)
+        b_backup = QPushButton("📦 立即备份"); b_backup.setObjectName("btn_primary")
+        b_backup.setFixedWidth(140); b_backup.clicked.connect(self._backup)
+        row1.addWidget(b_backup); row1.addStretch()
+        g1.addLayout(row1)
+        self.backup_log = QLabel(""); self.backup_log.setStyleSheet("color:#52c41a;font-size:12px;")
+        g1.addWidget(self.backup_log)
+        L.addWidget(grp1)
+
+        # ── 数据恢复 ──
+        grp2 = QFrame(); grp2.setObjectName("card")
+        g2 = QVBoxLayout(grp2); g2.setContentsMargins(24,20,24,20); g2.setSpacing(12)
+        g2.addWidget(lbl("数据恢复", bold=True, size=14))
+        warn = QLabel("⚠ 恢复将覆盖当前全部数据，操作不可撤销。请确保已备份当前数据！")
+        warn.setStyleSheet("background:#fff7e6;color:#d46b08;border-radius:6px;padding:8px 12px;font-size:12px;")
+        warn.setWordWrap(True); g2.addWidget(warn)
+        row2 = QHBoxLayout(); row2.setSpacing(12)
+        b_restore = QPushButton("📂 从备份文件恢复"); b_restore.setObjectName("btn_red")
+        b_restore.setFixedWidth(180); b_restore.clicked.connect(self._restore)
+        row2.addWidget(b_restore); row2.addStretch()
+        g2.addLayout(row2)
+        self.restore_log = QLabel(""); self.restore_log.setStyleSheet("color:#666;font-size:12px;")
+        g2.addWidget(self.restore_log)
+        L.addWidget(grp2)
+
+        # ── 关于 ──
+        grp3 = QFrame(); grp3.setObjectName("card")
+        g3 = QVBoxLayout(grp3); g3.setContentsMargins(24,20,24,20); g3.setSpacing(6)
+        g3.addWidget(lbl("关于 智一会计", bold=True, size=14))
+        g3.addWidget(lbl("版本：1.0.0    企业会计准则（2006）    支持 macOS / Windows", color="#666"))
+        g3.addWidget(lbl(f"数据目录：{self._db_path()}", color="#aaa", size=11))
+        L.addWidget(grp3)
+        L.addStretch()
+
+    def _db_path(self):
+        from db import DB_PATH
+        return DB_PATH
+
+    def _backup(self):
+        import shutil, datetime
+        default = f"智一会计备份_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        path, _ = QFileDialog.getSaveFileName(self, "选择备份位置", default, "数据库文件(*.db)")
+        if not path: return
+        try:
+            # Use SQLite backup API for a safe online backup
+            import sqlite3
+            from db import DB_PATH
+            src = sqlite3.connect(DB_PATH)
+            dst = sqlite3.connect(path)
+            src.backup(dst)
+            src.close(); dst.close()
+            self.backup_log.setText(f"✓ 备份成功：{path}")
+            self.backup_log.setStyleSheet("color:#52c41a;font-size:12px;")
+        except Exception as e:
+            self.backup_log.setText(f"✗ 备份失败：{e}")
+            self.backup_log.setStyleSheet("color:#ff4d4f;font-size:12px;")
+
+    def _restore(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择备份文件", "", "数据库文件(*.db)")
+        if not path: return
+        if QMessageBox.question(self, "确认恢复",
+                "恢复将覆盖当前所有数据，此操作不可撤销！\n\n确定要从所选备份文件恢复吗？",
+                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            import sqlite3
+            from db import DB_PATH
+            # Validate: check it's a valid SQLite db
+            test = sqlite3.connect(path)
+            test.execute("SELECT name FROM sqlite_master LIMIT 1")
+            test.close()
+            # Backup current first
+            import shutil, datetime
+            auto_bak = DB_PATH + f".autobak_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+            shutil.copy2(DB_PATH, auto_bak)
+            # Restore
+            src = sqlite3.connect(path)
+            dst = sqlite3.connect(DB_PATH)
+            src.backup(dst)
+            src.close(); dst.close()
+            self.restore_log.setText(f"✓ 恢复成功！原数据已自动备份至：{auto_bak}\n请重启应用使数据生效。")
+            self.restore_log.setStyleSheet("color:#52c41a;font-size:12px;")
+            QMessageBox.information(self, "恢复成功",
+                "数据恢复成功！\n请关闭并重新启动应用以加载恢复的数据。")
+        except Exception as e:
+            self.restore_log.setText(f"✗ 恢复失败：{e}")
+            self.restore_log.setStyleSheet("color:#ff4d4f;font-size:12px;")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -3060,7 +3494,7 @@ class MainWindow(QMainWindow):
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
         sl.addWidget(div)
         self._nav_btns = []
-        for name in ["客户管理","记账（凭证）","科目管理","期末结账","财务报表","审计日志"]:
+        for name in ["客户管理","记账（凭证）","科目管理","期末结账","财务报表","审计日志","系统管理"]:
             b = QPushButton(name); b.setObjectName("nav"); b.setProperty("active","false")
             b.clicked.connect(lambda _,n=name: self._nav(n))
             sl.addWidget(b); self._nav_btns.append(b)
@@ -3078,7 +3512,9 @@ class MainWindow(QMainWindow):
         self.pg_settle = SettlePage()
         self.pg_reports = ReportPage()
         self.pg_audit = AuditPage()
-        for pg in [self.pg_clients, self.pg_vouchers, self.pg_accounts, self.pg_settle, self.pg_reports, self.pg_audit]:
+        self.pg_system = SystemPage()
+        for pg in [self.pg_clients, self.pg_vouchers, self.pg_accounts,
+                   self.pg_settle, self.pg_reports, self.pg_audit, self.pg_system]:
             self.stack.addWidget(pg)
         self.pg_clients.client_opened.connect(self._open_client)
         self.pg_settle.carryforward_done.connect(self._on_carryforward_done)
@@ -3090,7 +3526,8 @@ class MainWindow(QMainWindow):
         self._nav("记账（凭证）")
 
     def _nav(self, name):
-        mapping = {"客户管理":0,"记账（凭证）":1,"科目管理":2,"期末结账":3,"财务报表":4,"审计日志":5}
+        mapping = {"客户管理":0,"记账（凭证）":1,"科目管理":2,"期末结账":3,
+                   "财务报表":4,"审计日志":5,"系统管理":6}
         self.stack.setCurrentIndex(mapping[name])
         for b in self._nav_btns:
             b.setProperty("active","true" if b.text()==name else "false")
