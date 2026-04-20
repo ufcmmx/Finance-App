@@ -2687,6 +2687,15 @@ class ReportPage(QWidget):
                 QPushButton[active=true]{color:#3d6fdb;border-bottom:2px solid #3d6fdb;}""")
             b.clicked.connect(lambda _,nn=n:self._switch(nn)); tl.addWidget(b); self._rtabs.append(b)
         tl.addStretch()
+        # Period selector
+        pr = QHBoxLayout(); pr.setSpacing(8)
+        pr.addWidget(lbl("报告期间:", color="#666"))
+        self.rep_start_period = QComboBox(); self.rep_start_period.setMinimumWidth(100)
+        self.rep_end_period = QComboBox(); self.rep_end_period.setMinimumWidth(100)
+        pr.addWidget(self.rep_start_period); pr.addWidget(lbl("至", color="#666")); pr.addWidget(self.rep_end_period)
+        b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary"); b_refresh.clicked.connect(self._refresh_reports)
+        pr.addWidget(b_refresh); pr.addStretch()
+        tl.addLayout(pr)
         self.period_lbl = lbl("", color="#888"); tl.addWidget(self.period_lbl)
         b_dl = QPushButton(" ↓ 下载"); b_dl.setObjectName("btn_outline"); b_dl.clicked.connect(self._export)
         tl.addSpacing(12); tl.addWidget(b_dl)
@@ -2694,6 +2703,16 @@ class ReportPage(QWidget):
         self.stack = QStackedWidget(); L.addWidget(self.stack)
         self._build_balance(); self._build_income(); self._build_equity(); self._build_placeholder("现金流量表"); self._build_cashflow()
         self._switch("资产负债表")
+
+    def _refresh_reports(self):
+        """Refresh current report with selected period range"""
+        current_tab = None
+        for b in self._rtabs:
+            if b.property("active") == "true":
+                current_tab = b.text()
+                break
+        if current_tab:
+            self._switch(current_tab)
 
     def _build_placeholder(self, name):
         w = QWidget(); vl = QVBoxLayout(w)
@@ -2732,12 +2751,14 @@ class ReportPage(QWidget):
 
     def _load_balance(self):
         if not self.client_id: return
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
         conn = get_db(); c = conn.cursor()
         # Net balance from vouchers up to current period (approved only)
         c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period<=? AND v.status='已审核'
-            GROUP BY e.account_code""", (self.client_id, self.period))
+            GROUP BY e.account_code""", (self.client_id, end_period))
         mv = {r[0]: r[1] or 0 for r in c.fetchall()}
         c.execute("SELECT code,opening_debit,opening_credit,direction FROM accounts WHERE client_id=?",
                   (self.client_id,))
@@ -2898,6 +2919,9 @@ class ReportPage(QWidget):
 
     def _load_income(self):
         if not self.client_id: return
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
         conn = get_db(); c = conn.cursor()
 
         def fetch_period(period_filter):
@@ -2907,9 +2931,11 @@ class ReportPage(QWidget):
                 GROUP BY e.account_code""", (self.client_id,))
             return {r[0]: r[1] or 0 for r in c.fetchall()}
 
-        cur = fetch_period(f"='{self.period}'")
-        year = self.period[:4]
-        ytd = fetch_period(f" LIKE '{year}%'")
+        # Current period: from start to end
+        cur = fetch_period(f">='{start_period}' AND v.period<='{end_period}'")
+        year = end_period[:4]
+        # Year-to-date: from year start to end
+        ytd = fetch_period(f" LIKE '{year}%' AND v.period<='{end_period}'")
         conn.close()
 
         def g(codes, d=None):
@@ -3054,8 +3080,10 @@ class ReportPage(QWidget):
 
     def _load_equity(self):
         if not self.client_id: return
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
         conn = get_db(); c = conn.cursor()
-        year = self.period[:4]
+        year = end_period[:4]
 
         # Fetch year-to-date balances from voucher entries (approved only)
         c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
@@ -3129,13 +3157,16 @@ class ReportPage(QWidget):
 
     def _load_cashflow(self):
         if not self.client_id: return
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
         conn = get_db(); c = conn.cursor()
         c.execute("""SELECT e.account_code, e.account_name,
             SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? AND v.status='已审核'
+            WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
             GROUP BY e.account_code ORDER BY e.account_code""",
-            (self.client_id, self.period))
+            (self.client_id, start_period, end_period))
         entries = c.fetchall()
         # Get account types
         c.execute("SELECT code,type FROM accounts WHERE client_id=?",(self.client_id,))
@@ -3172,6 +3203,29 @@ class ReportPage(QWidget):
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.period = period
         self.period_lbl.setText(f"【{client_name}】{period}")
+        # Initialize period ranges
+        self.rep_start_period.clear()
+        self.rep_end_period.clear()
+        now = datetime.now()
+        periods = []
+        for y in range(now.year, now.year-3, -1):
+            for m in range(12,0,-1):
+                period_str = f"{y}-{m:02d}"
+                display_str = f"{y}年{m:02d}期"
+                periods.append((period_str, display_str))
+
+        for period_str, display_str in periods:
+            self.rep_start_period.addItem(display_str, period_str)
+            self.rep_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        current_period = f"{now.year}-{now.month:02d}"
+        for i in range(self.rep_start_period.count()):
+            if self.rep_start_period.itemData(i) == current_period:
+                self.rep_start_period.setCurrentIndex(i)
+                self.rep_end_period.setCurrentIndex(i)
+                break
+
         idx = self.stack.currentIndex()
         if idx==0: self._load_balance()
         elif idx==1: self._load_income()
@@ -3180,16 +3234,23 @@ class ReportPage(QWidget):
 
     def _export(self):
         if not self.client_id: return
-        path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{self.period}.xlsx","Excel(*.xlsx)")
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
+        path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{end_period}.xlsx","Excel(*.xlsx)")
         if not path: return
         wb = openpyxl.Workbook()
         # Income sheet
         ws = wb.active; ws.title="利润表"
         ws.append(["项目","行次","本期金额","本年累计"])
         conn = get_db(); c = conn.cursor()
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period:
+            QMessageBox.warning(self, "错误", "请选择报告期间")
+            return
         c.execute("""SELECT e.account_code,SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
-            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period=? GROUP BY e.account_code""",
-                  (self.client_id,self.period))
+            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period>=? AND v.period<=? GROUP BY e.account_code""",
+                  (self.client_id, start_period, end_period))
         cur = {r[0]:r[1] or 0 for r in c.fetchall()}
         def g(code):
             total = 0
