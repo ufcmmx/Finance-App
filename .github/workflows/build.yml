@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -20,7 +23,7 @@ jobs:
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
-        pip install PySide6 openpyxl pyinstaller
+        pip install PySide6 openpyxl pandas xlrd pyinstaller
 
     - name: 执行 PyInstaller 打包 (包含图标)
       # 这里加入了 --icon 参数指向你的图标文件
@@ -31,3 +34,4 @@ jobs:
       with:
         name: 智一会计-Windows版
         path: dist/智一会计.exe
+        retention-days: 30
