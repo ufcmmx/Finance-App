@@ -11,7 +11,6 @@ from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side,
 # ── Stylesheet ──────────────────────────────────────────────────────────────
 SS = """
 * { font-family:'Microsoft YaHei','PingFang SC',sans-serif; font-size:13px; color:#1e2130; }
-QPushButton { font-family:'Microsoft YaHei','PingFang SC',sans-serif; font-size:13px; }
 QMainWindow,QWidget#root { background:#f0f2f5; }
 /* Sidebar */
 QWidget#sidebar { background:#1c2340; }
@@ -1201,14 +1200,15 @@ class ClientPage(QWidget):
                 it.setData(Qt.UserRole, r['id']); self.tbl.setItem(i,j,it)
             # Buttons
             bw = QWidget()
+            bw.setAutoFillBackground(True)
+            pal = bw.palette(); pal.setColor(QPalette.Window, QColor("#ffffff")); bw.setPalette(pal)
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,4,8,4); bl.setSpacing(8)
-            _f = QFont("Microsoft YaHei", 9)
             b1 = QPushButton("📂 进账簿"); b1.setObjectName("btn_primary")
-            b1.setFixedSize(94, 30); b1.setFont(_f)
+            b1.setFixedSize(94, 30)
             b2 = QPushButton("✏ 编辑"); b2.setObjectName("btn_outline")
-            b2.setFixedSize(68, 30); b2.setFont(_f)
+            b2.setFixedSize(68, 30)
             b3 = QPushButton("🗑 删除"); b3.setObjectName("btn_red")
-            b3.setFixedSize(68, 30); b3.setFont(_f)
+            b3.setFixedSize(68, 30)
             b1.clicked.connect(lambda _,rr=r: self.client_opened.emit(rr['id'],rr['name'],rr['short_code'] or ''))
             b2.clicked.connect(lambda _,rr=r: self._edit(rr))
             b3.clicked.connect(lambda _,rr=r: self._del(rr))
@@ -1733,7 +1733,7 @@ class AccountPage(QWidget):
         hh.setMinimumSectionSize(55)
         self.tbl.setColumnWidth(0,120); self.tbl.setColumnWidth(1,240)
         self.tbl.setColumnWidth(2,80);  self.tbl.setColumnWidth(3,55)
-        self.tbl.setColumnWidth(4,280)
+        self.tbl.setColumnWidth(4,350)
         self.tbl.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         vl.addWidget(self.tbl); L.addWidget(f)
 
@@ -1765,7 +1765,7 @@ class AccountPage(QWidget):
         type_colors = {"资产":"#3d6fdb","负债":"#e05252","所有者权益":"#722ed1",
                        "成本":"#fa8c16","收入":"#52c41a","费用":"#eb5757"}
         for i,r in enumerate(rows):
-            self.tbl.setRowHeight(i,52)
+            self.tbl.setRowHeight(i,68)
             level = r["level"] or 1
             indent = "    " * (level-1)
             code_it = QTableWidgetItem(r["code"])
@@ -1790,9 +1790,16 @@ class AccountPage(QWidget):
                 self.tbl.setItem(i,j,it)
 
             bw = QWidget()
-            bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(8)
-            _f = QFont("Microsoft YaHei", 9)
-
+            bw.setAutoFillBackground(True)
+            pal = bw.palette()
+            pal.setColor(QPalette.Window, QColor("#ffffff"))
+            bw.setPalette(pal)
+            bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(12)
+            
+            # Button style to ensure text is visible on Windows
+            outline_style = "color:#3d6fdb; border:1px solid #3d6fdb; background:transparent; border-radius:4px; padding:6px 14px; font-size:12px; font-weight:bold;"
+            red_style = "color:#fff; background:#ff4d4f; border:none; border-radius:4px; padding:6px 14px; font-size:12px; font-weight:bold;"
+            
             # If frozen, show frozen status
             if is_frozen:
                 frozen_lbl = lbl("已冻结", color="#ccc", bold=True)
@@ -1800,26 +1807,28 @@ class AccountPage(QWidget):
                 bl.addStretch()
                 self.tbl.setCellWidget(i,4,bw)
                 continue
-
-            b_sub = QPushButton("＋ 子科目"); b_sub.setObjectName("btn_outline")
-            b_sub.setMinimumWidth(88); b_sub.setFont(_f)
+            
+            b_sub = QPushButton("＋ 子科目")
+            b_sub.setMinimumWidth(110); b_sub.setMaximumWidth(120); b_sub.setStyleSheet(outline_style)
             b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
-            b_ed = QPushButton("✏ 编辑"); b_ed.setObjectName("btn_outline")
-            b_ed.setMinimumWidth(68); b_ed.setFont(_f)
+            b_ed = QPushButton("✏ 编辑")
+            b_ed.setMinimumWidth(90); b_ed.setMaximumWidth(100); b_ed.setStyleSheet(outline_style)
             b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
             bl.addWidget(b_sub); bl.addWidget(b_ed)
-
+            
             if level > 1:
                 is_used = r['code'] in used_accounts
                 if is_used:
-                    b_freeze = QPushButton("❄ 冻结"); b_freeze.setObjectName("btn_outline")
-                    b_freeze.setMinimumWidth(68); b_freeze.setFont(_f)
+                    # Account has been used, show freeze button instead of delete
+                    b_freeze = QPushButton("❄ 冻结")
+                    b_freeze.setMinimumWidth(90); b_freeze.setMaximumWidth(100); b_freeze.setStyleSheet(outline_style)
                     b_freeze.setToolTip("冻结此科目，不再允许使用")
                     b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
                     bl.addWidget(b_freeze)
                 else:
-                    b_del = QPushButton("🗑 删除"); b_del.setObjectName("btn_red")
-                    b_del.setMinimumWidth(68); b_del.setFont(_f)
+                    # Account not used, show delete button
+                    b_del = QPushButton("🗑 删除")
+                    b_del.setMinimumWidth(90); b_del.setMaximumWidth(100); b_del.setStyleSheet(red_style)
                     b_del.setToolTip("删除此科目")
                     b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
                     bl.addWidget(b_del)
@@ -2696,7 +2705,7 @@ class ReportPage(QWidget):
         tl.addSpacing(12); tl.addWidget(b_dl)
         L.addWidget(tb)
         self.stack = QStackedWidget(); L.addWidget(self.stack)
-        self._build_balance(); self._build_income(); self._build_equity(); self._build_placeholder("现金流量表"); self._build_cashflow()
+        self._build_balance(); self._build_income(); self._build_equity(); self._build_cf_stmt(); self._build_cashflow()
         self._switch("资产负债表")
 
     def _refresh_reports(self):
@@ -2715,7 +2724,7 @@ class ReportPage(QWidget):
         vl.addStretch(); self.stack.addWidget(w)
 
     def _switch(self, name):
-        mapping = {"资产负债表":0,"利润表":1,"所有者权益变动表":2,"现金流量表":4,"收支统计表":3}
+        mapping = {"资产负债表":0,"利润表":1,"所有者权益变动表":2,"现金流量表":3,"收支统计表":4}
         for b in self._rtabs:
             b.setProperty("active","true" if b.text()==name else "false")
             b.style().unpolish(b); b.style().polish(b)
@@ -2724,6 +2733,7 @@ class ReportPage(QWidget):
             if name=="资产负债表": self._load_balance()
             elif name=="利润表": self._load_income()
             elif name=="所有者权益变动表": self._load_equity()
+            elif name=="现金流量表": self._load_cf_stmt()
             elif name=="收支统计表": self._load_cashflow()
 
     def _make_report_table(self, cols, col_widths=None):
@@ -3139,6 +3149,359 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 self.eq_tbl.setItem(i, j, it)
 
+    def _build_cf_stmt(self):
+        w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(8)
+        hdr = QHBoxLayout()
+        hdr.addWidget(lbl("现金流量表", bold=True, size=15)); hdr.addStretch()
+        b_dl = QPushButton("导出Excel"); b_dl.setObjectName("btn_outline")
+        b_dl.clicked.connect(self._export_cf_stmt)
+        hdr.addWidget(b_dl); L.addLayout(hdr)
+        L.addWidget(lbl("（采用直接法，现金及现金等价物 = 库存现金+银行存款+其他货币资金）",
+                         color="#888", size=12))
+        self.cf_stmt_tbl = self._make_report_table(
+            ["项目", "行次", "本期金额", "本年累计金额"],
+            [-1, 40, 140, 140])
+        L.addWidget(self.cf_stmt_tbl)
+        self.stack.addWidget(w)
+
+    def _get_cash_balance(self, c, client_id, period_end):
+        """期末现金余额 = 期初 + 本年至今净发生额"""
+        # Opening balance from accounts
+        c.execute("""SELECT SUM(opening_debit - opening_credit) FROM accounts
+            WHERE client_id=? AND (code='1001' OR code LIKE '1001.%' OR code LIKE '1001_%'
+              OR code='1002' OR code LIKE '1002.%' OR code LIKE '1002_%'
+              OR code='1012' OR code LIKE '1012.%' OR code LIKE '1012_%')""",
+            (client_id,))
+        opening = c.fetchone()[0] or 0
+        if not period_end:
+            return opening
+        year = period_end[:4]
+        c.execute("""SELECT SUM(e.debit) - SUM(e.credit) FROM voucher_entries e
+            JOIN vouchers v ON v.id=e.voucher_id
+            WHERE v.client_id=? AND v.period<=? AND v.period LIKE ? AND v.status='已审核'
+            AND (e.account_code='1001' OR e.account_code LIKE '1001.%' OR e.account_code LIKE '1001_%'
+              OR e.account_code='1002' OR e.account_code LIKE '1002.%' OR e.account_code LIKE '1002_%'
+              OR e.account_code='1012' OR e.account_code LIKE '1012.%' OR e.account_code LIKE '1012_%')""",
+            (client_id, period_end, f"{year}%"))
+        ytd_net = c.fetchone()[0] or 0
+        return opening + ytd_net
+
+    def _compute_cf(self, c, client_id, start_period, end_period):
+        """
+        Compute cash flow by analyzing cash account counterparts in vouchers.
+        Returns dict: row_key -> amount (positive = inflow, negative = outflow shown as positive)
+        Two dicts returned: current_period and ytd.
+        """
+        year = end_period[:4]
+
+        def _analyze(p_start, p_end):
+            """Analyze cash flows for a period range."""
+            # Get all voucher IDs with cash account entries in range
+            c.execute("""SELECT DISTINCT v.id FROM vouchers v
+                JOIN voucher_entries e ON e.voucher_id=v.id
+                WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+                AND (e.account_code='1001' OR e.account_code LIKE '1001.%' OR e.account_code LIKE '1001_%'
+                  OR e.account_code='1002' OR e.account_code LIKE '1002.%' OR e.account_code LIKE '1002_%'
+                  OR e.account_code='1012' OR e.account_code LIKE '1012.%' OR e.account_code LIKE '1012_%')""",
+                (client_id, p_start, p_end))
+            vids = [r[0] for r in c.fetchall()]
+
+            rows = {}  # row_number -> amount
+
+            def add(key, amt):
+                rows[key] = rows.get(key, 0) + amt
+
+            for vid in vids:
+                c.execute("SELECT account_code, debit, credit FROM voucher_entries WHERE voucher_id=?", (vid,))
+                entries = c.fetchall()
+
+                cash_in = 0; cash_out = 0
+                non_cash = []
+                for e in entries:
+                    code = e[0] or ""
+                    d = e[1] or 0; cr = e[2] or 0
+                    if (code == '1001' or code.startswith('1001.') or code.startswith('1001_') or
+                        code == '1002' or code.startswith('1002.') or code.startswith('1002_') or
+                        code == '1012' or code.startswith('1012.') or code.startswith('1012_')):
+                        cash_in += d; cash_out += cr
+                    else:
+                        non_cash.append((code, d, cr))
+
+                # Classify inflows (cash debited)
+                if cash_in > 0:
+                    for code, d, cr in non_cash:
+                        amt = cr  # credit side = source of cash
+                        if amt <= 0: continue
+                        p = code[:4]
+                        # Revenue accounts → 销售商品收到现金
+                        if (code.startswith('6001') or code.startswith('6002') or
+                            code.startswith('6051') or code.startswith('5001') or
+                            code.startswith('5051') or code.startswith('1122') or
+                            code.startswith('2203')):
+                            add('r1', amt)
+                        elif code.startswith('2221') or code.startswith('1321'):
+                            add('r2', amt)  # 税费返还
+                        elif code.startswith('6301') or code.startswith('5301'):
+                            add('r3', amt)  # 其他经营收入
+                        elif (code.startswith('6111') or code.startswith('5111') or
+                              code.startswith('1511') or code.startswith('1521') or
+                              code.startswith('1131') or code.startswith('1132')):
+                            add('r12', amt)  # 取得投资收益
+                        elif code.startswith('1601') or code.startswith('1604'):
+                            add('r13', amt)  # 处置固定资产
+                        elif code.startswith('2001') or code.startswith('2501'):
+                            add('r24', amt)  # 取得借款
+                        elif code.startswith('3001') or code.startswith('4001'):
+                            add('r23', amt)  # 吸收投资
+                        else:
+                            add('r3', amt)   # 其他经营收入
+
+                # Classify outflows (cash credited)
+                if cash_out > 0:
+                    for code, d, cr in non_cash:
+                        amt = d  # debit side = destination of cash
+                        if amt <= 0: continue
+                        if (code.startswith('1403') or code.startswith('1401') or
+                            code.startswith('1405') or code.startswith('6401') or
+                            code.startswith('6402') or code.startswith('5401') or
+                            code.startswith('5402') or code.startswith('2202') or
+                            code.startswith('1221')):
+                            add('r5', amt)   # 购买商品
+                        elif code.startswith('2211'):
+                            add('r6', amt)   # 支付员工
+                        elif code.startswith('2221') or code.startswith('2231'):
+                            add('r7', amt)   # 支付税费
+                        elif (code.startswith('6601') or code.startswith('6602') or
+                              code.startswith('6603') or code.startswith('5501') or
+                              code.startswith('5502') or code.startswith('5503') or
+                              code.startswith('2241') or code.startswith('1461')):
+                            add('r8', amt)   # 其他经营支出
+                        elif (code.startswith('1601') or code.startswith('1604') or
+                              code.startswith('1605') or code.startswith('1701')):
+                            add('r17', amt)  # 购建固定资产
+                        elif (code.startswith('1801') or code.startswith('1511') or
+                              code.startswith('1521') or code.startswith('1531')):
+                            add('r18', amt)  # 投资支出
+                        elif code.startswith('2001') or code.startswith('2501'):
+                            add('r27', amt)  # 偿还借款
+                        elif (code.startswith('3104') or code.startswith('4104') or
+                              code.startswith('2232')):
+                            add('r28', amt)  # 分配股利
+                        else:
+                            add('r8', amt)   # 其他经营支出
+
+            return rows
+
+        cur = _analyze(start_period, end_period)
+        ytd = _analyze(f"{year}-01", end_period)
+        return cur, ytd
+
+    def _load_cf_stmt(self):
+        if not self.client_id: return
+        start_period = self.rep_start_period.currentData()
+        end_period   = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
+        year = end_period[:4]
+
+        conn = get_db(); c = conn.cursor()
+
+        # Cash balances
+        cash_end  = self._get_cash_balance(c, self.client_id, end_period)
+        cash_beg  = self._get_cash_balance(c, self.client_id,
+                        f"{year}-01" if start_period[:4] == year else start_period)
+        cash_open = self._get_cash_balance(c, self.client_id, None)  # opening from accounts
+
+        # Compute cash flow amounts
+        cur, ytd = self._compute_cf(c, self.client_id, start_period, end_period)
+
+        # Subtotals
+        def g(d, *keys): return sum(d.get(k, 0) for k in keys)
+
+        # Current period
+        ci  = g(cur,'r1','r2','r3')       # 经营流入
+        co  = g(cur,'r5','r6','r7','r8')  # 经营流出
+        cn  = ci - co                      # 经营净额
+        ii  = g(cur,'r11','r12','r13','r14','r15')
+        io_ = g(cur,'r17','r18','r19','r20')
+        inv_n = ii - io_
+        fi  = g(cur,'r23','r24','r25')
+        fo  = g(cur,'r27','r28','r29')
+        fin_n = fi - fo
+        net_cur = cn + inv_n + fin_n
+
+        # YTD
+        ci_y  = g(ytd,'r1','r2','r3')
+        co_y  = g(ytd,'r5','r6','r7','r8')
+        cn_y  = ci_y - co_y
+        ii_y  = g(ytd,'r11','r12','r13','r14','r15')
+        io_y  = g(ytd,'r17','r18','r19','r20')
+        inv_ny = ii_y - io_y
+        fi_y  = g(ytd,'r23','r24','r25')
+        fo_y  = g(ytd,'r27','r28','r29')
+        fin_ny = fi_y - fo_y
+        net_ytd = cn_y + inv_ny + fin_ny
+
+        # Net profit for supplementary
+        c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
+            FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
+            WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+            GROUP BY e.account_code""", (self.client_id, f"{year}-01", end_period))
+        mv_ytd = {r[0]: r[1] or 0 for r in c.fetchall()}
+        c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
+            FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
+            WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+            GROUP BY e.account_code""", (self.client_id, start_period, end_period))
+        mv_cur = {r[0]: r[1] or 0 for r in c.fetchall()}
+        conn.close()
+
+        def net_profit(mv):
+            use6 = any(k.startswith('6') for k in mv)
+            if use6:
+                rev  = sum(v for k,v in mv.items() if k[:4]<'6400' and k[0]=='6')
+                cost = -sum(v for k,v in mv.items() if k[:4]>='6400' and k[0]=='6')
+                return rev + cost
+            else:
+                rev  = sum(v for k,v in mv.items() if k[0]=='5' and k[:4]<'5400')
+                cost = -sum(v for k,v in mv.items() if k[0]=='5' and k[:4]>='5400')
+                return rev + cost
+
+        np_cur = net_profit(mv_cur)
+        np_ytd = net_profit(mv_ytd)
+
+        # AR/AP changes for supplementary (ytd)
+        def bal_chg(mv, codes):
+            total = 0
+            for k, v in mv.items():
+                for code in codes:
+                    if k == code or k.startswith(code+'.') or k.startswith(code+'_'):
+                        total += v; break
+            return total
+        ar_chg  = -bal_chg(mv_ytd, ['1122','1123','1131','1132','1221'])
+        ap_chg  =  bal_chg(mv_ytd, ['2202','2203','2211','2241'])
+
+        # ── Build table rows ──
+        BOLD_BG = "#f0f4ff"; HDR_BG = "#e6ecf8"
+
+        def R(label, rowno, cur_val, ytd_val, style="normal"):
+            return (label, str(rowno) if rowno else "", cur_val, ytd_val, style)
+
+        rows = [
+            # ── 经营活动 ──
+            R("一、经营活动产生的现金流量：",  "", None, None, "header"),
+            R("  销售商品、提供劳务收到的现金","1", cur.get('r1',0), ytd.get('r1',0)),
+            R("  收到的税费返还",              "2", cur.get('r2',0), ytd.get('r2',0)),
+            R("  收到的其他与经营活动有关的现金","3",cur.get('r3',0),ytd.get('r3',0)),
+            R("  经营活动现金流入小计",         "4", ci,   ci_y,  "subtotal"),
+            R("  购买商品、接受劳务支付的现金", "5", cur.get('r5',0), ytd.get('r5',0)),
+            R("  支付给职工以及为职工支付的现金","6",cur.get('r6',0),ytd.get('r6',0)),
+            R("  支付的各项税费",               "7", cur.get('r7',0), ytd.get('r7',0)),
+            R("  支付的其他与经营活动有关的现金","8",cur.get('r8',0),ytd.get('r8',0)),
+            R("  经营活动现金流出小计",          "9", co,   co_y,  "subtotal"),
+            R("  经营活动产生的现金流量净额",   "10", cn,   cn_y,  "total"),
+            # ── 投资活动 ──
+            R("二、投资活动产生的现金流量：",   "", None, None,   "header"),
+            R("  收回投资收到的现金",           "11", cur.get('r11',0), ytd.get('r11',0)),
+            R("  取得投资收益收到的现金",        "12", cur.get('r12',0), ytd.get('r12',0)),
+            R("  处置固定资产收回的现金净额",   "13", cur.get('r13',0), ytd.get('r13',0)),
+            R("  处置子公司收到的现金净额",     "14", cur.get('r14',0), ytd.get('r14',0)),
+            R("  收到的其他与投资活动有关的现金","15",cur.get('r15',0),ytd.get('r15',0)),
+            R("  投资活动现金流入小计",         "16", ii,   ii_y,  "subtotal"),
+            R("  购建固定资产支付的现金",        "17", cur.get('r17',0), ytd.get('r17',0)),
+            R("  投资支付的现金",               "18", cur.get('r18',0), ytd.get('r18',0)),
+            R("  取得子公司支付的现金净额",     "19", cur.get('r19',0), ytd.get('r19',0)),
+            R("  支付的其他与投资活动有关的现金","20",cur.get('r20',0),ytd.get('r20',0)),
+            R("  投资活动现金流出小计",         "21", io_,  io_y,  "subtotal"),
+            R("  投资活动产生的现金流量净额",   "22", inv_n,inv_ny,"total"),
+            # ── 筹资活动 ──
+            R("三、筹资活动产生的现金流量：",   "", None, None,   "header"),
+            R("  吸收投资收到的现金",           "23", cur.get('r23',0), ytd.get('r23',0)),
+            R("  取得借款收到的现金",           "24", cur.get('r24',0), ytd.get('r24',0)),
+            R("  收到的其他与筹资活动有关的现金","25",cur.get('r25',0),ytd.get('r25',0)),
+            R("  筹资活动现金流入小计",         "26", fi,   fi_y,  "subtotal"),
+            R("  偿还债务支付的现金",           "27", cur.get('r27',0), ytd.get('r27',0)),
+            R("  分配股利或偿付利息支付的现金", "28", cur.get('r28',0), ytd.get('r28',0)),
+            R("  支付的其他与筹资活动有关的现金","29",cur.get('r29',0),ytd.get('r29',0)),
+            R("  筹资活动现金流出小计",         "30", fo,   fo_y,  "subtotal"),
+            R("  筹资活动产生的现金流量净额",   "31", fin_n,fin_ny,"total"),
+            R("四、汇率变动对现金及现金等价物的影响","32",0,0),
+            R("五、现金及现金等价物净增加额",   "33", net_cur, net_ytd, "total"),
+            R("  加：期初现金及现金等价物余额", "34", cash_open, cash_open),
+            R("六、期末现金及现金等价物余额",   "35", cash_end, cash_end, "total"),
+            # ── 补充资料分隔 ──
+            R("━━━━ 补充资料 ━━━━",            "",  None, None,  "header"),
+            R("一、将净利润调节为经营活动现金流量：","", None, None, "header"),
+            R("  净利润",                       "1",  np_cur, np_ytd),
+            R("  加：资产减值准备",             "2",  0, 0),
+            R("  固定资产折旧",                 "3",  0, 0),
+            R("  无形资产摊销",                 "4",  0, 0),
+            R("  长期待摊费用摊销",             "5",  0, 0),
+            R("  处置固定资产损失（收益-）",    "6",  0, 0),
+            R("  公允价值变动损失（收益-）",    "8",  0, 0),
+            R("  财务费用（收益-）",            "9",  0, 0),
+            R("  投资损失（收益-）",            "10", 0, 0),
+            R("  经营性应收项目的减少（增加-）","14", 0, ar_chg),
+            R("  经营性应付项目的增加（减少-）","15", 0, ap_chg),
+            R("  其他",                         "16", 0, 0),
+            R("  经营活动产生的现金流量净额",   "17", cn, cn_y, "total"),
+            R("三、现金及现金等价物净变动情况：","", None, None, "header"),
+            R("  现金的期末余额",               "21", cash_end, cash_end),
+            R("  减：现金的期初余额",           "22", cash_open, cash_open),
+            R("  现金及现金等价物净增加额",     "25", cash_end - cash_open, cash_end - cash_open, "total"),
+        ]
+
+        self.cf_stmt_tbl.setRowCount(len(rows))
+        for i, (label, rowno, cur_v, ytd_v, style) in enumerate(rows):
+            self.cf_stmt_tbl.setRowHeight(i, 32)
+            is_hdr    = (style == "header")
+            is_sub    = (style == "subtotal")
+            is_tot    = (style == "total")
+            bg = QColor(HDR_BG) if is_hdr else QColor(BOLD_BG) if is_sub or is_tot else None
+
+            for j, (text, align) in enumerate([
+                (label,  Qt.AlignLeft|Qt.AlignVCenter),
+                (rowno,  Qt.AlignCenter),
+                (fmt_amt(cur_v) if isinstance(cur_v, (int,float)) else "",
+                         Qt.AlignRight|Qt.AlignVCenter),
+                (fmt_amt(ytd_v) if isinstance(ytd_v, (int,float)) else "",
+                         Qt.AlignRight|Qt.AlignVCenter),
+            ]):
+                it = QTableWidgetItem(text); it.setTextAlignment(align)
+                if is_hdr:
+                    it.setBackground(QColor(HDR_BG))
+                    if j == 0: it.setForeground(QColor("#3d6fdb"))
+                    it.setFont(QFont("", weight=QFont.Bold))
+                elif is_sub or is_tot:
+                    it.setBackground(QColor(BOLD_BG))
+                    it.setFont(QFont("", weight=QFont.Bold))
+                if j >= 2 and isinstance(cur_v if j==2 else ytd_v, (int,float)):
+                    val = cur_v if j == 2 else ytd_v
+                    if val and val < 0:
+                        it.setForeground(QColor("#ff4d4f"))
+                self.cf_stmt_tbl.setItem(i, j, it)
+
+    def _export_cf_stmt(self):
+        if not self.client_id: return
+        end_period = self.rep_end_period.currentData() or self.period
+        path, _ = QFileDialog.getSaveFileName(self, "保存",
+            f"现金流量表_{end_period}.xlsx", "Excel(*.xlsx)")
+        if not path: return
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "现金流量表"
+        hdrs = ["项目","行次","本期金额","本年累计金额"]
+        fill_hdr = PatternFill("solid", fgColor="1C2340")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(1, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+        for ri in range(self.cf_stmt_tbl.rowCount()):
+            row_vals = []
+            for ci in range(4):
+                it = self.cf_stmt_tbl.item(ri, ci)
+                row_vals.append(it.text() if it else "")
+            ws.append(row_vals)
+        ws.column_dimensions['A'].width = 45
+        for col in ['B','C','D']: ws.column_dimensions[col].width = 16
+        wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
+
     def _build_cashflow(self):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(8)
         L.addWidget(lbl("收支统计表（本期科目发生额汇总）", bold=True, size=15))
@@ -3225,7 +3588,8 @@ class ReportPage(QWidget):
         if idx==0: self._load_balance()
         elif idx==1: self._load_income()
         elif idx==2: self._load_equity()
-        elif idx==3: self._load_cashflow()
+        elif idx==3: self._load_cf_stmt()
+        elif idx==4: self._load_cashflow()
 
     def _export(self):
         if not self.client_id: return
