@@ -44,6 +44,7 @@ QPushButton#btn_gray:hover { background:#e8e8e8; }
 QLineEdit,QDateEdit,QComboBox,QDoubleSpinBox,QSpinBox,QTextEdit {
     background:#fff; border:1px solid #d9d9d9; border-radius:5px;
     padding:6px 10px; }
+QSpinBox,QDoubleSpinBox { qproperty-buttonSymbols: NoButtons; }
 QLineEdit:focus,QDateEdit:focus,QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }
 QComboBox::drop-down { border:none; width:22px; }
 /* Tables */
@@ -245,6 +246,10 @@ class VoucherDialog(QDialog):
         self.setMinimumSize(860, 580)
         self._accounts = self._fetch_accounts()
         self._templates = VOUCHER_TEMPLATES
+        from PySide6.QtCore import QStringListModel
+        self._account_completion_model = QStringListModel(
+            [f"{a['code']}  {a['full_name']}" for a in self._accounts], self)
+        self._row_completers = []
         self._build()
         if voucher_id: self._load_voucher()
         else: self._add_row(); self._add_row()
@@ -316,9 +321,9 @@ class VoucherDialog(QDialog):
         # Add/del row buttons
         row_btns = QHBoxLayout()
         b_add = QPushButton("＋ 增行"); b_add.setObjectName("btn_outline")
-        b_add.clicked.connect(self._add_row)
+        b_add.clicked.connect(lambda: self._add_row())
         b_del = QPushButton("－ 删行"); b_del.setObjectName("btn_gray")
-        b_del.clicked.connect(self._del_row)
+        b_del.clicked.connect(lambda: self._del_row())
         row_btns.addWidget(b_add); row_btns.addWidget(b_del); row_btns.addStretch()
         L.addLayout(row_btns)
         L.addWidget(sep())
@@ -353,14 +358,15 @@ class VoucherDialog(QDialog):
         code_by_display = {f"{a['code']}  {a['full_name']}": a['code'] for a in self._accounts}
         display_by_code = {a['code']: f"{a['code']}  {a['full_name']}" for a in self._accounts}
 
-        from PySide6.QtCore import QStringListModel
         from PySide6.QtWidgets import QCompleter
-        completer = QCompleter(display_list, acct_edit)
+        completer = QCompleter(self._account_completion_model, acct_edit)
         completer.setFilterMode(Qt.MatchContains)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setCompletionMode(QCompleter.PopupCompletion)
         completer.popup().setMinimumWidth(380)
         acct_edit.setCompleter(completer)
+        acct_edit._completer = completer
+        self._row_completers.append(completer)
 
         # Restore pre-filled value
         if acct_code and acct_code in display_by_code:
@@ -380,9 +386,12 @@ class VoucherDialog(QDialog):
             if text in code_by_display:
                 acct_edit._code = code_by_display[text]
                 rebuild_aux(acct_edit._code)
+            if text:
+                completer.setCompletionPrefix(text)
+                completer.complete()
 
         completer.activated.connect(on_acct_selected)
-        acct_edit.textEdited.connect(on_acct_edited)
+        acct_edit.textChanged.connect(on_acct_edited)
 
         # ── 辅助核算 ──
         aux_container = QWidget()
@@ -451,9 +460,15 @@ class VoucherDialog(QDialog):
             if cw and cw is not target_spin: tc_other += cw.value()
         needed = max(0, round(td - tc_other, 2))
         target_spin.setValue(needed)
+        self._update_totals()
+
+    def _del_row(self):
         row = self.table.currentRow()
+        if row < 0:
+            row = self.table.rowCount() - 1
         if row >= 0 and self.table.rowCount() > 1:
-            self.table.removeRow(row); self._update_totals()
+            self.table.removeRow(row)
+            self._update_totals()
 
     def _update_totals(self):
         td = tc = 0
@@ -1187,13 +1202,13 @@ class ClientPage(QWidget):
             # Buttons
             bw = QWidget()
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,4,8,4); bl.setSpacing(8)
-            _font = QFont("Microsoft YaHei", 9)
+            _f = QFont("Microsoft YaHei", 9)
             b1 = QPushButton("📂 进账簿"); b1.setObjectName("btn_primary")
-            b1.setFixedSize(94, 30); b1.setFont(_font)
+            b1.setFixedSize(94, 30); b1.setFont(_f)
             b2 = QPushButton("✏ 编辑"); b2.setObjectName("btn_outline")
-            b2.setFixedSize(68, 30); b2.setFont(_font)
+            b2.setFixedSize(68, 30); b2.setFont(_f)
             b3 = QPushButton("🗑 删除"); b3.setObjectName("btn_red")
-            b3.setFixedSize(68, 30); b3.setFont(_font)
+            b3.setFixedSize(68, 30); b3.setFont(_f)
             b1.clicked.connect(lambda _,rr=r: self.client_opened.emit(rr['id'],rr['name'],rr['short_code'] or ''))
             b2.clicked.connect(lambda _,rr=r: self._edit(rr))
             b3.clicked.connect(lambda _,rr=r: self._del(rr))
@@ -1388,6 +1403,12 @@ class VoucherPage(QWidget):
         hdr.addWidget(b_dl); L.addLayout(hdr)
         # Filter row
         fr = QHBoxLayout(); fr.setSpacing(10)
+        fr.addWidget(lbl("期间段:"))
+        self.bal_start_period = QComboBox(); self.bal_start_period.setMinimumWidth(100)
+        self.bal_end_period = QComboBox(); self.bal_end_period.setMinimumWidth(100)
+        fr.addWidget(self.bal_start_period); fr.addWidget(lbl("至")); fr.addWidget(self.bal_end_period)
+        b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary"); b_refresh.clicked.connect(self._load_balance)
+        fr.addWidget(b_refresh); fr.addSpacing(20)
         self.bal_aux = QCheckBox("辅助核算科目"); self.bal_detail = QCheckBox("明细科目")
         self.bal_zero = QCheckBox("0值科目")
         fr.addWidget(self.bal_aux); fr.addWidget(self.bal_detail); fr.addWidget(self.bal_zero)
@@ -1406,14 +1427,18 @@ class VoucherPage(QWidget):
 
     def _load_balance(self):
         if not self.client_id: return
+        start_period = self.bal_start_period.currentData()
+        end_period = self.bal_end_period.currentData()
+        if not start_period or not end_period: return
+
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
         accts = {r['code']:dict(r) for r in c.fetchall()}
-        # Aggregate voucher entries for current period
+        # Aggregate voucher entries for period range
         c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? GROUP BY e.account_code""",
-                  (self.client_id, self.period))
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ? GROUP BY e.account_code""",
+                  (self.client_id, start_period, end_period))
         activity = {r['account_code']:(r['td'] or 0, r['tc'] or 0) for r in c.fetchall()}
         conn.close()
 
@@ -1458,7 +1483,12 @@ class VoucherPage(QWidget):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(10)
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("明细账", bold=True, size=15)); hdr.addStretch()
-        hdr.addWidget(lbl("科目:")); self.ldg_acct = QComboBox(); self.ldg_acct.setMinimumWidth(220)
+        hdr.addWidget(lbl("期间段:"))
+        self.ldg_start_period = QComboBox(); self.ldg_start_period.setMinimumWidth(100)
+        self.ldg_end_period = QComboBox(); self.ldg_end_period.setMinimumWidth(100)
+        hdr.addWidget(self.ldg_start_period); hdr.addWidget(lbl("至")); hdr.addWidget(self.ldg_end_period)
+        hdr.addSpacing(10); hdr.addWidget(lbl("科目:"))
+        self.ldg_acct = QComboBox(); self.ldg_acct.setMinimumWidth(220)
         b_query = QPushButton("查询"); b_query.setObjectName("btn_primary"); b_query.clicked.connect(self._load_ledger)
         hdr.addWidget(self.ldg_acct); hdr.addWidget(b_query)
         L.addLayout(hdr)
@@ -1473,6 +1503,10 @@ class VoucherPage(QWidget):
 
     def _load_ledger(self):
         if not self.client_id: return
+        start_period = self.ldg_start_period.currentData()
+        end_period = self.ldg_end_period.currentData()
+        if not start_period or not end_period: return
+
         # Populate account combo
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT code,name FROM accounts WHERE client_id=? ORDER BY code",(self.client_id,))
@@ -1492,8 +1526,8 @@ class VoucherPage(QWidget):
         acct = c.fetchone()
         c.execute("""SELECT v.date,e.summary,e.debit,e.credit FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? AND e.account_code=? ORDER BY v.date,v.voucher_no,e.line_no""",
-                  (self.client_id, self.period, sel_code))
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ? AND e.account_code=? ORDER BY v.date,v.voucher_no,e.line_no""",
+                  (self.client_id, start_period, end_period, sel_code))
         entries = c.fetchall(); conn.close()
 
         direction = acct['direction'] if acct else '借'
@@ -1533,6 +1567,14 @@ class VoucherPage(QWidget):
         self.client_id = client_id; self.client_name = client_name; self.period = period
         self.client_lbl.setText(f"【{client_name}】")
         self._refresh_periods()
+        # Initialize period ranges for balance and ledger
+        self._init_period_ranges()
+        # Auto refresh current tab
+        idx = self.stack.currentIndex()
+        if idx == 0: self._load_vouchers()
+        elif idx == 1: self._load_balance()
+        elif idx == 2: self._load_ledger()
+        elif idx == 3 and self.client_id: self._aux_page.set_client(self.client_id, self.period)
 
     def _refresh_periods(self):
         self.period_combo.blockSignals(True)
@@ -1548,6 +1590,45 @@ class VoucherPage(QWidget):
                 self.period_combo.setCurrentIndex(i); break
         self.period = target
         self.period_combo.blockSignals(False)
+
+    def _init_period_ranges(self):
+        """Initialize period range selectors for balance and ledger pages"""
+        # Balance page periods
+        self.bal_start_period.clear()
+        self.bal_end_period.clear()
+        now = datetime.now()
+        periods = []
+        for y in range(now.year, now.year-3, -1):
+            for m in range(12,0,-1):
+                period_str = f"{y}-{m:02d}"
+                display_str = f"{y}年{m:02d}期"
+                periods.append((period_str, display_str))
+
+        for period_str, display_str in periods:
+            self.bal_start_period.addItem(display_str, period_str)
+            self.bal_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        current_period = f"{now.year}-{now.month:02d}"
+        for i in range(self.bal_start_period.count()):
+            if self.bal_start_period.itemData(i) == current_period:
+                self.bal_start_period.setCurrentIndex(i)
+                self.bal_end_period.setCurrentIndex(i)
+                break
+
+        # Ledger page periods
+        self.ldg_start_period.clear()
+        self.ldg_end_period.clear()
+        for period_str, display_str in periods:
+            self.ldg_start_period.addItem(display_str, period_str)
+            self.ldg_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        for i in range(self.ldg_start_period.count()):
+            if self.ldg_start_period.itemData(i) == current_period:
+                self.ldg_start_period.setCurrentIndex(i)
+                self.ldg_end_period.setCurrentIndex(i)
+                break
 
     def _on_period_change(self):
         self.period = self.period_combo.currentData() or self.period
@@ -1671,7 +1752,14 @@ class AccountPage(QWidget):
         if tf != "全部类型": sql += " AND type=?"; params.append(tf)
         sql += " ORDER BY code"
         c.execute(sql, params)
-        rows = c.fetchall(); conn.close()
+        rows = c.fetchall()
+        
+        # Check which accounts have been used
+        used_accounts = set()
+        c.execute("SELECT DISTINCT account_code FROM voucher_entries")
+        for row in c.fetchall():
+            used_accounts.add(row['account_code'])
+        conn.close()
 
         self.tbl.setRowCount(len(rows))
         type_colors = {"资产":"#3d6fdb","负债":"#e05252","所有者权益":"#722ed1",
@@ -1684,6 +1772,16 @@ class AccountPage(QWidget):
             code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignCenter)
             name_it = QTableWidgetItem(indent + r["name"])
             if level == 1: name_it.setFont(QFont("",weight=QFont.Bold))
+            
+            # If account is frozen, show gray text
+            try:
+                is_frozen = r['is_frozen']
+            except (KeyError, IndexError):
+                is_frozen = 0
+            if is_frozen:
+                code_it.setForeground(QColor("#ccc"))
+                name_it.setForeground(QColor("#ccc"))
+            
             type_it = QTableWidgetItem(r["type"] or "")
             type_it.setForeground(QColor(type_colors.get(r["type"],"#888")))
             type_it.setTextAlignment(Qt.AlignCenter)
@@ -1693,21 +1791,38 @@ class AccountPage(QWidget):
 
             bw = QWidget()
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(8)
-            _font = QFont("Microsoft YaHei", 9)
-            _font.setHintingPreference(QFont.PreferDefaultHinting)
+            _f = QFont("Microsoft YaHei", 9)
+
+            # If frozen, show frozen status
+            if is_frozen:
+                frozen_lbl = lbl("已冻结", color="#ccc", bold=True)
+                bl.addWidget(frozen_lbl)
+                bl.addStretch()
+                self.tbl.setCellWidget(i,4,bw)
+                continue
+
             b_sub = QPushButton("＋ 子科目"); b_sub.setObjectName("btn_outline")
-            b_sub.setMinimumWidth(88); b_sub.setFont(_font)
+            b_sub.setMinimumWidth(88); b_sub.setFont(_f)
             b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
             b_ed = QPushButton("✏ 编辑"); b_ed.setObjectName("btn_outline")
-            b_ed.setMinimumWidth(68); b_ed.setFont(_font)
+            b_ed.setMinimumWidth(68); b_ed.setFont(_f)
             b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
             bl.addWidget(b_sub); bl.addWidget(b_ed)
+
             if level > 1:
-                b_del = QPushButton("🗑 删除"); b_del.setObjectName("btn_red")
-                b_del.setMinimumWidth(68); b_del.setFont(_font)
-                b_del.setToolTip("删除此科目")
-                b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
-                bl.addWidget(b_del)
+                is_used = r['code'] in used_accounts
+                if is_used:
+                    b_freeze = QPushButton("❄ 冻结"); b_freeze.setObjectName("btn_outline")
+                    b_freeze.setMinimumWidth(68); b_freeze.setFont(_f)
+                    b_freeze.setToolTip("冻结此科目，不再允许使用")
+                    b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
+                    bl.addWidget(b_freeze)
+                else:
+                    b_del = QPushButton("🗑 删除"); b_del.setObjectName("btn_red")
+                    b_del.setMinimumWidth(68); b_del.setFont(_f)
+                    b_del.setToolTip("删除此科目")
+                    b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
+                    bl.addWidget(b_del)
             bl.addStretch()
             self.tbl.setCellWidget(i,4,bw)
 
@@ -1716,6 +1831,17 @@ class AccountPage(QWidget):
         if dlg.exec(): self.load()
 
     def _add_sub(self, parent_acct):
+        # Check if parent account has been used (has voucher entries)
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (parent_acct['code'],))
+        used_count = c.fetchone()[0]
+        conn.close()
+        
+        if used_count > 0:
+            QMessageBox.warning(self, "无法添加下级科目", 
+                f"上级科目 【{parent_acct['code']} {parent_acct['name']}】 已有凭证使用，不允许添加下级科目。")
+            return
+        
         dlg = AccountEditDialog(self, self.client_id, parent_acct=parent_acct)
         if dlg.exec(): self.load()
 
@@ -1723,14 +1849,67 @@ class AccountPage(QWidget):
         dlg = AccountEditDialog(self, self.client_id, account=r)
         if dlg.exec(): self.load()
 
+    def _freeze(self, aid):
+        """Freeze an account to prevent further use"""
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        acct = c.fetchone()
+        conn.close()
+        
+        if acct:
+            # Second confirmation for freezing
+            reply = QMessageBox.question(self, "冻结确认", 
+                f"确认冻结科目 【{acct['code']} {acct['name']}】 吗？\n\n冻结后将不再允许使用此科目。",
+                QMessageBox.Yes | QMessageBox.No)
+            
+            if reply == QMessageBox.Yes:
+                conn = get_db()
+                conn.execute("UPDATE accounts SET is_frozen=1 WHERE id=?", (aid,))
+                conn.commit(); conn.close()
+                QMessageBox.information(self, "成功", f"科目 【{acct['code']} {acct['name']}】 已冻结。")
+                self.load()
+
     def _del(self, aid):
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=(SELECT code FROM accounts WHERE id=?)",(aid,))
-        if c.fetchone()[0] > 0:
-            conn.close()
-            QMessageBox.warning(self,"无法删除","该科目已有凭证记录，不能删除。"); return
-        conn.execute("DELETE FROM accounts WHERE id=?",(aid,)); conn.commit(); conn.close()
-        self.load()
+        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        acct = c.fetchone()
+        if not acct: conn.close(); return
+        
+        acct_code, acct_name = acct['code'], acct['name']
+        
+        # Check if account has been used
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (acct_code,))
+        used_count = c.fetchone()[0]
+        conn.close()
+        
+        if used_count > 0:
+            # Account has been used, offer freeze or delete confirmation
+            msg_box = QMessageBox(QMessageBox.Warning, "科目已使用", 
+                f"科目 【{acct_code} {acct_name}】 已有凭证使用。\n\n选择操作：")
+            btn_freeze = msg_box.addButton("冻结科目", QMessageBox.AcceptRole)
+            btn_cancel = msg_box.addButton("取消", QMessageBox.RejectRole)
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == btn_freeze:
+                # Freeze the account
+                conn = get_db()
+                conn.execute("UPDATE accounts SET is_frozen=1 WHERE id=?", (aid,))
+                conn.commit(); conn.close()
+                QMessageBox.information(self, "成功", f"科目 【{acct_code} {acct_name}】 已冻结，不再允许使用。")
+                self.load()
+            return
+        
+        # Account not used, show delete confirmation dialog
+        reply = QMessageBox.question(self, "二次确认", 
+            f"确认删除科目 【{acct_code} {acct_name}】 吗？\n\n此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            conn = get_db()
+            conn.execute("DELETE FROM accounts WHERE id=?", (aid,))
+            conn.commit(); conn.close()
+            QMessageBox.information(self, "成功", f"科目 【{acct_code} {acct_name}】 已删除。")
+            self.load()
 
     def _import_excel(self):
         """Import historical vouchers from Excel."""
@@ -2503,6 +2682,15 @@ class ReportPage(QWidget):
                 QPushButton[active=true]{color:#3d6fdb;border-bottom:2px solid #3d6fdb;}""")
             b.clicked.connect(lambda _,nn=n:self._switch(nn)); tl.addWidget(b); self._rtabs.append(b)
         tl.addStretch()
+        # Period selector
+        pr = QHBoxLayout(); pr.setSpacing(8)
+        pr.addWidget(lbl("报告期间:", color="#666"))
+        self.rep_start_period = QComboBox(); self.rep_start_period.setMinimumWidth(100)
+        self.rep_end_period = QComboBox(); self.rep_end_period.setMinimumWidth(100)
+        pr.addWidget(self.rep_start_period); pr.addWidget(lbl("至", color="#666")); pr.addWidget(self.rep_end_period)
+        b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary"); b_refresh.clicked.connect(self._refresh_reports)
+        pr.addWidget(b_refresh); pr.addStretch()
+        tl.addLayout(pr)
         self.period_lbl = lbl("", color="#888"); tl.addWidget(self.period_lbl)
         b_dl = QPushButton(" ↓ 下载"); b_dl.setObjectName("btn_outline"); b_dl.clicked.connect(self._export)
         tl.addSpacing(12); tl.addWidget(b_dl)
@@ -2510,6 +2698,16 @@ class ReportPage(QWidget):
         self.stack = QStackedWidget(); L.addWidget(self.stack)
         self._build_balance(); self._build_income(); self._build_equity(); self._build_placeholder("现金流量表"); self._build_cashflow()
         self._switch("资产负债表")
+
+    def _refresh_reports(self):
+        """Refresh current report with selected period range"""
+        current_tab = None
+        for b in self._rtabs:
+            if b.property("active") == "true":
+                current_tab = b.text()
+                break
+        if current_tab:
+            self._switch(current_tab)
 
     def _build_placeholder(self, name):
         w = QWidget(); vl = QVBoxLayout(w)
@@ -2548,12 +2746,14 @@ class ReportPage(QWidget):
 
     def _load_balance(self):
         if not self.client_id: return
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
         conn = get_db(); c = conn.cursor()
         # Net balance from vouchers up to current period (approved only)
         c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period<=? AND v.status='已审核'
-            GROUP BY e.account_code""", (self.client_id, self.period))
+            GROUP BY e.account_code""", (self.client_id, end_period))
         mv = {r[0]: r[1] or 0 for r in c.fetchall()}
         c.execute("SELECT code,opening_debit,opening_credit,direction FROM accounts WHERE client_id=?",
                   (self.client_id,))
@@ -2714,6 +2914,9 @@ class ReportPage(QWidget):
 
     def _load_income(self):
         if not self.client_id: return
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
         conn = get_db(); c = conn.cursor()
 
         def fetch_period(period_filter):
@@ -2723,9 +2926,11 @@ class ReportPage(QWidget):
                 GROUP BY e.account_code""", (self.client_id,))
             return {r[0]: r[1] or 0 for r in c.fetchall()}
 
-        cur = fetch_period(f"='{self.period}'")
-        year = self.period[:4]
-        ytd = fetch_period(f" LIKE '{year}%'")
+        # Current period: from start to end
+        cur = fetch_period(f">='{start_period}' AND v.period<='{end_period}'")
+        year = end_period[:4]
+        # Year-to-date: from year start to end
+        ytd = fetch_period(f" LIKE '{year}%' AND v.period<='{end_period}'")
         conn.close()
 
         def g(codes, d=None):
@@ -2870,8 +3075,10 @@ class ReportPage(QWidget):
 
     def _load_equity(self):
         if not self.client_id: return
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
         conn = get_db(); c = conn.cursor()
-        year = self.period[:4]
+        year = end_period[:4]
 
         # Fetch year-to-date balances from voucher entries (approved only)
         c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
@@ -2945,13 +3152,16 @@ class ReportPage(QWidget):
 
     def _load_cashflow(self):
         if not self.client_id: return
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
         conn = get_db(); c = conn.cursor()
         c.execute("""SELECT e.account_code, e.account_name,
             SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? AND v.status='已审核'
+            WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
             GROUP BY e.account_code ORDER BY e.account_code""",
-            (self.client_id, self.period))
+            (self.client_id, start_period, end_period))
         entries = c.fetchall()
         # Get account types
         c.execute("SELECT code,type FROM accounts WHERE client_id=?",(self.client_id,))
@@ -2988,6 +3198,29 @@ class ReportPage(QWidget):
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.period = period
         self.period_lbl.setText(f"【{client_name}】{period}")
+        # Initialize period ranges
+        self.rep_start_period.clear()
+        self.rep_end_period.clear()
+        now = datetime.now()
+        periods = []
+        for y in range(now.year, now.year-3, -1):
+            for m in range(12,0,-1):
+                period_str = f"{y}-{m:02d}"
+                display_str = f"{y}年{m:02d}期"
+                periods.append((period_str, display_str))
+
+        for period_str, display_str in periods:
+            self.rep_start_period.addItem(display_str, period_str)
+            self.rep_end_period.addItem(display_str, period_str)
+
+        # Set default to current period
+        current_period = f"{now.year}-{now.month:02d}"
+        for i in range(self.rep_start_period.count()):
+            if self.rep_start_period.itemData(i) == current_period:
+                self.rep_start_period.setCurrentIndex(i)
+                self.rep_end_period.setCurrentIndex(i)
+                break
+
         idx = self.stack.currentIndex()
         if idx==0: self._load_balance()
         elif idx==1: self._load_income()
@@ -2996,16 +3229,23 @@ class ReportPage(QWidget):
 
     def _export(self):
         if not self.client_id: return
-        path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{self.period}.xlsx","Excel(*.xlsx)")
+        end_period = self.rep_end_period.currentData()
+        if not end_period: return
+        path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{end_period}.xlsx","Excel(*.xlsx)")
         if not path: return
         wb = openpyxl.Workbook()
         # Income sheet
         ws = wb.active; ws.title="利润表"
         ws.append(["项目","行次","本期金额","本年累计"])
         conn = get_db(); c = conn.cursor()
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period:
+            QMessageBox.warning(self, "错误", "请选择报告期间")
+            return
         c.execute("""SELECT e.account_code,SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
-            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period=? GROUP BY e.account_code""",
-                  (self.client_id,self.period))
+            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period>=? AND v.period<=? GROUP BY e.account_code""",
+                  (self.client_id, start_period, end_period))
         cur = {r[0]:r[1] or 0 for r in c.fetchall()}
         def g(code):
             total = 0
