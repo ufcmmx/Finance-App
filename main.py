@@ -2770,25 +2770,50 @@ class ReportPage(QWidget):
         accts = {r['code']: r for r in c.fetchall()}
         conn.close()
 
+        # 预计算末级科目：没有任何子科目的科目
+        all_codes = set(accts.keys())
+        leaf_codes = {
+            code for code in all_codes
+            if not any(
+                other != code and (other.startswith(code+".") or other.startswith(code+"_"))
+                for other in all_codes
+            )
+        }
+
         def bal(code_prefix_list):
-            """Sum ending balances for all accounts matching any prefix in list."""
+            """计算科目余额：
+            - 期初余额只取末级科目（避免父子科目重复计算）
+            - 凭证发生额取所有层级（录凭证时可能选父科目或子科目）
+            """
             total = 0
             for code, a in accts.items():
-                if not any(code == p or code.startswith(p+".") or code.startswith(p+"_") for p in code_prefix_list):
+                if not any(code == p or code.startswith(p+".") or code.startswith(p+"_")
+                           for p in code_prefix_list):
                     continue
-                od = a['opening_debit'] or 0; oc = a['opening_credit'] or 0
                 net_mv = mv.get(code, 0)
-                if a['direction'] == '借':
-                    total += (od - oc) + net_mv          # debit-normal
+                if code in leaf_codes:
+                    # 末级科目：期初余额 + 本期发生额
+                    od = a['opening_debit'] or 0; oc = a['opening_credit'] or 0
+                    if a['direction'] == '借':
+                        total += (od - oc) + net_mv
+                    else:
+                        total += (oc - od) - net_mv
                 else:
-                    total += (oc - od) - net_mv          # credit-normal → positive = credit
+                    # 父科目：只计发生额（期初余额已在子科目中）
+                    if a['direction'] == '借':
+                        total += net_mv
+                    else:
+                        total -= net_mv
             return total
 
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
         notes_rec = bal(["1121"])
         acct_rec  = bal(["1122"])
-        prepay    = bal(["1123"])
+        _prepay_raw = bal(["1123"])
+        _advrec_raw = bal(["2203"])
+        # 预付账款贷方余额 → 重分类为预收账款（确保资产负债表两边同步）
+        prepay  = max(0.0, _prepay_raw)  + max(0.0, -_advrec_raw)
         int_rec   = bal(["1132"])
         div_rec   = bal(["1131"])
         oth_rec   = bal(["1221"])
@@ -2808,7 +2833,7 @@ class ReportPage(QWidget):
         st_loan   = bal(["2001"])
         notes_pay = bal(["2201"])
         acct_pay  = bal(["2202"])
-        adv_rec   = bal(["2203"])
+        adv_rec   = max(0.0, _advrec_raw) + max(0.0, -_prepay_raw)
         emp_pay   = bal(["2211"])
         tax_pay   = bal(["2221"])
         int_pay   = bal(["2231"])
