@@ -2758,13 +2758,25 @@ class ReportPage(QWidget):
         if not self.client_id: return
         end_period = self.rep_end_period.currentData()
         if not end_period: return
+        year = end_period[:4]
+        year_start = f"{year}-01"   # 本年第一期
         conn = get_db(); c = conn.cursor()
-        # Net balance from vouchers up to current period (approved only)
+
+        # 期末：截止所选期间的累计发生额
         c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period<=? AND v.status='已审核'
             GROUP BY e.account_code""", (self.client_id, end_period))
         mv = {r[0]: r[1] or 0 for r in c.fetchall()}
+
+        # 年初：上年年末 = 期初余额 + 本年第一期之前的凭证发生额
+        # 若所选期间就是01期，则年初 = 纯期初余额（凭证发生额=0）
+        c.execute("""SELECT e.account_code, SUM(e.debit)-SUM(e.credit) net
+            FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
+            WHERE v.client_id=? AND v.period<? AND v.status='已审核'
+            GROUP BY e.account_code""", (self.client_id, year_start))
+        mv_ys = {r[0]: r[1] or 0 for r in c.fetchall()}
+
         c.execute("SELECT code,opening_debit,opening_credit,direction FROM accounts WHERE client_id=?",
                   (self.client_id,))
         accts = {r['code']: r for r in c.fetchall()}
@@ -2780,31 +2792,34 @@ class ReportPage(QWidget):
             )
         }
 
-        def bal(code_prefix_list):
-            """计算科目余额：
-            - 期初余额只取末级科目（避免父子科目重复计算）
-            - 凭证发生额取所有层级（录凭证时可能选父科目或子科目）
-            """
+        def _bal_with_mv(code_prefix_list, movements):
+            """通用余额计算：末级科目取期初+发生额，父科目只取发生额"""
             total = 0
             for code, a in accts.items():
                 if not any(code == p or code.startswith(p+".") or code.startswith(p+"_")
                            for p in code_prefix_list):
                     continue
-                net_mv = mv.get(code, 0)
+                net_mv = movements.get(code, 0)
                 if code in leaf_codes:
-                    # 末级科目：期初余额 + 本期发生额
                     od = a['opening_debit'] or 0; oc = a['opening_credit'] or 0
                     if a['direction'] == '借':
                         total += (od - oc) + net_mv
                     else:
                         total += (oc - od) - net_mv
                 else:
-                    # 父科目：只计发生额（期初余额已在子科目中）
                     if a['direction'] == '借':
                         total += net_mv
                     else:
                         total -= net_mv
             return total
+
+        def bal(code_prefix_list):
+            """期末余额"""
+            return _bal_with_mv(code_prefix_list, mv)
+
+        def bal_ys(code_prefix_list):
+            """年初余额（上年年末 = 期初 + 本年首期前发生额）"""
+            return _bal_with_mv(code_prefix_list, mv_ys)
 
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
@@ -2817,6 +2832,46 @@ class ReportPage(QWidget):
         int_rec   = bal(["1132"])
         div_rec   = bal(["1131"])
         oth_rec   = bal(["1221"])
+
+        # ── 年初余额（同结构，使用 bal_ys） ──
+        notes_rec_y = bal_ys(["1121"])
+        acct_rec_y  = bal_ys(["1122"])
+        _prepay_y   = bal_ys(["1123"])
+        _advrec_y   = bal_ys(["2203"])
+        prepay_y    = max(0.0, _prepay_y) + max(0.0, -_advrec_y)
+        int_rec_y   = bal_ys(["1132"])
+        div_rec_y   = bal_ys(["1131"])
+        oth_rec_y   = bal_ys(["1221"])
+        cash_y      = bal_ys(["1001","1002","1012"])
+        inventory_y = bal_ys(["1401","1402","1403","1404","1405","1406","1408","1411"])
+        prepd_exp_y = bal_ys(["1461"])
+        fa_y        = bal_ys(["1601"]) - abs(bal_ys(["1602"])) - abs(bal_ys(["1603"]))
+        wip_y       = bal_ys(["1604"])
+        intangible_y= bal_ys(["1701"]) - abs(bal_ys(["1702"]))
+        lt_prepaid_y= bal_ys(["1901"])
+        deferred_a_y= bal_ys(["1911"])
+        lt_equity_y = bal_ys(["1801","1811","1521","1511"])
+        cur_asset_y  = cash_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y+oth_rec_y+inventory_y+prepd_exp_y
+        noncur_asset_y = fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
+        total_asset_y  = cur_asset_y + noncur_asset_y
+
+        st_loan_y   = bal_ys(["2001"]); notes_pay_y = bal_ys(["2201"])
+        acct_pay_y  = bal_ys(["2202"]); adv_rec_y   = max(0.0, _advrec_y) + max(0.0, -_prepay_y)
+        emp_pay_y   = bal_ys(["2211"]); tax_pay_y   = bal_ys(["2221"])
+        int_pay_y   = bal_ys(["2231"]); div_pay_y   = bal_ys(["2232"])
+        oth_pay_y   = bal_ys(["2241"])
+        cur_liab_y  = st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y+int_pay_y+div_pay_y+oth_pay_y
+        lt_loan_y   = bal_ys(["2501"]); bonds_pay_y = bal_ys(["2502"])
+        lt_payable_y= bal_ys(["2601"]); est_liab_y  = bal_ys(["2701"])
+        deferred_l_y= bal_ys(["2901"])
+        noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y
+        total_liab_y  = cur_liab_y + noncur_liab_y
+        cap_y     = bal_ys(["3001","4001"]); cap_res_y = bal_ys(["3002","4002"])
+        surp_res_y= bal_ys(["3101","4101"])
+        profit_y  = bal_ys(["3103","4103"]) + bal_ys(["3104","4104"])
+        tsy_y     = bal_ys(["3201","4201"])
+        total_equity_y = cap_y + cap_res_y + surp_res_y + profit_y - tsy_y
+        total_le_y     = total_liab_y + total_equity_y
         inventory = bal(["1401","1402","1403","1404","1405","1406","1408","1411"])
         prepd_exp = bal(["1461"])
         fa        = bal(["1601"]) - abs(bal(["1602"])) - abs(bal(["1603"]))
@@ -2859,63 +2914,64 @@ class ReportPage(QWidget):
         total_le     = total_liab + total_equity
 
         def R(label, rowno, left_val, right_label="", right_rowno="", right_val=None,
-              is_header=False, is_total=False):
+              is_header=False, is_total=False,
+              left_ys=None, right_ys=None):
             return (label, rowno, left_val, right_label, right_rowno, right_val,
-                    is_header, is_total)
+                    is_header, is_total, left_ys, right_ys)
 
         rows = [
             R("流动资产：","","",  "流动负债：","","",          True),
-            R("货币资金","1",cash,            "短期借款","34",st_loan),
+            R("货币资金","1",cash,            "短期借款","34",st_loan,         left_ys=cash_y,        right_ys=st_loan_y),
             R("以公允价值计量且其变动\n计入当期损益的金融资产","2",0, "以公允价值计量且其变动\n计入当期损益的金融负债","35",0),
             R("衍生金融资产","3",0,            "衍生金融负债","36",0),
-            R("应收票据","4",notes_rec,        "应付票据","37",notes_pay),
-            R("应收账款","5",acct_rec,         "应付账款","38",acct_pay),
-            R("预付款项","6",prepay,           "预收款项","39",adv_rec),
-            R("应收利息","7",int_rec,          "应付职工薪酬","40",emp_pay),
-            R("应收股利","8",div_rec,          "应交税费","41",tax_pay),
-            R("其他应收款","9",oth_rec,         "应付利息","42",int_pay),
-            R("存货","10",inventory,           "应付股利","43",div_pay),
-            R("持有待售资产","11",0,            "其他应付款","44",oth_pay),
+            R("应收票据","4",notes_rec,        "应付票据","37",notes_pay,       left_ys=notes_rec_y,   right_ys=notes_pay_y),
+            R("应收账款","5",acct_rec,         "应付账款","38",acct_pay,        left_ys=acct_rec_y,    right_ys=acct_pay_y),
+            R("预付款项","6",prepay,           "预收款项","39",adv_rec,         left_ys=prepay_y,      right_ys=adv_rec_y),
+            R("应收利息","7",int_rec,          "应付职工薪酬","40",emp_pay,     left_ys=int_rec_y,     right_ys=emp_pay_y),
+            R("应收股利","8",div_rec,          "应交税费","41",tax_pay,         left_ys=div_rec_y,     right_ys=tax_pay_y),
+            R("其他应收款","9",oth_rec,         "应付利息","42",int_pay,        left_ys=oth_rec_y,     right_ys=int_pay_y),
+            R("存货","10",inventory,           "应付股利","43",div_pay,         left_ys=inventory_y,   right_ys=div_pay_y),
+            R("持有待售资产","11",0,            "其他应付款","44",oth_pay,                              right_ys=oth_pay_y),
             R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0),
-            R("其他流动资产","13",prepd_exp,    "一年内到期的非流动负债","46",0),
-            R("流动资产合计","14",cur_asset,   "其他流动负债","47",0,   False,True),
-            R("非流动资产：","","",            "流动负债合计","48",cur_liab,True,True),
-            R("可供出售金融资产","15",lt_equity,"非流动负债：","","",   False,False),
-            R("持有至到期投资","16",0,          "长期借款","49",lt_loan),
+            R("其他流动资产","13",prepd_exp,    "一年内到期的非流动负债","46",0, left_ys=prepd_exp_y),
+            R("流动资产合计","14",cur_asset,   "其他流动负债","47",0,   False,True, left_ys=cur_asset_y, right_ys=cur_liab_y),
+            R("非流动资产：","","",            "流动负债合计","48",cur_liab,True,True,                  right_ys=cur_liab_y),
+            R("可供出售金融资产","15",lt_equity,"非流动负债：","","",   False,False, left_ys=lt_equity_y),
+            R("持有至到期投资","16",0,          "长期借款","49",lt_loan,                                right_ys=lt_loan_y),
             R("长期应收款","17",0,             "应付债券","50",bonds_pay),
             R("长期股权投资","18",0,            "其中：优先股","51",0),
             R("投资性房地产","19",0,            "永续债","52",0),
-            R("固定资产","20",fa,              "长期应付款","53",lt_payable),
-            R("在建工程","21",wip,             "专项应付款","54",0),
-            R("工程物资","22",0,               "预计负债","55",est_liab),
+            R("固定资产","20",fa,              "长期应付款","53",lt_payable,    left_ys=fa_y,           right_ys=lt_payable_y),
+            R("在建工程","21",wip,             "专项应付款","54",0,             left_ys=wip_y),
+            R("工程物资","22",0,               "预计负债","55",est_liab,                               right_ys=est_liab_y),
             R("固定资产清理","23",0,            "递延收益","56",0),
-            R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l),
+            R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l,                       right_ys=deferred_l_y),
             R("油气资产","25",0,               "其他非流动负债","58",0),
-            R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab, False,True),
-            R("开发支出","27",0,               "负债合计","60",total_liab,    False,True),
+            R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab, False,True, left_ys=intangible_y, right_ys=noncur_liab_y),
+            R("开发支出","27",0,               "负债合计","60",total_liab,    False,True,               right_ys=total_liab_y),
             R("商誉","28",0,                   "所有者权益（或股东权益）：","","",True),
-            R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap),
-            R("递延所得税资产","30",deferred_a, "其他权益工具","62",0),
+            R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap,  left_ys=lt_prepaid_y,   right_ys=cap_y),
+            R("递延所得税资产","30",deferred_a, "其他权益工具","62",0,          left_ys=deferred_a_y),
             R("其他非流动资产","31",0,          "其中：优先股","63",0),
-            R("非流动资产合计","32",noncur_asset,"永续债","64",0,          False,True),
-            R("","","",                        "资本公积","65",cap_res),
-            R("","","",                        "减：库存股","66",tsy_stock),
+            R("非流动资产合计","32",noncur_asset,"永续债","64",0,          False,True, left_ys=noncur_asset_y),
+            R("","","",                        "资本公积","65",cap_res,                                 right_ys=cap_res_y),
+            R("","","",                        "减：库存股","66",tsy_stock,                             right_ys=tsy_y),
             R("","","",                        "其他综合收益","67",0),
-            R("","","",                        "盈余公积","68",surp_res),
-            R("","","",                        "未分配利润","69",profit),
-            R("","","",                        "所有者权益合计","70",total_equity, False,True),
-            R("资产总计","33",total_asset,     "负债和所有者权益总计","71",total_le,False,True),
+            R("","","",                        "盈余公积","68",surp_res,                                right_ys=surp_res_y),
+            R("","","",                        "未分配利润","69",profit,                                right_ys=profit_y),
+            R("","","",                        "所有者权益合计","70",total_equity, False,True,          right_ys=total_equity_y),
+            R("资产总计","33",total_asset,     "负债和所有者权益总计","71",total_le,False,True, left_ys=total_asset_y, right_ys=total_le_y),
         ]
 
         self.bs_tbl.setRowCount(len(rows))
-        for i,(l_name,l_row,l_val,r_name,r_row,r_val,is_hdr,is_tot) in enumerate(rows):
+        for i,(l_name,l_row,l_val,r_name,r_row,r_val,is_hdr,is_tot,l_ys,r_ys) in enumerate(rows):
             self.bs_tbl.setRowHeight(i, 32)
             # Left
             for j,(text,align) in enumerate([
                 (l_name, Qt.AlignLeft|Qt.AlignVCenter),
                 (str(l_row), Qt.AlignCenter),
                 (fmt_amt(l_val) if isinstance(l_val,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
-                ("", Qt.AlignRight|Qt.AlignVCenter),  # year-start placeholder
+                (fmt_amt(l_ys) if isinstance(l_ys,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
             ]):
                 it = QTableWidgetItem(text); it.setTextAlignment(align)
                 if is_hdr or is_tot:
@@ -2924,13 +2980,15 @@ class ReportPage(QWidget):
                 if j==0 and is_hdr: it.setForeground(QColor("#3d6fdb"))
                 if j==2 and isinstance(l_val,(int,float)) and l_val<0:
                     it.setForeground(QColor("#e05252"))
+                if j==3 and isinstance(l_ys,(int,float)) and l_ys<0:
+                    it.setForeground(QColor("#e05252"))
                 self.bs_tbl.setItem(i,j,it)
             # Right
             for j,(text,align) in enumerate([
                 (r_name, Qt.AlignLeft|Qt.AlignVCenter),
                 (str(r_row), Qt.AlignCenter),
                 (fmt_amt(r_val) if isinstance(r_val,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
-                ("", Qt.AlignRight|Qt.AlignVCenter),
+                (fmt_amt(r_ys) if isinstance(r_ys,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
             ],4):
                 it = QTableWidgetItem(text); it.setTextAlignment(align)
                 if is_hdr or is_tot:
@@ -2938,6 +2996,8 @@ class ReportPage(QWidget):
                     if is_tot: it.setFont(QFont("",weight=QFont.Bold))
                 if j==4 and is_hdr: it.setForeground(QColor("#3d6fdb"))
                 if j==6 and isinstance(r_val,(int,float)) and r_val<0:
+                    it.setForeground(QColor("#e05252"))
+                if j==7 and isinstance(r_ys,(int,float)) and r_ys<0:
                     it.setForeground(QColor("#e05252"))
                 self.bs_tbl.setItem(i,j,it)
 
