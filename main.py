@@ -658,10 +658,22 @@ class VoucherDialog(QDialog):
 
         conn = get_db(); c = conn.cursor()
         dt = self.date_edit.date().toString("yyyy-MM-dd")
+        reverted_to_pending = False
 
         if self.voucher_id:
-            c.execute("UPDATE vouchers SET date=?,attachment_count=? WHERE id=?",
-                      (dt, self.attach_spin.value(), self.voucher_id))
+            c.execute("SELECT voucher_no, status FROM vouchers WHERE id=?", (self.voucher_id,))
+            voucher = c.fetchone()
+            if not voucher:
+                conn.close()
+                QMessageBox.warning(self, "提示", "凭证不存在或已被删除，请刷新后重试")
+                return
+            vno = voucher["voucher_no"]
+            new_status = voucher["status"]
+            if voucher["status"] == "已审核":
+                new_status = "待审核"
+                reverted_to_pending = True
+            c.execute("UPDATE vouchers SET date=?,attachment_count=?,status=? WHERE id=?",
+                      (dt, self.attach_spin.value(), new_status, self.voucher_id))
             c.execute("DELETE FROM voucher_entries WHERE voucher_id=?", (self.voucher_id,))
             vid = self.voucher_id
         else:
@@ -680,12 +692,16 @@ class VoucherDialog(QDialog):
             for dim_id, item_id, item_name in aux_sel:
                 c.execute("INSERT INTO voucher_entry_aux(entry_id,dimension_id,aux_item_id,aux_item_name) VALUES(?,?,?,?)",
                           (entry_id, dim_id, item_id, item_name))
+        action = "编辑凭证" if self.voucher_id else "新增凭证"
+        detail = f"凭证号:{vno} 借方合计:{td:.2f}"
+        if reverted_to_pending:
+            detail += " 修改后自动回退为待审核"
         log_action(conn, self.client_id,
-                   "编辑凭证" if self.voucher_id else "新增凭证",
-                   "voucher", vid,
-                   f"凭证号:{vno if not self.voucher_id else ''} 借方合计:{td:.2f}")
+                   action, "voucher", vid, detail)
         conn.commit(); conn.close()
         self.saved_and_new = and_new
+        if reverted_to_pending:
+            QMessageBox.information(self, "已回退待审核", "该凭证原状态为“已审核”，修改后已自动回退为“待审核”，请重新审核。")
         self.accept()
 
 # ── Pages ──────────────────────────────────────────────────────────────────
@@ -1289,7 +1305,10 @@ class VoucherPage(QWidget):
     def _build_voucher_list(self):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(10)
         hdr = QHBoxLayout()
-        hdr.addWidget(lbl("凭证列表", bold=True, size=15)); hdr.addStretch()
+        hdr.addWidget(lbl("凭证列表", bold=True, size=15))
+        self.lock_lbl = QLabel("")  # shows 🔒 已封账 when period is closed
+        hdr.addSpacing(12); hdr.addWidget(self.lock_lbl)
+        hdr.addStretch()
         b_new = QPushButton("＋ 新增凭证"); b_new.setObjectName("btn_primary")
         b_new.clicked.connect(self._new_voucher)
         b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
@@ -1319,6 +1338,11 @@ class VoucherPage(QWidget):
     def _load_vouchers(self):
         if not self.client_id: return
         conn = get_db(); c = conn.cursor()
+        # Show lock banner if period is closed
+        c.execute("SELECT is_closed FROM periods WHERE client_id=? AND period=?",
+                  (self.client_id, self.period))
+        row = c.fetchone()
+        is_closed = bool(row and row["is_closed"])
         c.execute("""SELECT v.id,v.voucher_no,v.date,v.status,
             (SELECT summary FROM voucher_entries WHERE voucher_id=v.id ORDER BY line_no LIMIT 1) as summ,
             (SELECT group_concat(account_name,'/') FROM voucher_entries WHERE voucher_id=v.id) as accts,
@@ -1327,6 +1351,14 @@ class VoucherPage(QWidget):
             FROM vouchers v WHERE v.client_id=? AND v.period=? ORDER BY v.voucher_no""",
                   (self.client_id, self.period))
         rows = c.fetchall(); conn.close()
+        # Update period lock indicator in toolbar
+        if hasattr(self, 'lock_lbl'):
+            if is_closed:
+                self.lock_lbl.setText("  🔒 已封账  ")
+                self.lock_lbl.setStyleSheet("color:#ff4d4f;font-weight:bold;background:#fff1f0;border-radius:4px;padding:2px 6px;")
+            else:
+                self.lock_lbl.setText("")
+                self.lock_lbl.setStyleSheet("")
         self.v_tbl.setRowCount(len(rows))
         for i,r in enumerate(rows):
             self.v_tbl.setRowHeight(i,46)
@@ -1371,7 +1403,21 @@ class VoucherPage(QWidget):
             self.v_tbl.setCellWidget(i,6,bw)
 
     def _set_voucher_status(self, vid, new_status):
-        conn = get_db()
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT voucher_no, status, period FROM vouchers WHERE id=?", (vid,))
+        v = c.fetchone()
+        if not v: conn.close(); return
+        # 已结账期间禁止变更状态
+        if self._is_period_closed(v["period"]):
+            conn.close()
+            QMessageBox.warning(self,"期间已封账","该凭证所在期间已封账，禁止修改审核状态。\n如需修改请先执行反结账。"); return
+        # 审核前检查借贷平衡
+        if new_status == "已审核":
+            c.execute("SELECT ABS(SUM(debit)-SUM(credit)) AS diff FROM voucher_entries WHERE voucher_id=?", (vid,))
+            diff = c.fetchone()["diff"] or 0
+            if diff > 0.005:
+                conn.close()
+                QMessageBox.warning(self,"借贷不平",f"该凭证借贷差额 {diff:.2f}，不能审核通过。\n请先编辑修正后再审核。"); return
         conn.execute("UPDATE vouchers SET status=? WHERE id=?", (new_status, vid))
         log_action(conn, self.client_id, f"凭证审核:{new_status}", "voucher", vid, f"状态变更为{new_status}")
         conn.commit(); conn.close()
@@ -1380,19 +1426,46 @@ class VoucherPage(QWidget):
     def _new_voucher(self):
         if not self.client_id:
             QMessageBox.information(self,"提示","请先从客户列表选择一个客户进入账簿"); return
+        if self._is_period_closed():
+            QMessageBox.warning(self,"期间已封账","该期间已结账封账，禁止新增凭证。\n如需修改请到【期末结账】页面执行反结账。"); return
         d = VoucherDialog(self, self.client_id, self.period)
         if d.exec():
             self._switch_tab("查凭证")
             if getattr(d,'saved_and_new',False): self._new_voucher()
 
     def _edit_voucher(self, vid):
+        if self._is_period_closed():
+            QMessageBox.warning(self,"期间已封账","该期间已结账封账，禁止修改凭证。\n如需修改请到【期末结账】页面执行反结账。"); return
         d = VoucherDialog(self, self.client_id, self.period, vid)
         if d.exec(): self._load_vouchers()
 
     def _del_voucher(self, vid):
-        if QMessageBox.question(self,"确认","删除该凭证？",QMessageBox.Yes|QMessageBox.No)==QMessageBox.Yes:
-            conn=get_db(); conn.execute("DELETE FROM vouchers WHERE id=?",(vid,)); conn.commit(); conn.close()
-            self._load_vouchers()
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT voucher_no, status, period FROM vouchers WHERE id=?", (vid,))
+        v = c.fetchone(); conn.close()
+        if not v: return
+        # 已结账期间禁止删除
+        if self._is_period_closed(v["period"]):
+            QMessageBox.warning(self,"期间已封账","该凭证所在期间已封账，禁止删除。"); return
+        # 已审核凭证需二次确认
+        if v["status"] == "已审核":
+            reply = QMessageBox.question(self, "⚠ 删除已审核凭证",
+                f"凭证【{v['voucher_no']}】状态为【已审核】，删除将影响账务数据。\n\n确认要永久删除该凭证吗？",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes: return
+            # 记审计日志
+            conn = get_db()
+            log_action(conn, self.client_id, "删除已审核凭证", "voucher", vid,
+                       f"凭证号:{v['voucher_no']} 期间:{v['period']}")
+            conn.execute("DELETE FROM vouchers WHERE id=?", (vid,))
+            conn.commit(); conn.close()
+        else:
+            if QMessageBox.question(self,"确认","删除该凭证？",
+                    QMessageBox.Yes|QMessageBox.No) != QMessageBox.Yes: return
+            conn = get_db()
+            conn.execute("DELETE FROM vouchers WHERE id=?", (vid,))
+            conn.commit(); conn.close()
+        self._load_vouchers()
 
     # ─ Balance table (科目余额表) ─
     def _build_balance(self):
@@ -1575,6 +1648,16 @@ class VoucherPage(QWidget):
         elif idx == 1: self._load_balance()
         elif idx == 2: self._load_ledger()
         elif idx == 3 and self.client_id: self._aux_page.set_client(self.client_id, self.period)
+
+    def _is_period_closed(self, period=None):
+        """Return True if the given (or current) period is closed."""
+        p = period or self.period
+        if not self.client_id or not p: return False
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT is_closed FROM periods WHERE client_id=? AND period=?",
+                  (self.client_id, p))
+        row = c.fetchone(); conn.close()
+        return bool(row and row["is_closed"])
 
     def _refresh_periods(self):
         self.period_combo.blockSignals(True)
@@ -2425,11 +2508,22 @@ class SettlePage(QWidget):
 
         # Period / client row
         pr = QHBoxLayout()
-        self.period_lbl = lbl("请先从客户管理进入账簿", color="#888")
+        self.period_combo = QComboBox()
+        self.period_combo.setMinimumWidth(130)
+        self.period_combo.currentIndexChanged.connect(self._on_period_change)
+        self.client_lbl = lbl("请先从客户管理进入账簿", color="#888")
+        self.status_lbl = lbl("", bold=True)   # 显示已结账/未结账状态
         self.do_btn = QPushButton("生成结转凭证"); self.do_btn.setObjectName("btn_primary")
         self.do_btn.clicked.connect(self._do_carryforward)
-        pr.addWidget(lbl("结账期间：")); pr.addWidget(self.period_lbl)
-        pr.addStretch(); pr.addWidget(self.do_btn)
+        self.close_btn = QPushButton("🔒 结账封账"); self.close_btn.setObjectName("btn_primary")
+        self.close_btn.clicked.connect(self._close_period)
+        self.reopen_btn = QPushButton("🔓 反结账"); self.reopen_btn.setObjectName("btn_red")
+        self.reopen_btn.clicked.connect(self._reopen_period)
+        pr.addWidget(lbl("结账期间：")); pr.addWidget(self.period_combo)
+        pr.addSpacing(10); pr.addWidget(self.client_lbl)
+        pr.addSpacing(12); pr.addWidget(self.status_lbl)
+        pr.addStretch()
+        pr.addWidget(self.do_btn); pr.addWidget(self.close_btn); pr.addWidget(self.reopen_btn)
         L.addLayout(pr)
         L.addWidget(sep())
 
@@ -2497,10 +2591,198 @@ class SettlePage(QWidget):
 
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.client_name = client_name; self.period = period
-        self.period_lbl.setText(f"{period}  【{client_name}】")
+        self.client_lbl.setText(f"【{client_name}】")
+        self._refresh_period_options(period)
+        self._refresh_period_view()
+
+    def _refresh_period_options(self, selected_period=None):
+        self.period_combo.blockSignals(True)
+        self.period_combo.clear()
+        if not self.client_id:
+            self.period_combo.addItem("请先从客户管理进入账簿", "")
+            self.period_combo.setEnabled(False)
+            self.period_combo.blockSignals(False)
+            return
+
+        periods = set()
+        now = datetime.now()
+        year, month = now.year, now.month
+        for _ in range(36):
+            periods.add(f"{year}-{month:02d}")
+            month -= 1
+            if month == 0:
+                year -= 1
+                month = 12
+
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT period FROM vouchers WHERE client_id=?
+                     UNION
+                     SELECT period FROM periods WHERE client_id=?""",
+                  (self.client_id, self.client_id))
+        periods.update(row["period"] for row in c.fetchall() if row["period"])
+        conn.close()
+
+        target = selected_period or self.period
+        if target:
+            periods.add(target)
+
+        for p in sorted(periods, reverse=True):
+            self.period_combo.addItem(f"{p[:4]}年{p[5:]}期", p)
+
+        idx = self.period_combo.findData(target)
+        if idx < 0 and self.period_combo.count():
+            idx = 0
+        if idx >= 0:
+            self.period_combo.setCurrentIndex(idx)
+            self.period = self.period_combo.itemData(idx)
+        self.period_combo.setEnabled(self.period_combo.count() > 0)
+        self.period_combo.blockSignals(False)
+
+    def _on_period_change(self):
+        period = self.period_combo.currentData()
+        if not period:
+            return
+        self.period = period
+        self._refresh_period_view()
+
+    def _refresh_period_view(self):
+        if not self.client_id or not self.period:
+            return
+        self._refresh_lock_state()
         self._refresh_carry_amounts()
         self._load_activity()
         self._run_checks()
+
+    def _is_period_closed(self):
+        """Check if current period is closed."""
+        if not self.client_id or not self.period: return False
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT is_closed FROM periods WHERE client_id=? AND period=?",
+                  (self.client_id, self.period))
+        row = c.fetchone(); conn.close()
+        return bool(row and row["is_closed"])
+
+    def _refresh_lock_state(self):
+        """Update UI buttons and status label based on period close state."""
+        closed = self._is_period_closed()
+        if closed:
+            self.status_lbl.setText("🔒 已结账封账")
+            self.status_lbl.setStyleSheet("color:#ff4d4f;font-weight:bold;")
+            self.do_btn.setEnabled(False)
+            self.close_btn.setVisible(False)
+            self.reopen_btn.setVisible(True)
+        else:
+            self.status_lbl.setText("○ 未结账")
+            self.status_lbl.setStyleSheet("color:#888;")
+            self.do_btn.setEnabled(True)
+            self.close_btn.setVisible(True)
+            self.reopen_btn.setVisible(False)
+
+    def _close_period(self):
+        """结账封账：检查无待审核凭证后锁定期间。"""
+        if not self.client_id: return
+        conn = get_db(); c = conn.cursor()
+        # 检查待审核凭证
+        c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND status='待审核'",
+                  (self.client_id, self.period))
+        pending = c.fetchone()[0]
+        if pending > 0:
+            conn.close()
+            QMessageBox.warning(self, "无法结账",
+                f"本期还有 {pending} 张【待审核】凭证，请先全部审核后再结账封账。")
+            return
+        # 检查借贷不平凭证（额外保障）
+        c.execute("""SELECT v.voucher_no,
+            ABS(SUM(e.debit)-SUM(e.credit)) AS diff
+            FROM vouchers v JOIN voucher_entries e ON e.voucher_id=v.id
+            WHERE v.client_id=? AND v.period=?
+            GROUP BY v.id HAVING diff > 0.005""", (self.client_id, self.period))
+        unbal = c.fetchall()
+        if unbal:
+            conn.close()
+            nos = "、".join(r["voucher_no"] for r in unbal[:5])
+            QMessageBox.warning(self, "无法结账",
+                f"以下凭证借贷不平衡，请先修正：{nos}")
+            return
+        if QMessageBox.question(self, "确认结账封账",
+                f"确认对期间【{self.period}】进行结账封账？\n\n封账后该期间凭证将无法新增或修改，如需修改请先反结账。",
+                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+            conn.close(); return
+        # 写入或更新 periods 表
+        c.execute("INSERT OR REPLACE INTO periods(client_id,period,is_closed,closed_at) VALUES(?,?,1,datetime('now'))",
+                  (self.client_id, self.period))
+        log_action(conn, self.client_id, "期间结账封账", "period", self.period,
+                   f"期间 {self.period} 封账")
+        conn.commit(); conn.close()
+        self._refresh_lock_state()
+        self._run_checks()
+        QMessageBox.information(self, "结账成功", f"期间【{self.period}】已结账封账。")
+
+    def _reopen_period(self):
+        """反结账：解除期间锁定。"""
+        if not self.client_id: return
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT period FROM periods
+                     WHERE client_id=? AND is_closed=1 AND period>=?
+                     ORDER BY period""",
+                  (self.client_id, self.period))
+        closed_periods = [row["period"] for row in c.fetchall()]
+        if not closed_periods:
+            conn.close()
+            QMessageBox.information(self, "提示", f"期间【{self.period}】当前未封账，无需反结账。")
+            self._refresh_lock_state()
+            self._run_checks()
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("确认反结账")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(f"请选择期间【{self.period}】的反结账方式。")
+        if len(closed_periods) > 1:
+            msg.setInformativeText(
+                f"当前期间之后还有 {len(closed_periods) - 1} 个已结账期间："
+                f"{'、'.join(closed_periods[1:4])}"
+                f"{' 等' if len(closed_periods) > 4 else ''}\n\n"
+                "你可以只反当前期间，也可以连同后续已结账期间一起反结账。")
+        else:
+            msg.setInformativeText("当前期间之后没有其他已结账期间。")
+        current_btn = msg.addButton("只反当前期间", QMessageBox.AcceptRole)
+        cascade_btn = None
+        if len(closed_periods) > 1:
+            cascade_btn = msg.addButton("反当前及后续期间", QMessageBox.DestructiveRole)
+        cancel_btn = msg.addButton("取消", QMessageBox.RejectRole)
+        msg.setDefaultButton(current_btn)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == cancel_btn or clicked is None:
+            conn.close()
+            return
+
+        if clicked == cascade_btn:
+            target_periods = closed_periods
+            c.execute("""UPDATE periods
+                         SET is_closed=0, closed_at=NULL
+                         WHERE client_id=? AND is_closed=1 AND period>=?""",
+                      (self.client_id, self.period))
+            detail = f"期间 {self.period} 反结账，并级联解除后续 {len(target_periods) - 1} 个期间封账"
+            success_msg = (
+                f"期间【{self.period}】及后续共 {len(target_periods)} 个已结账期间"
+                "已解除封账，可重新修改凭证。")
+        else:
+            target_periods = [self.period]
+            c.execute("""UPDATE periods
+                         SET is_closed=0, closed_at=NULL
+                         WHERE client_id=? AND period=?""",
+                      (self.client_id, self.period))
+            detail = f"期间 {self.period} 反结账"
+            success_msg = f"期间【{self.period}】已解除封账，可重新修改凭证。"
+
+        log_action(conn, self.client_id, "期间反结账", "period", self.period, detail)
+        conn.commit(); conn.close()
+        self._refresh_lock_state()
+        self._run_checks()
+        QMessageBox.information(self, "反结账成功", success_msg)
 
     def _refresh_carry_amounts(self):
         if not self.client_id: return
@@ -2580,7 +2862,18 @@ class SettlePage(QWidget):
 
     def _do_carryforward(self):
         if not self.client_id: return
+        # 已结账期间不能结转
+        if self._is_period_closed():
+            QMessageBox.warning(self, "期间已封账", "该期间已结账封账，请先反结账后再操作。"); return
+        # 有待审核凭证不能结转
         conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND status='待审核'",
+                  (self.client_id, self.period))
+        pending = c.fetchone()[0]
+        if pending > 0:
+            conn.close()
+            QMessageBox.warning(self, "存在待审核凭证",
+                f"本期有 {pending} 张凭证尚未审核，请先全部审核通过后再执行结转。"); return
 
         def next_vno():
             c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=?",
@@ -2659,18 +2952,56 @@ class SettlePage(QWidget):
         self._refresh_carry_amounts(); self._load_activity(); self._run_checks()
 
     def _run_checks(self):
-        checks = [("01","期末结转","已完成"),("02","科目期初","平衡"),("03","固定资产","平衡"),
-                  ("04","无形资产","平衡"),("05","待摊费用","平衡"),("06","资产负债表","平衡"),
-                  ("07","利润表","平衡")]
+        if not self.client_id:
+            return
+        conn = get_db(); c = conn.cursor()
+
+        # 1. 待审核凭证数
+        c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND status='待审核'",
+                  (self.client_id, self.period))
+        pending = c.fetchone()[0]
+
+        # 2. 借贷不平凭证数
+        c.execute("""SELECT COUNT(*) FROM (
+            SELECT v.id FROM vouchers v JOIN voucher_entries e ON e.voucher_id=v.id
+            WHERE v.client_id=? AND v.period=?
+            GROUP BY v.id HAVING ABS(SUM(e.debit)-SUM(e.credit)) > 0.005
+        )""", (self.client_id, self.period))
+        unbalanced = c.fetchone()[0]
+
+        # 3. 是否已结账封账
+        c.execute("SELECT is_closed FROM periods WHERE client_id=? AND period=?",
+                  (self.client_id, self.period))
+        row = c.fetchone()
+        is_closed = bool(row and row["is_closed"])
+
+        # 4. 结转凭证是否存在
+        c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND note IN ('结转收入','结转费用')",
+                  (self.client_id, self.period))
+        carried = c.fetchone()[0]
+        conn.close()
+
+        checks = [
+            ("01", "待审核凭证",   "通过" if pending == 0    else f"风险：{pending}张待审核"),
+            ("02", "借贷平衡",     "通过" if unbalanced == 0  else f"风险：{unbalanced}张不平"),
+            ("03", "期末结转",     "已完成" if carried > 0   else "未结转"),
+            ("04", "期间封账",     "已封账" if is_closed      else "未封账"),
+        ]
+
         self.check_list.setRowCount(len(checks))
-        for i,(no,name,status) in enumerate(checks):
-            self.check_list.setRowHeight(i,40)
-            for j,v in enumerate([no,name]):
+        for i, (no, name, status) in enumerate(checks):
+            self.check_list.setRowHeight(i, 40)
+            for j, v in enumerate([no, name]):
                 it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter)
-                self.check_list.setItem(i,j,it)
-            s_w = QLabel(f"  {'✓' if status != '风险' else '✗'}  {status}  ")
-            s_w.setStyleSheet(f"color:{'#52c41a' if status!='风险' else '#ff4d4f'};font-weight:bold;")
-            self.check_list.setCellWidget(i,2,s_w)
+                self.check_list.setItem(i, j, it)
+            is_ok = "风险" not in status
+            icon = "✓" if is_ok else "✗"
+            color = "#52c41a" if is_ok else "#ff4d4f"
+            if status in ("未结转", "未封账"):
+                color = "#fa8c16"; icon = "○"
+            s_w = QLabel(f"  {icon}  {status}  ")
+            s_w.setStyleSheet(f"color:{color};font-weight:bold;")
+            self.check_list.setCellWidget(i, 2, s_w)
 
 
 class ReportPage(QWidget):
