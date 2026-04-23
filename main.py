@@ -2497,7 +2497,18 @@ class SettlePage(QWidget):
     def __init__(self):
         super().__init__()
         self.client_id = None; self.client_name = ""; self.period = ""
-        L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0,0,0,0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        scroll.setWidget(content)
+        L = QVBoxLayout(content); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
 
         # Step indicator
         step_row = QHBoxLayout(); step_row.setSpacing(0)
@@ -2543,6 +2554,7 @@ class SettlePage(QWidget):
         self.activity_tbl = QTableWidget()
         self.activity_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.activity_tbl.setShowGrid(False); self.activity_tbl.verticalHeader().setVisible(False)
+        self.activity_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.activity_tbl.setColumnCount(5)
         self.activity_tbl.setHorizontalHeaderLabels(["科目编号","科目名称","类型","本期借方","本期贷方"])
         self.activity_tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -2558,7 +2570,7 @@ class SettlePage(QWidget):
         self.check_list.setHorizontalHeaderLabels(["序号","检测项目","状态"])
         self.check_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.check_list.verticalHeader().setVisible(False); self.check_list.setShowGrid(False)
-        self.check_list.setMaximumHeight(260)
+        self.check_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         L.addWidget(self.check_list); L.addStretch()
 
     def _step_box(self, num, text, state):
@@ -2652,6 +2664,15 @@ class SettlePage(QWidget):
         self._refresh_carry_amounts()
         self._load_activity()
         self._run_checks()
+
+    def _fit_table_height(self, table, extra=8):
+        height = table.horizontalHeader().height()
+        for row in range(table.rowCount()):
+            height += table.rowHeight(row)
+        if table.rowCount() == 0:
+            height += table.verticalHeader().defaultSectionSize()
+        table.setMinimumHeight(height + extra)
+        table.setMaximumHeight(height + extra)
 
     def _is_period_closed(self):
         """Check if current period is closed."""
@@ -2839,6 +2860,8 @@ class SettlePage(QWidget):
             it.setForeground(QColor("#ad6800"))
             self.activity_tbl.setItem(0, 0, it)
             self.activity_tbl.setSpan(0, 0, 1, 5)
+            self.activity_tbl.setRowHeight(0, 42)
+            self._fit_table_height(self.activity_tbl)
             return
 
         for i, r in enumerate(rows):
@@ -2857,8 +2880,10 @@ class SettlePage(QWidget):
             warn.setForeground(QColor("#ff4d4f"))
             row = len(rows)
             self.activity_tbl.setRowCount(row + 1)
+            self.activity_tbl.setRowHeight(row, 38)
             self.activity_tbl.setItem(row, 0, warn)
             self.activity_tbl.setSpan(row, 0, 1, 5)
+        self._fit_table_height(self.activity_tbl)
 
     def _do_carryforward(self):
         if not self.client_id: return
@@ -2981,10 +3006,17 @@ class SettlePage(QWidget):
         carried = c.fetchone()[0]
         conn.close()
 
+        if carried > 0:
+            carry_status = "已完成"
+        elif abs(getattr(self, "_income_amt", 0)) <= 0.005 and abs(getattr(self, "_expense_amt", 0)) <= 0.005:
+            carry_status = "无需结转"
+        else:
+            carry_status = "未结转"
+
         checks = [
             ("01", "待审核凭证",   "通过" if pending == 0    else f"风险：{pending}张待审核"),
             ("02", "借贷平衡",     "通过" if unbalanced == 0  else f"风险：{unbalanced}张不平"),
-            ("03", "期末结转",     "已完成" if carried > 0   else "未结转"),
+            ("03", "期末结转",     carry_status),
             ("04", "期间封账",     "已封账" if is_closed      else "未封账"),
         ]
 
@@ -2997,11 +3029,12 @@ class SettlePage(QWidget):
             is_ok = "风险" not in status
             icon = "✓" if is_ok else "✗"
             color = "#52c41a" if is_ok else "#ff4d4f"
-            if status in ("未结转", "未封账"):
+            if status in ("未结转", "未封账", "无需结转"):
                 color = "#fa8c16"; icon = "○"
             s_w = QLabel(f"  {icon}  {status}  ")
             s_w.setStyleSheet(f"color:{color};font-weight:bold;")
             self.check_list.setCellWidget(i, 2, s_w)
+        self._fit_table_height(self.check_list)
 
 
 class ReportPage(QWidget):
@@ -4077,7 +4110,8 @@ class AuditPage(QWidget):
         fr = QHBoxLayout(); fr.setSpacing(10)
         self.action_filter = QComboBox()
         self.action_filter.addItems(["全部操作","新增凭证","编辑凭证","凭证审核:已审核","凭证审核:已拒绝",
-                                      "凭证审核:待审核","批量导入凭证","期末结转","删除凭证"])
+                                      "凭证审核:待审核","批量导入凭证","期末结转","期间结账封账",
+                                      "期间反结账","删除凭证"])
         self.action_filter.currentIndexChanged.connect(self.load)
         self.date_from = QDateEdit(); self.date_from.setDisplayFormat("yyyy-MM-dd")
         self.date_from.setDate(QDate.currentDate().addMonths(-3))
@@ -4139,7 +4173,8 @@ class AuditPage(QWidget):
             "新增凭证":"#3d6fdb","编辑凭证":"#fa8c16",
             "凭证审核:已审核":"#52c41a","凭证审核:已拒绝":"#ff4d4f",
             "凭证审核:待审核":"#888","批量导入凭证":"#722ed1",
-            "期末结转":"#eb2f96","删除凭证":"#ff4d4f",
+            "期末结转":"#eb2f96","期间结账封账":"#fa8c16",
+            "期间反结账":"#13c2c2","删除凭证":"#ff4d4f",
         }
 
         self.tbl.setRowCount(len(rows))
