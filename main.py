@@ -1986,9 +1986,11 @@ class VoucherPage(QWidget):
         hdr.addStretch()
         b_new = QPushButton("＋ 新增凭证"); b_new.setObjectName("btn_primary")
         b_new.clicked.connect(self._new_voucher)
+        b_exp_doc = QPushButton("导出记账凭证"); b_exp_doc.setObjectName("btn_outline")
+        b_exp_doc.clicked.connect(self._export_voucher_docs)
         b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
         b_exp.clicked.connect(self._export_vouchers)
-        hdr.addWidget(b_exp); hdr.addWidget(b_new); L.addLayout(hdr)
+        hdr.addWidget(b_exp_doc); hdr.addWidget(b_exp); hdr.addWidget(b_new); L.addLayout(hdr)
 
         f = card(); vl = QVBoxLayout(f); vl.setContentsMargins(0,0,0,0)
         self.v_tbl = QTableWidget(); self.v_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -2418,6 +2420,114 @@ class VoucherPage(QWidget):
         for col in ws.columns:
             ws.column_dimensions[col[0].column_letter].width=16
         wb.save(path); QMessageBox.information(self,"成功",f"已导出:\n{path}")
+
+    def _export_voucher_docs(self):
+        if not self.client_id: return
+        period_text = (self.period or "").replace("-", "年", 1) + "期"
+        path,_ = QFileDialog.getSaveFileName(
+            self, "保存", f"记账凭证({period_text}).xlsx", "Excel(*.xlsx)")
+        if not path: return
+
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT id,voucher_no,date,status,attachment_count
+            FROM vouchers
+            WHERE client_id=? AND period=?
+            ORDER BY date,voucher_no,id""",
+            (self.client_id, self.period))
+        vouchers = c.fetchall()
+        if not vouchers:
+            conn.close()
+            QMessageBox.information(self, "提示", "当前账期没有可导出的凭证")
+            return
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "记账凭证"
+
+        title_fill = PatternFill("solid", fgColor="1C2340")
+        sub_fill = PatternFill("solid", fgColor="EEF3FF")
+        head_fill = PatternFill("solid", fgColor="F5F7FA")
+        thin = Side(style="thin", color="D9D9D9")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        money_fmt = '#,##0.00'
+
+        ws.merge_cells("B1:E1")
+        ws["B1"] = f"{period_text} 记账凭证"
+        ws["B1"].font = XFont(bold=True, color="FFFFFF", size=14)
+        ws["B1"].fill = title_fill
+        ws["B1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 26
+
+        row_idx = 3
+        for v in vouchers:
+            c.execute("""SELECT line_no,summary,account_code,account_name,debit,credit
+                FROM voucher_entries
+                WHERE voucher_id=?
+                ORDER BY line_no""", (v["id"],))
+            entries = c.fetchall()
+            if not entries:
+                continue
+
+            ws.cell(row_idx, 2, f"日期:{v['date']}    凭证字号:{v['voucher_no']}")
+            ws.cell(row_idx, 2).font = XFont(bold=True)
+            ws.cell(row_idx, 2).fill = sub_fill
+            ws.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="center")
+            for col in range(2, 6):
+                ws.cell(row_idx, col).border = border
+                if col > 2:
+                    ws.cell(row_idx, col).fill = sub_fill
+            row_idx += 1
+
+            headers = ["摘要", "科目", "借方金额", "贷方金额"]
+            for ci, text in enumerate(headers, start=2):
+                cell = ws.cell(row_idx, ci, text)
+                cell.font = XFont(bold=True)
+                cell.fill = head_fill
+                cell.border = border
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            row_idx += 1
+
+            for ent in entries:
+                ws.cell(row_idx, 2, ent["summary"] or "")
+                ws.cell(row_idx, 3, f"{ent['account_code'] or ''} {ent['account_name'] or ''}".strip())
+                ws.cell(row_idx, 4, ent["debit"] or 0)
+                ws.cell(row_idx, 5, ent["credit"] or 0)
+                ws.cell(row_idx, 4).number_format = money_fmt
+                ws.cell(row_idx, 5).number_format = money_fmt
+                for col in range(2, 6):
+                    ws.cell(row_idx, col).border = border
+                    ws.cell(row_idx, col).alignment = Alignment(vertical="center")
+                row_idx += 1
+
+            total_debit = sum((ent["debit"] or 0) for ent in entries)
+            total_credit = sum((ent["credit"] or 0) for ent in entries)
+            ws.cell(row_idx, 2, "合计：")
+            ws.cell(row_idx, 4, total_debit)
+            ws.cell(row_idx, 5, total_credit)
+            ws.cell(row_idx, 4).number_format = money_fmt
+            ws.cell(row_idx, 5).number_format = money_fmt
+            for col in range(2, 6):
+                ws.cell(row_idx, col).border = border
+                ws.cell(row_idx, col).fill = sub_fill
+                ws.cell(row_idx, col).font = XFont(bold=True)
+            row_idx += 1
+
+            ws.cell(row_idx, 2, f"附单据 {v['attachment_count'] or 0} 张")
+            ws.cell(row_idx, 2).font = XFont(bold=True)
+            ws.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="center")
+            for col in range(2, 6):
+                ws.cell(row_idx, col).border = border
+            row_idx += 2
+
+        ws.column_dimensions["A"].width = 4
+        ws.column_dimensions["B"].width = 28
+        ws.column_dimensions["C"].width = 36
+        ws.column_dimensions["D"].width = 14
+        ws.column_dimensions["E"].width = 14
+
+        conn.close()
+        wb.save(path)
+        QMessageBox.information(self, "成功", f"已导出:\n{path}")
 
     def _export_balance(self):
         if not self.client_id: return

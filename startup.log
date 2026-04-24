@@ -46,3 +46,35 @@ step 3: setStyleSheet
 step 4: MainWindow()
 step 5: w.show()
 step 6: entering event loop
+
+=== 启动 2026-04-24 16:53:39.302904 ===
+step 1: init_db
+step 2: QApplication
+step 3: setStyleSheet
+step 4: MainWindow()
+step 5: w.show()
+step 6: entering event loop
+
+=== 启动 2026-04-24 17:19:41.569027 ===
+step 1: init_db
+step 2: QApplication
+step 3: setStyleSheet
+step 4: MainWindow()
+step 5: w.show()
+step 6: entering event loop
+
+=== 启动 2026-04-24 17:27:44.014169 ===
+step 1: init_db
+step 2: QApplication
+step 3: setStyleSheet
+step 4: MainWindow()
+step 5: w.show()
+step 6: entering event loop
+
+=== 启动 2026-04-24 17:32:54.101146 ===
+step 1: init_db
+step 2: QApplication
+step 3: setStyleSheet
+step 4: MainWindow()
+step 5: w.show()
+step 6: entering event loop
