@@ -135,6 +135,23 @@ def init_db():
         entries TEXT NOT NULL,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS bank_statements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        account_code TEXT DEFAULT '1002',
+        account_name TEXT DEFAULT '银行存款',
+        date TEXT NOT NULL,
+        voucher_no TEXT,
+        description TEXT,
+        debit REAL DEFAULT 0,
+        credit REAL DEFAULT 0,
+        balance REAL,
+        is_matched INTEGER DEFAULT 0,
+        matched_entry_id INTEGER,
+        source TEXT DEFAULT 'import',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(client_id) REFERENCES clients(id)
+    );
     """)
     conn.commit()
     # Run migrations
@@ -149,6 +166,27 @@ def _migrate_db(conn):
     columns = {row[1] for row in c.fetchall()}
     if 'is_frozen' not in columns:
         c.execute("ALTER TABLE accounts ADD COLUMN is_frozen INTEGER DEFAULT 0")
+        conn.commit()
+    # Add bank_statements table if missing (for existing databases)
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bank_statements'")
+    if not c.fetchone():
+        c.execute("""CREATE TABLE bank_statements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            account_code TEXT DEFAULT '1002',
+            account_name TEXT DEFAULT '银行存款',
+            date TEXT NOT NULL,
+            voucher_no TEXT,
+            description TEXT,
+            debit REAL DEFAULT 0,
+            credit REAL DEFAULT 0,
+            balance REAL,
+            is_matched INTEGER DEFAULT 0,
+            matched_entry_id INTEGER,
+            source TEXT DEFAULT 'import',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(client_id) REFERENCES clients(id)
+        )""")
         conn.commit()
 
 # 企业会计准则（2006）完整科目表
