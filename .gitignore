@@ -11,4 +11,12 @@ __pycache__/
 
 # 忽略虚拟环境（如果你有的话）
 .venv/
-venv/
+venv/# 备份文件
+*.bak
+*.bak_*
+*_bak_*
+*.backup_*
+
+# 运行时文件
+startup.log
+accounting.db

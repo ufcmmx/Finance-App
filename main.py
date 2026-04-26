@@ -15,8 +15,7 @@ from datetime import datetime, date
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
-import openpyxl
-from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side, numbers
+# openpyxl imported lazily inside each export function (saves ~600ms startup)
 
 # ── Stylesheet ──────────────────────────────────────────────────────────────
 SS = """
@@ -98,9 +97,78 @@ def card(widget=None):
         vl.addWidget(widget)
     return f
 
+class NoScrollSpinBox(QSpinBox):
+    """QSpinBox that ignores mouse-wheel events to prevent accidental value changes."""
+    def wheelEvent(self, event):
+        event.ignore()
+
+class NoScrollDoubleSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox that ignores mouse-wheel events to prevent accidental value changes."""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 def fmt_amt(v):
     if v == 0 or v is None: return ""
     return f"{v:,.2f}"
+
+# Contra-asset account root codes (credit-normal)
+_CONTRA_ASSET_ROOTS = {
+    "1231","1471","1472","1482","1502","1512",
+    "1602","1603","1608","1609","1622","1632","1702","1703"
+}
+
+def infer_account_type_direction(code, name=""):
+    """Infer account type and normal-balance direction from code and name.
+    Matches the standard chart of accounts template (4xxx=equity, 5xxx=cost, 6xxx=income/expense).
+    """
+    code = (code or "").strip()
+    name = (name or "").strip()
+    if not code:
+        return "资产", "借"
+
+    prefix = code[0]
+    parts = code.split(".")
+    root4 = code[:4] if len(code) >= 4 else code
+
+    if prefix == "1":
+        # Check contra-asset (credit normal): traverse ancestors
+        for i in range(len(parts), 0, -1):
+            ancestor = ".".join(parts[:i])
+            if ancestor in _CONTRA_ASSET_ROOTS:
+                return "资产", "贷"
+        return "资产", "借"
+
+    if prefix == "2":
+        # 2702 未确认融资费用 is a contra-liability (debit normal)
+        if code.startswith("2702"):
+            return "负债", "借"
+        return "负债", "贷"
+
+    if prefix == "3":
+        # In this template 3xxx are special clearing/hedging accounts (asset-like)
+        return "资产", "借"
+
+    if prefix == "4":
+        if code.startswith("4201"):   # 库存股 — debit normal
+            return "所有者权益", "借"
+        return "所有者权益", "贷"
+
+    if prefix == "5":
+        if code.startswith("5402"):   # 工程结算 — credit normal
+            return "成本", "贷"
+        return "成本", "借"
+
+    if prefix == "6":
+        try:
+            top4 = int(code[:4])
+        except ValueError:
+            top4 = 9999
+        if top4 <= 6301:              # 6001-6301 are income/gain accounts
+            return "收入", "贷"
+        return "费用", "借"           # 6401+ are expense accounts
+
+    return "资产", "借"
 
 def cn_amount(n):
     units = ["", "拾", "佰", "仟", "万", "拾万", "佰万", "仟万", "亿"]
@@ -223,7 +291,7 @@ class AccountInitDialog(QDialog):
             self.table.setItem(i,1,name_it)
             # Spinbox with explicit minimum size so numbers are readable
             def make_spin(val):
-                sp = QDoubleSpinBox()
+                sp = NoScrollDoubleSpinBox()
                 sp.setRange(0, 9999999999)
                 sp.setDecimals(2)
                 sp.setValue(val or 0)
@@ -298,7 +366,7 @@ class VoucherDialog(QDialog):
         self.date_edit = QDateEdit(QDate.currentDate())
         self.date_edit.setCalendarPopup(True); self.date_edit.setDisplayFormat("yyyy-MM-dd")
         self.preparer_lbl = lbl("未来", color="#888")
-        self.attach_spin = QSpinBox(); self.attach_spin.setRange(0,999)
+        self.attach_spin = NoScrollSpinBox(); self.attach_spin.setRange(0,999)
         self.attach_spin.setSuffix(" 张"); self.attach_spin.setFixedWidth(70)
         hdr.addWidget(self.lbl_no); hdr.addSpacing(16)
         hdr.addWidget(lbl("日期：")); hdr.addWidget(self.date_edit)
@@ -435,12 +503,12 @@ class VoucherDialog(QDialog):
         rebuild_aux(acct_code, aux_data)
 
         # ── 借方金额 ──
-        d_spin = QDoubleSpinBox(); d_spin.setRange(0,999999999); d_spin.setDecimals(2)
+        d_spin = NoScrollDoubleSpinBox(); d_spin.setRange(0,999999999); d_spin.setDecimals(2)
         d_spin.setSpecialValueText(""); d_spin.setValue(debit)
         d_spin.valueChanged.connect(self._update_totals)
 
         # ── 贷方金额（支持 = 键自动补平） ──
-        cr_spin = QDoubleSpinBox(); cr_spin.setRange(0,999999999); cr_spin.setDecimals(2)
+        cr_spin = NoScrollDoubleSpinBox(); cr_spin.setRange(0,999999999); cr_spin.setDecimals(2)
         cr_spin.setSpecialValueText(""); cr_spin.setValue(credit)
         cr_spin.valueChanged.connect(self._update_totals)
 
@@ -1097,6 +1165,9 @@ class AuxPage(QWidget):
 
     def _export_aux_report(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         period = self.rpt_period_edit.text().strip() or "report"
         path, _ = QFileDialog.getSaveFileName(self, "保存", f"往来对账_{period}.xlsx", "Excel(*.xlsx)")
         if not path: return
@@ -1114,6 +1185,9 @@ class AuxPage(QWidget):
 
     def _export_items(self):
         if not self._cur_dim_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         path, _ = QFileDialog.getSaveFileName(self, "保存", "核算对象.xlsx", "Excel(*.xlsx)")
         if not path: return
         wb = openpyxl.Workbook(); ws = wb.active
@@ -1594,16 +1668,7 @@ class ImportAccountSetDialog(QDialog):
             od = self._flt(row.iloc[3]) if df.shape[1] > 3 else 0
             oc = self._flt(row.iloc[4]) if df.shape[1] > 4 else 0
             # 推断类型 & 方向
-            prefix = code[:1]
-            if prefix == "6":
-                atype = "收入" if code[:4] < "6400" else "费用"
-                direction = "贷" if atype == "收入" else "借"
-            elif prefix in ("3","4"):
-                atype = "所有者权益"
-                direction = "借" if code[:4] >= "4200" else "贷"
-            else:
-                atype = {"1":"资产","2":"负债","5":"收入"}.get(prefix,"资产")
-                direction = {"1":"借","2":"贷","5":"贷"}.get(prefix,"借")
+            atype, direction = infer_account_type_direction(code, name)
             normalized = code.replace("_",".")
             level  = normalized.count(".") + 1
             parent = (code.rsplit(".",1)[0] if "." in code
@@ -1678,7 +1743,8 @@ class ImportAccountSetDialog(QDialog):
                     af = str(row.iloc[2] if df.shape[1] > 2 else "").strip()
                     if not af: continue
                     parts = af.split(" ", 1)
-                    code = re.sub(r"_", ".", parts[0])
+                    # Preserve auxiliary-account separators from source files.
+                    code = parts[0]
                     aname = parts[1] if len(parts) > 1 else af
                     d  = self._flt(row.iloc[3]) if df.shape[1] > 3 else 0
                     cr = self._flt(row.iloc[4]) if df.shape[1] > 4 else 0
@@ -1918,11 +1984,28 @@ class ClientPage(QWidget):
         if QMessageBox.question(self,"确认",f"删除 [{r['name']}]？所有账目数据一并删除。",
                                 QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             conn = get_db()
-            conn.execute("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE client_id=?)",(r['id'],))
-            conn.execute("DELETE FROM vouchers WHERE client_id=?",(r['id'],))
-            conn.execute("DELETE FROM accounts WHERE client_id=?",(r['id'],))
-            conn.execute("DELETE FROM clients WHERE id=?",(r['id'],))
-            conn.commit(); conn.close(); self.load()
+            try:
+                client_id = r['id']
+                # Delete dependent rows explicitly because most FKs are NO ACTION.
+                conn.execute("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE client_id=?)",
+                             (client_id,))
+                conn.execute("DELETE FROM voucher_templates WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM bank_statements WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM account_aux_config WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM aux_items WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM aux_dimensions WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM periods WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM audit_log WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM vouchers WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM accounts WHERE client_id=?", (client_id,))
+                conn.execute("DELETE FROM clients WHERE id=?", (client_id,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+            self.load()
 
 
 class VoucherPage(QWidget):
@@ -2399,6 +2482,9 @@ class VoucherPage(QWidget):
 
     def _export_vouchers(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         path,_ = QFileDialog.getSaveFileName(self,"保存","凭证汇总.xlsx","Excel(*.xlsx)")
         if not path: return
         conn = get_db(); c = conn.cursor()
@@ -2423,6 +2509,9 @@ class VoucherPage(QWidget):
 
     def _export_voucher_docs(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         period_text = (self.period or "").replace("-", "年", 1) + "期"
         path,_ = QFileDialog.getSaveFileName(
             self, "保存", f"记账凭证({period_text}).xlsx", "Excel(*.xlsx)")
@@ -2531,6 +2620,9 @@ class VoucherPage(QWidget):
 
     def _export_balance(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         path,_ = QFileDialog.getSaveFileName(self,"保存",f"科目余额表_{self.period}.xlsx","Excel(*.xlsx)")
         if not path: return
         conn = get_db(); c = conn.cursor()
@@ -2575,7 +2667,7 @@ class AccountPage(QWidget):
         b_imp.clicked.connect(self._import_excel)
         hdr.addWidget(b_imp); hdr.addWidget(b_add); L.addLayout(hdr)
 
-        info = QLabel("  提示：可新增二级、三级科目（如 1002.01 银行存款-工商银行）。一级标准科目不可删除。")
+        info = QLabel("  提示：可新增子科目（如 6602.100 管理费用-其他）。系统默认科目不可删除，但可冻结或添加子科目。")
         info.setStyleSheet("background:#fffbe6;color:#ad6800;border-radius:6px;padding:8px 12px;font-size:12px;")
         L.addWidget(info)
 
@@ -2729,14 +2821,16 @@ class AccountPage(QWidget):
     def _freeze(self, aid):
         """Freeze an account to prevent further use"""
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        c.execute("SELECT code, name, is_default FROM accounts WHERE id=?", (aid,))
         acct = c.fetchone()
         conn.close()
         
         if acct:
+            is_def = acct['is_default'] if 'is_default' in acct.keys() else 0
+            extra = "\n（系统默认科目冻结后仍保留，不可删除）" if is_def else ""
             # Second confirmation for freezing
             reply = QMessageBox.question(self, "冻结确认", 
-                f"确认冻结科目 【{acct['code']} {acct['name']}】 吗？\n\n冻结后将不再允许使用此科目。",
+                f"确认冻结科目 【{acct['code']} {acct['name']}】 吗？\n\n冻结后将不再允许使用此科目。{extra}",
                 QMessageBox.Yes | QMessageBox.No)
             
             if reply == QMessageBox.Yes:
@@ -2748,11 +2842,20 @@ class AccountPage(QWidget):
 
     def _del(self, aid):
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT code, name FROM accounts WHERE id=?", (aid,))
+        c.execute("SELECT code, name, is_default FROM accounts WHERE id=?", (aid,))
         acct = c.fetchone()
         if not acct: conn.close(); return
         
         acct_code, acct_name = acct['code'], acct['name']
+        try:
+            is_def = acct['is_default']
+        except (KeyError, IndexError):
+            is_def = 0
+        
+        if is_def:
+            conn.close()
+            QMessageBox.warning(self, "系统默认科目", f"科目【{acct_code} {acct_name}】是系统默认科目，不可删除。如不需要使用，可以点击【冻结科目】。")
+            return
         
         # Check if account has been used
         c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (acct_code,))
@@ -2822,8 +2925,8 @@ class AccountEditDialog(QDialog):
         for r in c.fetchall():
             self.parent_cb.addItem(f"{r['code']}  {r['name']}", r['code'])
         conn.close()
-        self.od = QDoubleSpinBox(); self.od.setRange(0,9999999999); self.od.setDecimals(2); self.od.setPrefix("¥ ")
-        self.oc = QDoubleSpinBox(); self.oc.setRange(0,9999999999); self.oc.setDecimals(2); self.oc.setPrefix("¥ ")
+        self.od = NoScrollDoubleSpinBox(); self.od.setRange(0,9999999999); self.od.setDecimals(2); self.od.setPrefix("¥ ")
+        self.oc = NoScrollDoubleSpinBox(); self.oc.setRange(0,9999999999); self.oc.setDecimals(2); self.oc.setPrefix("¥ ")
         F.addRow("科目编号 *", self.code); F.addRow("科目名称 *", self.name)
         F.addRow("完整名称", self.full_name); F.addRow("科目类型", self.type_cb)
         F.addRow("余额方向", self.dir_cb); F.addRow("上级科目", self.parent_cb)
@@ -2955,6 +3058,8 @@ class ImportExcelDialog(QDialog):
         self.istack.addWidget(w)
 
     def _dl_voucher_template(self):
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
         path, _ = QFileDialog.getSaveFileName(self,"保存模板","凭证导入模板.xlsx","Excel(*.xlsx)")
         if not path: return
         wb = openpyxl.Workbook(); ws = wb.active; ws.title="凭证数据"
@@ -3040,8 +3145,8 @@ class ImportExcelDialog(QDialog):
                     if not acct_full: continue
                     parts = acct_full.split(" ", 1)
                     code = parts[0]; aname = parts[1] if len(parts)>1 else acct_full
-                    # Normalize code: replace _ and . separators
-                    code_norm = re.sub(r"[_]", ".", code)
+                    # Preserve auxiliary-account separators from source files.
+                    code_norm = code
                     try: d = float(row.iloc[3]) if row.iloc[3] else 0
                     except: d = 0
                     try: cr = float(row.iloc[4]) if row.iloc[4] else 0
@@ -3139,25 +3244,8 @@ class ImportExcelDialog(QDialog):
                 oc = float(str(row.iloc[4]).replace(",","")) if row.iloc[4] else 0
             except: oc = 0
 
-            # Determine account type from code prefix
-            prefix = code[:1]
-            # 6xxx: <6400=收入, >=6400=成本/费用
-            if prefix == "6":
-                if code[:4] < "6400":
-                    acct_type = "收入"; direction = "贷"
-                else:
-                    acct_type = "费用"; direction = "借"
-            elif prefix == "4":
-                # 4xxx: 部分软件的所有者权益科目（4001实收资本, 4103本年利润等）
-                if code[:4] >= "4200":
-                    acct_type = "所有者权益"; direction = "借"  # 库存股类
-                else:
-                    acct_type = "所有者权益"; direction = "贷"
-            else:
-                type_map = {"1":"资产","2":"负债","3":"所有者权益","5":"收入"}
-                direction_map = {"1":"借","2":"贷","3":"贷","5":"贷"}
-                acct_type = type_map.get(prefix, "资产")
-                direction  = direction_map.get(prefix, "借")
+            # Determine account type from code + name
+            acct_type, direction = infer_account_type_direction(code, name)
 
             # Compute level and parent from code (treat _ same as . for hierarchy)
             normalized = code.replace("_", ".")
@@ -4013,7 +4101,7 @@ class ReportPage(QWidget):
         oth_pay_y   = bal_ys(["2241"])
         cur_liab_y  = st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y+int_pay_y+div_pay_y+oth_pay_y
         lt_loan_y   = bal_ys(["2501"]); bonds_pay_y = bal_ys(["2502"])
-        lt_payable_y= bal_ys(["2601"]); est_liab_y  = bal_ys(["2701"])
+        lt_payable_y= bal_ys(["2701"]); est_liab_y  = bal_ys(["2801"])
         deferred_l_y= bal_ys(["2901"])
         noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y
         total_liab_y  = cur_liab_y + noncur_liab_y
@@ -4207,7 +4295,7 @@ class ReportPage(QWidget):
             inv_g    = g(["6111"])                       # 投资收益
             fv_g     = g(["6121"])                       # 公允价值变动
             asset_d  = g(["6301"])                       # 营业外收入（此处作资产处置收益）
-            op_profit = rev + cost_n + tax + sell + mgmt + rnd + fin_net + inv_g + fv_g
+            op_profit = rev - cost_n - tax - sell - mgmt - rnd + fin_net + inv_g + fv_g
             nop_inc   = g(["6301"])                      # 营业外收入
             nop_exp   = -g(["6711"])                     # 营业外支出
             tax_exp   = -g(["6801"])                     # 所得税费用
@@ -4218,7 +4306,7 @@ class ReportPage(QWidget):
             fin_y    = gy(["6603"]); inv_y = gy(["6111"])
             nop_y    = gy(["6301"]); nopx_y = -gy(["6711"])
             tax_y    = -gy(["6801"])
-            op_y     = rev_y + cost_y + (-gy(["6403"])) + sell_y + mgmt_y + fin_y + inv_y
+            op_y     = rev_y - cost_y - gy(["6403"]) - sell_y - mgmt_y + fin_y + inv_y
             net_y    = op_y + nop_y + nopx_y + tax_y
         else:
             # 5xxx科目体系（旧版/标准）
@@ -4717,6 +4805,9 @@ class ReportPage(QWidget):
 
     def _export_cf_stmt(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
         end_period = self.rep_end_period.currentData() or self.period
         path, _ = QFileDialog.getSaveFileName(self, "保存",
             f"现金流量表_{end_period}.xlsx", "Excel(*.xlsx)")
@@ -4829,6 +4920,8 @@ class ReportPage(QWidget):
 
     def _export(self):
         if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
         end_period = self.rep_end_period.currentData()
         if not end_period: return
         path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{end_period}.xlsx","Excel(*.xlsx)")
@@ -4855,9 +4948,9 @@ class ReportPage(QWidget):
             return total
         use_6 = bool(g("6001") or g("6401"))
         if use_6:
-            income = g("6001") + g("6002") + g("6051")
-            cost   = -g("6401") - g("6402")
-            ops    = income + cost - abs(g("6601")) - abs(g("6602")) + g("6603")
+            income = g("6001") + g("6051")
+            cost   = -(g("6401") + g("6402"))
+            ops    = income + cost - abs(g("6403")) - abs(g("6601")) - abs(g("6602")) + g("6603") - abs(g("6604"))
             net    = ops + g("6301") - abs(g("6711")) - abs(g("6801"))
         else:
             income = g("5001") + g("5051"); cost = -g("5401") - g("5402")
@@ -4984,6 +5077,8 @@ class AuditPage(QWidget):
         self.summary_bar.setText(f"  共 {len(rows)} 条记录")
 
     def _export(self):
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
         path,_ = QFileDialog.getSaveFileName(self,"保存审计报告",
             f"审计报告_{date.today()}.xlsx","Excel(*.xlsx)")
         if not path: return
