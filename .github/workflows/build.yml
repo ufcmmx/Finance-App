@@ -1,37 +1,38 @@
-name: 构建 Windows 智一会计
+name: Build Windows EXE
 
 on:
   push:
-    branches: [ "main" ]
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    branches: [ main ]
+  workflow_dispatch:   # 允许手动触发
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
 
     steps:
-    - name: 检出代码
+    - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: 设置 Python 3.12
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
-    - name: 安装依赖
+    - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install PySide6 openpyxl pandas xlrd pyinstaller
+        pip install pyinstaller pyside6 openpyxl pandas xlrd
 
-    - name: 执行 PyInstaller 打包 (包含图标)
-      # 这里加入了 --icon 参数指向你的图标文件
-      run: pyinstaller --noconsole --onefile --name "智一会计" --icon main.ico main.py
+    - name: Build EXE
+      run: |
+        pyinstaller --onefile --windowed ^
+          --name=智一会计 ^
+          --icon=main.ico ^
+          --add-data "pages;pages" ^
+          main.py
 
-    - name: 上传生成的 EXE 文件
+    - name: Upload EXE
       uses: actions/upload-artifact@v4
       with:
-        name: 智一会计-Windows版
+        name: 智一会计-Windows
         path: dist/智一会计.exe
         retention-days: 30
