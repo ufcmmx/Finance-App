@@ -25,9 +25,22 @@ jobs:
         python -m pip install --upgrade pip
         pip install PySide6 openpyxl pandas xlrd pyinstaller
 
-    - name: 执行 PyInstaller 打包 (包含图标)
-      # 这里加入了 --icon 参数指向你的图标文件
-      run: pyinstaller --noconsole --onefile --name "智一会计" --icon main.ico main.py
+    - name: 执行 PyInstaller 打包
+      run: >
+        pyinstaller
+        --noconsole
+        --onefile
+        --name "智一会计"
+        --icon main.ico
+        --add-data "pages;pages"
+        --hidden-import=pages.client
+        --hidden-import=pages.voucher
+        --hidden-import=pages.account
+        --hidden-import=pages.settle
+        --hidden-import=pages.report
+        --hidden-import=pages.audit
+        --hidden-import=pages.system
+        main.py
 
     - name: 上传生成的 EXE 文件
       uses: actions/upload-artifact@v4
