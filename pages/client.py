@@ -62,8 +62,7 @@ class ClientPage(QWidget):
                 it.setData(Qt.UserRole, r['id']); self.tbl.setItem(i,j,it)
             # Buttons
             bw = QWidget()
-            bw.setAutoFillBackground(True)
-            pal = bw.palette(); pal.setColor(QPalette.Window, QColor("#ffffff")); bw.setPalette(pal)
+            bw.setStyleSheet("QWidget { background:#ffffff; }")
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,4,8,4); bl.setSpacing(8)
             b1 = QPushButton("📂 进账簿"); b1.setObjectName("btn_primary")
             b1.setFixedSize(94, 30)

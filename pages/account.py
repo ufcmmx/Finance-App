@@ -108,10 +108,7 @@ class AccountPage(QWidget):
                 self.tbl.setItem(i,j,it)
 
             bw = QWidget()
-            bw.setAutoFillBackground(True)
-            pal = bw.palette()
-            pal.setColor(QPalette.Window, QColor("#ffffff"))
-            bw.setPalette(pal)
+            bw.setStyleSheet("QWidget { background:#ffffff; }")
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(12)
             
             # Button style to ensure text is visible on Windows
