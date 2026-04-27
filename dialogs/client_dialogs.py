@@ -125,6 +125,21 @@ class AccountInitDialog(QDialog):
             self.table.setCellWidget(i,3,cr_spin)
 
     def _save(self):
+        # 校验：期初借方合计 = 期初贷方合计
+        total_debit = 0.0
+        total_credit = 0.0
+        for i in range(len(self._ids)):
+            total_debit += self.table.cellWidget(i, 2).value()
+            total_credit += self.table.cellWidget(i, 3).value()
+        diff = abs(total_debit - total_credit)
+        if diff > 0.005:
+            QMessageBox.warning(self, "借贷不平衡",
+                f"期初借方合计与贷方合计不相等，无法保存。\n\n"
+                f"借方合计：{total_debit:,.2f}\n"
+                f"贷方合计：{total_credit:,.2f}\n"
+                f"差额：{diff:,.2f}\n\n"
+                f"请检查并修正后重新保存。")
+            return
         conn = get_db(); c = conn.cursor()
         for i,aid in enumerate(self._ids):
             d = self.table.cellWidget(i,2).value()
