@@ -417,6 +417,24 @@ class SettlePage(QWidget):
             QMessageBox.warning(self, "存在待审核凭证",
                 f"本期有 {pending} 张凭证尚未审核，请先全部审核通过后再执行结转。"); return
 
+        # 检查是否已存在结转凭证，如有则先删除再重新生成
+        c.execute("""SELECT id, voucher_no FROM vouchers
+            WHERE client_id=? AND period=? AND note IN ('结转收入','结转费用')""",
+                  (self.client_id, self.period))
+        old_carry = c.fetchall()
+        if old_carry:
+            old_nos = "、".join(r["voucher_no"] for r in old_carry)
+            reply = QMessageBox.question(self, "已存在结转凭证",
+                f"本期已有结转凭证：{old_nos}\n\n"
+                "是否删除旧结转凭证并重新生成？",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                conn.close(); return
+            for r in old_carry:
+                c.execute("DELETE FROM vouchers WHERE id=?", (r["id"],))
+            log_action(conn, self.client_id, "删除旧结转凭证", "settle", self.period,
+                       f"删除 {len(old_carry)} 张旧结转凭证: {old_nos}")
+
         def next_vno():
             c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=?",
                       (self.client_id, self.period))
