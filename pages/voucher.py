@@ -509,11 +509,11 @@ class VoucherPage(QWidget):
         wb.save(path); QMessageBox.information(self,"成功",f"已导出:\n{path}")
 
     def _export_voucher_pdf(self):
-        """导出记账凭证 PDF（A4 三版格式）"""
+        """导出记账凭证 PDF（A4 横版单凭证格式）"""
         if not self.client_id: return
 
         try:
-            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.pagesizes import A4, landscape
             from reportlab.pdfgen import canvas as rl_canvas
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -532,7 +532,7 @@ class VoucherPage(QWidget):
 
         period_text = (self.period or "").replace("-", "年", 1) + "期"
         path, _ = QFileDialog.getSaveFileName(
-            self, "保存记账凭证", f"记账凭证_A4三版_{period_text}.pdf", "PDF文件 (*.pdf)")
+            self, "保存记账凭证", f"记账凭证_A4横版_{period_text}.pdf", "PDF文件 (*.pdf)")
         if not path: return
 
         conn = get_db(); cur = conn.cursor()
@@ -550,11 +550,10 @@ class VoucherPage(QWidget):
             QMessageBox.information(self, "提示", "当前账期没有可导出的凭证")
             return
 
-        MAX_ROWS = 6        # 每个凭证版面最多显示的分录行数
-        SLOTS_PER_PAGE = 3  # 每页 A4 打印 3 张凭证
+        MAX_ROWS = 5
 
-        # ── 构建版面列表 ──
-        slots = []
+        # ── 构建分页后的凭证页列表 ──
+        pages = []
         for v in vouchers:
             cur.execute("""SELECT line_no, summary, account_code, account_name, debit, credit
                 FROM voucher_entries WHERE voucher_id=? ORDER BY line_no""", (v['id'],))
@@ -564,11 +563,11 @@ class VoucherPage(QWidget):
             chunks = [entries[i:i+MAX_ROWS] for i in range(0, max(len(entries), 1), MAX_ROWS)]
             if not chunks: chunks = [[]]
             for idx, chunk in enumerate(chunks):
-                slots.append(dict(
+                pages.append(dict(
                     voucher=dict(v),
                     entries=chunk,
-                    slot_no=idx + 1,
-                    total_slots=len(chunks),
+                    page_no=idx + 1,
+                    total_pages=len(chunks),
                     total_debit=total_debit,
                     total_credit=total_credit,
                     company=company_name,
@@ -576,120 +575,167 @@ class VoucherPage(QWidget):
         conn.close()
 
         # ── PDF 参数 ──
-        page_w, page_h = A4          # 595 x 842 pt
-        mg_x, mg_y = 25, 15
-        slot_w = page_w - 2 * mg_x
-        slot_h = (page_h - 2 * mg_y) / SLOTS_PER_PAGE
+        page_w, page_h = landscape(A4)
+        cv = rl_canvas.Canvas(path, pagesize=(page_w, page_h))
+        margin_left = 42
+        margin_right = 42
+        margin_top = 34
+        margin_bottom = 32
+        content_w = page_w - margin_left - margin_right
+        table_top = page_h - 170
+        table_bottom = margin_bottom + 42
+        table_h = table_top - table_bottom
 
-        cv = rl_canvas.Canvas(path, pagesize=A4)
+        def wrap_text(text, font_name, font_size, max_width, max_lines=2):
+            text = str(text or "").strip()
+            if not text:
+                return [""]
+            lines = []
+            current = ""
+            for ch in text:
+                probe = current + ch
+                if pdfmetrics.stringWidth(probe, font_name, font_size) <= max_width:
+                    current = probe
+                else:
+                    if current:
+                        lines.append(current)
+                    current = ch
+                    if len(lines) >= max_lines - 1:
+                        break
+            if len(lines) < max_lines and current:
+                lines.append(current)
+            leftover = text[len("".join(lines)):]
+            if leftover and lines:
+                tail = lines[-1]
+                while tail and pdfmetrics.stringWidth(tail + "…", font_name, font_size) > max_width:
+                    tail = tail[:-1]
+                lines[-1] = (tail or "") + "…"
+            return lines[:max_lines]
 
-        def draw_slot(sd, ox, oy):
-            """在 (ox, oy) 底部左角绘制一张凭证版面。"""
-            H_HDR   = 17   # 记账/制单栏
-            H_COL   = 16   # 列标题
-            H_SUM   = 17   # 合计栏
-            H_AUDIT = 15   # 审核栏
-            H_STAMP = 16   # 记账凭证/附单据数
-            H_FOOT  = 17   # 核算单位/日期/凭证号
-            fixed_h = H_HDR + H_COL + H_SUM + H_AUDIT + H_STAMP + H_FOOT
-            row_h   = (slot_h - fixed_h) / MAX_ROWS   # 动态行高撑满版面
-
-            # 列宽
-            cw = [slot_w * r for r in [0.27, 0.43, 0.15, 0.15]]
-            cx = [ox, ox + cw[0], ox + cw[0] + cw[1], ox + cw[0] + cw[1] + cw[2]]
-
-            cv.setStrokeColor(rl_colors.black)
-            cv.setLineWidth(0.4)
-
-            def cell(x, y, w, h, text='', fs=8, align='left'):
-                cv.rect(x, y, w, h)
-                if not text: return
-                cv.setFont(FONT, fs)
-                text = str(text)
-                base_y = y + h * 0.28
+        def draw_cell_text(x, y, w, h, text="", fs=10, align='left', bold=False, max_lines=2):
+            if not text:
+                return
+            font_name = FONT
+            cv.setFont(font_name, fs)
+            inner_w = max(w - 10, 20)
+            lines = wrap_text(text, font_name, fs, inner_w, max_lines=max_lines)
+            line_gap = fs + 2
+            total_h = line_gap * len(lines)
+            base_y = y + (h - total_h) / 2 + (len(lines) - 1) * line_gap
+            for idx, line in enumerate(lines):
+                line_y = base_y - idx * line_gap
                 if align == 'center':
-                    cv.drawCentredString(x + w / 2, base_y, text)
+                    cv.drawCentredString(x + w / 2, line_y, line)
                 elif align == 'right':
-                    cv.drawRightString(x + w - 3, base_y, text)
+                    cv.drawRightString(x + w - 8, line_y, line)
                 else:
-                    cv.drawString(x + 3, base_y, text)
+                    cv.drawString(x + 8, line_y, line)
 
-            cur_y = oy + slot_h   # 从顶部往下画
+        def draw_page(sd):
+            cv.setStrokeColor(rl_colors.black)
+            cv.setFillColor(rl_colors.black)
+            cv.setLineWidth(1)
 
-            # ① 记账 / 制单
-            cur_y -= H_HDR
-            preparer = sd['voucher'].get('preparer') or '未来'
-            cell(ox, cur_y, slot_w, H_HDR,
-                 f"记账：{preparer}    制单：{preparer}", fs=8)
+            # 顶部装订孔位
+            hole_y = page_h - 22
+            for hole_x in (page_w * 0.18, page_w * 0.5, page_w * 0.82):
+                cv.circle(hole_x, hole_y, 12, stroke=1, fill=0)
 
-            # ② 列标题
-            cur_y -= H_COL
-            for i, label in enumerate(["摘  要", "科  目", "借  方", "贷  方"]):
-                cell(cx[i], cur_y, cw[i], H_COL, label, fs=8, align='center')
+            # 标题区
+            cv.setFont(FONT, 20)
+            cv.drawCentredString(page_w / 2, page_h - 88, "记账凭证")
 
-            # ③ 分录行（固定 MAX_ROWS 行，空行留白）
-            entries = sd['entries']
-            for j in range(MAX_ROWS):
-                cur_y -= row_h
-                if j < len(entries):
-                    e = entries[j]
-                    summary  = (e['summary'] or '')[:14]
-                    code     = e['account_code'] or ''
-                    name     = e['account_name'] or ''
-                    acct     = f"{code} {name}"
-                    if len(acct) > 26: acct = acct[:26]
-                    dbt = e['debit']  or 0
-                    crd = e['credit'] or 0
-                    cell(cx[0], cur_y, cw[0], row_h, summary, fs=7)
-                    cell(cx[1], cur_y, cw[1], row_h, acct,    fs=7)
-                    cell(cx[2], cur_y, cw[2], row_h,
-                         fmt_amt(dbt) if dbt else '', fs=7, align='right')
-                    cell(cx[3], cur_y, cw[3], row_h,
-                         fmt_amt(crd) if crd else '', fs=7, align='right')
-                else:
-                    for i in range(4):
-                        cv.rect(cx[i], cur_y, cw[i], row_h)
-
-            # ④ 合计行（大写 + 数字）
-            cur_y -= H_SUM
-            td = sd['total_debit']; tc = sd['total_credit']
-            summary_col_w = cw[0] + cw[1]
-            cv.rect(ox, cur_y, summary_col_w, H_SUM)
-            cv.setFont(FONT, 7.5)
-            cv.drawString(ox + 3, cur_y + H_SUM * 0.28,
-                          f"合计：{cn_amount(td) if td else '零元整'}")
-            cell(cx[2], cur_y, cw[2], H_SUM,
-                 fmt_amt(td) if td else '', fs=7.5, align='right')
-            cell(cx[3], cur_y, cw[3], H_SUM,
-                 fmt_amt(tc) if tc else '', fs=7.5, align='right')
-
-            # ⑤ 审核
-            cur_y -= H_AUDIT
-            cell(ox, cur_y, slot_w, H_AUDIT, "审核：", fs=8)
-
-            # ⑥ 记账凭证 / 附单据数
-            cur_y -= H_STAMP
             attach = sd['voucher'].get('attachment_count') or 0
-            cell(ox, cur_y, slot_w, H_STAMP,
-                 f"记账凭证          附单据数：{attach} 张", fs=8)
+            cv.setFont(FONT, 11)
+            cv.drawRightString(page_w - margin_right, page_h - 86, f"附单据数：{attach}")
 
-            # ⑦ 核算单位 / 日期 / 凭证号
-            cur_y -= H_FOOT
+            company_y = page_h - 136
+            date_y = company_y
+            no_y = company_y
+            cv.setFont(FONT, 11)
+            cv.drawString(margin_left, company_y, f"核算单位：{sd['company']}")
+            cv.drawCentredString(page_w / 2, date_y, f"日期：{sd['voucher']['date']}")
             vno = sd['voucher']['voucher_no']
-            date = sd['voucher']['date']
-            sn = sd['slot_no']; ts = sd['total_slots']
-            vno_str = f"{vno} ({sn}/{ts})" if ts > 1 else vno
-            cell(ox, cur_y, slot_w, H_FOOT,
-                 f"核算单位：{sd['company']}    日期：{date}    凭证号：{vno_str}",
-                 fs=8)
+            page_no = sd['page_no']
+            total_pages = sd['total_pages']
+            vno_text = f"{vno}（{page_no}/{total_pages}）" if total_pages > 1 else vno
+            cv.drawRightString(page_w - margin_right, no_y, f"凭证号： {vno_text}")
+
+            # 主表格
+            col_widths = [content_w * ratio for ratio in (0.30, 0.40, 0.15, 0.15)]
+            col_x = [margin_left]
+            for width in col_widths[:-1]:
+                col_x.append(col_x[-1] + width)
+            header_h = 52
+            total_h_row = 48
+            body_h = table_h - header_h - total_h_row
+            row_h = body_h / MAX_ROWS
+            y_header_bottom = table_top - header_h
+
+            cv.rect(margin_left, table_bottom, content_w, table_h, stroke=1, fill=0)
+            x_cursor = margin_left
+            for width in col_widths[:-1]:
+                x_cursor += width
+                cv.line(x_cursor, table_bottom, x_cursor, table_top)
+
+            cv.line(margin_left, y_header_bottom, margin_left + content_w, y_header_bottom)
+            for row_idx in range(MAX_ROWS - 1):
+                y_line = y_header_bottom - (row_idx + 1) * row_h
+                cv.line(margin_left, y_line, margin_left + content_w, y_line)
+            cv.line(margin_left, table_bottom + total_h_row, margin_left + content_w, table_bottom + total_h_row)
+
+            headers = ["摘要", "科目", "借方", "贷方"]
+            for idx, title in enumerate(headers):
+                draw_cell_text(col_x[idx], y_header_bottom, col_widths[idx], header_h,
+                               title, fs=14, align='center', max_lines=1)
+
+            entries = sd['entries']
+            for idx in range(MAX_ROWS):
+                row_bottom = table_bottom + total_h_row + (MAX_ROWS - 1 - idx) * row_h
+                if idx >= len(entries):
+                    continue
+                entry = entries[idx]
+                account_text = " ".join(
+                    part for part in [entry['account_code'] or '', entry['account_name'] or ''] if part
+                )
+                draw_cell_text(col_x[0], row_bottom, col_widths[0], row_h,
+                               entry['summary'] or '', fs=11, align='left', max_lines=2)
+                draw_cell_text(col_x[1], row_bottom, col_widths[1], row_h,
+                               account_text, fs=10, align='left', max_lines=2)
+                draw_cell_text(col_x[2], row_bottom, col_widths[2], row_h,
+                               fmt_amt(entry['debit']) if entry['debit'] else '',
+                               fs=11, align='right', max_lines=1)
+                draw_cell_text(col_x[3], row_bottom, col_widths[3], row_h,
+                               fmt_amt(entry['credit']) if entry['credit'] else '',
+                               fs=11, align='right', max_lines=1)
+
+            td = sd['total_debit']
+            tc = sd['total_credit']
+            amount_cn = cn_amount(td) if td else "零元整"
+            draw_cell_text(margin_left, table_bottom, col_widths[0] + col_widths[1], total_h_row,
+                           f"合计： {amount_cn}", fs=12, align='left', max_lines=1)
+            draw_cell_text(col_x[2], table_bottom, col_widths[2], total_h_row,
+                           fmt_amt(td) if td else "0.00", fs=12, align='right', max_lines=1)
+            draw_cell_text(col_x[3], table_bottom, col_widths[3], total_h_row,
+                           fmt_amt(tc) if tc else "0.00", fs=12, align='right', max_lines=1)
+
+            # 底部签字区与裁切线
+            preparer = sd['voucher'].get('preparer') or ""
+            footer_y = margin_bottom + 10
+            cv.setFont(FONT, 11)
+            cv.drawString(margin_left, footer_y, f"记账：{preparer}")
+            cv.drawCentredString(page_w / 2, footer_y, "审核：")
+            cv.drawString(page_w * 0.62, footer_y, f"制单：{preparer}")
+
+            cv.setDash(1, 2)
+            cv.line(0, 6, page_w, 6)
+            cv.setDash()
 
         # ── 分页输出 ──
-        for i, slot in enumerate(slots):
-            page_slot = i % SLOTS_PER_PAGE
-            if page_slot == 0 and i > 0:
+        for idx, page in enumerate(pages):
+            if idx > 0:
                 cv.showPage()
-            slot_bottom = mg_y + (SLOTS_PER_PAGE - 1 - page_slot) * slot_h
-            draw_slot(slot, mg_x, slot_bottom)
+            draw_page(page)
 
         cv.save()
         QMessageBox.information(self, "成功", f"已导出记账凭证 PDF：\n{path}")
