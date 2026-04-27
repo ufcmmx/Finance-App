@@ -108,7 +108,7 @@ class AccountPage(QWidget):
                 self.tbl.setItem(i,j,it)
 
             bw = QWidget()
-            bw.setStyleSheet("QWidget { background:#ffffff; }")
+            bw.setObjectName("btnRow"); bw.setStyleSheet("#btnRow { background:#ffffff; }")
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(12)
             
             # Button style to ensure text is visible on Windows
@@ -126,7 +126,7 @@ class AccountPage(QWidget):
             b_sub = QPushButton("＋ 子科目")
             b_sub.setMinimumWidth(110); b_sub.setMaximumWidth(120); b_sub.setStyleSheet(outline_style)
             b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
-            b_ed = QPushButton("✏ 编辑")
+            b_ed = QPushButton("编辑")
             b_ed.setMinimumWidth(90); b_ed.setMaximumWidth(100); b_ed.setStyleSheet(outline_style)
             b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
             bl.addWidget(b_sub); bl.addWidget(b_ed)
@@ -135,14 +135,14 @@ class AccountPage(QWidget):
                 is_used = r['code'] in used_accounts
                 if is_used:
                     # Account has been used, show freeze button instead of delete
-                    b_freeze = QPushButton("❄ 冻结")
+                    b_freeze = QPushButton("冻结")
                     b_freeze.setMinimumWidth(90); b_freeze.setMaximumWidth(100); b_freeze.setStyleSheet(outline_style)
                     b_freeze.setToolTip("冻结此科目，不再允许使用")
                     b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
                     bl.addWidget(b_freeze)
                 else:
                     # Account not used, show delete button
-                    b_del = QPushButton("🗑 删除")
+                    b_del = QPushButton("删除")
                     b_del.setMinimumWidth(90); b_del.setMaximumWidth(100); b_del.setStyleSheet(red_style)
                     b_del.setToolTip("删除此科目")
                     b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))

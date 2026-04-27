@@ -26,7 +26,7 @@ class SystemPage(QWidget):
             "备份会将当前数据库完整复制到你指定的位置，建议定期备份到云盘或移动硬盘。",
             color="#666"))
         row1 = QHBoxLayout(); row1.setSpacing(12)
-        b_backup = QPushButton("📦 立即备份"); b_backup.setObjectName("btn_primary")
+        b_backup = QPushButton("立即备份"); b_backup.setObjectName("btn_primary")
         b_backup.setFixedWidth(140); b_backup.clicked.connect(self._backup)
         row1.addWidget(b_backup); row1.addStretch()
         g1.addLayout(row1)
@@ -42,7 +42,7 @@ class SystemPage(QWidget):
         warn.setStyleSheet("background:#fff7e6;color:#d46b08;border-radius:6px;padding:8px 12px;font-size:12px;")
         warn.setWordWrap(True); g2.addWidget(warn)
         row2 = QHBoxLayout(); row2.setSpacing(12)
-        b_restore = QPushButton("📂 从备份文件恢复"); b_restore.setObjectName("btn_red")
+        b_restore = QPushButton("从备份文件恢复"); b_restore.setObjectName("btn_red")
         b_restore.setFixedWidth(180); b_restore.clicked.connect(self._restore)
         row2.addWidget(b_restore); row2.addStretch()
         g2.addLayout(row2)

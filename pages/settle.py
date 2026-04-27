@@ -45,9 +45,9 @@ class SettlePage(QWidget):
         self.status_lbl = lbl("", bold=True)   # 显示已结账/未结账状态
         self.do_btn = QPushButton("生成结转凭证"); self.do_btn.setObjectName("btn_primary")
         self.do_btn.clicked.connect(self._do_carryforward)
-        self.close_btn = QPushButton("🔒 结账封账"); self.close_btn.setObjectName("btn_primary")
+        self.close_btn = QPushButton("结账封账"); self.close_btn.setObjectName("btn_primary")
         self.close_btn.clicked.connect(self._close_period)
-        self.reopen_btn = QPushButton("🔓 反结账"); self.reopen_btn.setObjectName("btn_red")
+        self.reopen_btn = QPushButton("反结账"); self.reopen_btn.setObjectName("btn_red")
         self.reopen_btn.clicked.connect(self._reopen_period)
         pr.addWidget(lbl("结账期间：")); pr.addWidget(self.period_combo)
         pr.addSpacing(10); pr.addWidget(self.client_lbl)
