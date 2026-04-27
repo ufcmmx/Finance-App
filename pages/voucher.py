@@ -106,7 +106,7 @@ class VoucherPage(QWidget):
         is_closed = bool(row and row["is_closed"])
         c.execute("""SELECT v.id,v.voucher_no,v.date,v.status,
             (SELECT summary FROM voucher_entries WHERE voucher_id=v.id ORDER BY line_no LIMIT 1) as summ,
-            (SELECT group_concat(account_name,'/') FROM voucher_entries WHERE voucher_id=v.id) as accts,
+            (SELECT group_concat(account_code || ' ' || account_name,'/') FROM voucher_entries WHERE voucher_id=v.id) as accts,
             (SELECT SUM(debit) FROM voucher_entries WHERE voucher_id=v.id) as td,
             (SELECT SUM(credit) FROM voucher_entries WHERE voucher_id=v.id) as tc
             FROM vouchers v WHERE v.client_id=? AND v.period=? ORDER BY v.voucher_no""",
@@ -695,9 +695,13 @@ class VoucherPage(QWidget):
             # ── 再画网格线（在背景之上） ──
             cv.rect(margin_left, table_bottom, content_w, table_h, stroke=1, fill=0)
             x_cursor = margin_left
-            for width in col_widths[:-1]:
+            for col_idx, width in enumerate(col_widths[:-1]):
                 x_cursor += width
-                cv.line(x_cursor, table_bottom, x_cursor, table_top)
+                if col_idx == 0:
+                    # 第一根竖线：合计行不画（让合计文字跨两列）
+                    cv.line(x_cursor, table_bottom + total_h_row, x_cursor, table_top)
+                else:
+                    cv.line(x_cursor, table_bottom, x_cursor, table_top)
 
             cv.line(margin_left, y_header_bottom, margin_left + content_w, y_header_bottom)
             for row_idx in range(MAX_ROWS - 1):
