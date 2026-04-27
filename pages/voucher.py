@@ -517,18 +517,36 @@ class VoucherPage(QWidget):
             from reportlab.pdfgen import canvas as rl_canvas
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            from reportlab.pdfbase.ttfonts import TTFont
             from reportlab.lib import colors as rl_colors
         except ImportError:
             QMessageBox.warning(self, "缺少依赖",
                 "导出PDF需要安装 reportlab 库。\n\n请在终端运行：\npip install reportlab\n\n安装后重启程序。")
             return
 
-        try:
-            pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
-            FONT = 'STSong-Light'
-        except Exception as e:
-            QMessageBox.warning(self, "字体错误", f"无法加载中文字体：{e}")
-            return
+        # 优先使用系统 TTF 字体（间距正常），CID 字体作为兜底
+        FONT = None
+        ttf_candidates = [
+            ('SongtiSC', '/System/Library/Fonts/Supplemental/Songti.ttc', 0),
+            ('PingFangSC', '/System/Library/Fonts/PingFang.ttc', 0),
+            ('STHeitiSC', '/System/Library/Fonts/STHeiti Light.ttc', 0),
+        ]
+        for font_name, font_path, sub_idx in ttf_candidates:
+            try:
+                import os
+                if os.path.exists(font_path):
+                    pdfmetrics.registerFont(TTFont(font_name, font_path, subfontIndex=sub_idx))
+                    FONT = font_name
+                    break
+            except Exception:
+                continue
+        if not FONT:
+            try:
+                pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+                FONT = 'STSong-Light'
+            except Exception as e:
+                QMessageBox.warning(self, "字体错误", f"无法加载中文字体：{e}")
+                return
 
         period_text = (self.period or "").replace("-", "年", 1) + "期"
         path, _ = QFileDialog.getSaveFileName(
@@ -627,7 +645,7 @@ class VoucherPage(QWidget):
                 if align == 'center':
                     cv.drawCentredString(x + w / 2, line_y, line)
                 elif align == 'right':
-                    cv.drawRightString(x + w - 8, line_y, line)
+                    cv.drawRightString(x + w - 14, line_y, line)
                 else:
                     cv.drawString(x + 8, line_y, line)
 
@@ -636,10 +654,6 @@ class VoucherPage(QWidget):
             cv.setFillColor(rl_colors.black)
             cv.setLineWidth(1)
 
-            # 顶部装订孔位
-            hole_y = page_h - 22
-            for hole_x in (page_w * 0.18, page_w * 0.5, page_w * 0.82):
-                cv.circle(hole_x, hole_y, 12, stroke=1, fill=0)
 
             # 标题区
             cv.setFont(FONT, 20)
@@ -662,7 +676,7 @@ class VoucherPage(QWidget):
             cv.drawRightString(page_w - margin_right, no_y, f"凭证号： {vno_text}")
 
             # 主表格
-            col_widths = [content_w * ratio for ratio in (0.30, 0.40, 0.15, 0.15)]
+            col_widths = [content_w * ratio for ratio in (0.28, 0.36, 0.18, 0.18)]
             col_x = [margin_left]
             for width in col_widths[:-1]:
                 col_x.append(col_x[-1] + width)
@@ -672,6 +686,13 @@ class VoucherPage(QWidget):
             row_h = body_h / MAX_ROWS
             y_header_bottom = table_top - header_h
 
+            # ── 先画背景填充（在网格线之下） ──
+            cv.setFillColor(rl_colors.Color(0.92, 0.93, 0.95))
+            cv.rect(margin_left, y_header_bottom, content_w, header_h, stroke=0, fill=1)   # 表头背景
+            cv.rect(margin_left, table_bottom, content_w, total_h_row, stroke=0, fill=1)    # 合计行背景
+            cv.setFillColor(rl_colors.black)
+
+            # ── 再画网格线（在背景之上） ──
             cv.rect(margin_left, table_bottom, content_w, table_h, stroke=1, fill=0)
             x_cursor = margin_left
             for width in col_widths[:-1]:
@@ -684,10 +705,7 @@ class VoucherPage(QWidget):
                 cv.line(margin_left, y_line, margin_left + content_w, y_line)
             cv.line(margin_left, table_bottom + total_h_row, margin_left + content_w, table_bottom + total_h_row)
 
-            # ── 表头行：浅灰底 + 加粗 ──
-            cv.setFillColor(rl_colors.Color(0.92, 0.93, 0.95))  # 浅灰背景
-            cv.rect(margin_left, y_header_bottom, content_w, header_h, stroke=0, fill=1)
-            cv.setFillColor(rl_colors.black)
+            # ── 表头文字 ──
             headers = ["摘要", "科目", "借方", "贷方"]
             for idx, title in enumerate(headers):
                 draw_cell_text(col_x[idx], y_header_bottom, col_widths[idx], header_h,
@@ -716,10 +734,7 @@ class VoucherPage(QWidget):
             td = sd['total_debit']
             tc = sd['total_credit']
             amount_cn = cn_amount(td) if td else "零元整"
-            # ── 合计行：浅灰底 + 加粗 ──
-            cv.setFillColor(rl_colors.Color(0.92, 0.93, 0.95))  # 浅灰背景
-            cv.rect(margin_left, table_bottom, content_w, total_h_row, stroke=0, fill=1)
-            cv.setFillColor(rl_colors.black)
+            # ── 合计行文字 ──
             draw_cell_text(margin_left, table_bottom, col_widths[0] + col_widths[1], total_h_row,
                            f"合计： {amount_cn}", fs=14, align='left', bold=True, max_lines=1)
             draw_cell_text(col_x[2], table_bottom, col_widths[2], total_h_row,
@@ -735,9 +750,6 @@ class VoucherPage(QWidget):
             cv.drawString(page_w * 0.36, footer_y, "审核：")
             cv.drawString(page_w * 0.54, footer_y, f"制单：{preparer}")
 
-            cv.setDash(1, 2)
-            cv.line(0, 6, page_w, 6)
-            cv.setDash()
 
         # ── 分页输出 ──
         for idx, page in enumerate(pages):
