@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
 from db import get_db, log_action
-from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
+from utils import lbl, sep, card, fmt_amt, cn_amount, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import VoucherDialog, AccountInitDialog, AuxPage
 # openpyxl imported lazily inside each export function
 
@@ -70,8 +70,8 @@ class VoucherPage(QWidget):
         hdr.addStretch()
         b_new = QPushButton("＋ 新增凭证"); b_new.setObjectName("btn_primary")
         b_new.clicked.connect(self._new_voucher)
-        b_exp_doc = QPushButton("导出记账凭证"); b_exp_doc.setObjectName("btn_outline")
-        b_exp_doc.clicked.connect(self._export_voucher_docs)
+        b_exp_doc = QPushButton("导出记账凭证(PDF)"); b_exp_doc.setObjectName("btn_outline")
+        b_exp_doc.clicked.connect(self._export_voucher_pdf)
         b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
         b_exp.clicked.connect(self._export_vouchers)
         hdr.addWidget(b_exp_doc); hdr.addWidget(b_exp); hdr.addWidget(b_new); L.addLayout(hdr)
@@ -508,116 +508,192 @@ class VoucherPage(QWidget):
             ws.column_dimensions[col[0].column_letter].width=16
         wb.save(path); QMessageBox.information(self,"成功",f"已导出:\n{path}")
 
-    def _export_voucher_docs(self):
+    def _export_voucher_pdf(self):
+        """导出记账凭证 PDF（A4 三版格式）"""
         if not self.client_id: return
-        import openpyxl
-        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas as rl_canvas
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            from reportlab.lib import colors as rl_colors
+        except ImportError:
+            QMessageBox.warning(self, "缺少依赖",
+                "导出PDF需要安装 reportlab 库。\n\n请在终端运行：\npip install reportlab\n\n安装后重启程序。")
+            return
+
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+            FONT = 'STSong-Light'
+        except Exception as e:
+            QMessageBox.warning(self, "字体错误", f"无法加载中文字体：{e}")
+            return
 
         period_text = (self.period or "").replace("-", "年", 1) + "期"
-        path,_ = QFileDialog.getSaveFileName(
-            self, "保存", f"记账凭证({period_text}).xlsx", "Excel(*.xlsx)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存记账凭证", f"记账凭证_A4三版_{period_text}.pdf", "PDF文件 (*.pdf)")
         if not path: return
 
-        conn = get_db(); c = conn.cursor()
-        c.execute("""SELECT id,voucher_no,date,status,attachment_count
-            FROM vouchers
-            WHERE client_id=? AND period=?
-            ORDER BY date,voucher_no,id""",
-            (self.client_id, self.period))
-        vouchers = c.fetchall()
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT name FROM clients WHERE id=?", (self.client_id,))
+        row = cur.fetchone()
+        company_name = row['name'] if row else ''
+
+        cur.execute("""SELECT id, voucher_no, date, status, attachment_count, preparer
+            FROM vouchers WHERE client_id=? AND period=?
+            ORDER BY date, voucher_no, id""", (self.client_id, self.period))
+        vouchers = cur.fetchall()
+
         if not vouchers:
             conn.close()
             QMessageBox.information(self, "提示", "当前账期没有可导出的凭证")
             return
 
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "记账凭证"
+        MAX_ROWS = 6        # 每个凭证版面最多显示的分录行数
+        SLOTS_PER_PAGE = 3  # 每页 A4 打印 3 张凭证
 
-        title_fill = PatternFill("solid", fgColor="1C2340")
-        sub_fill = PatternFill("solid", fgColor="EEF3FF")
-        head_fill = PatternFill("solid", fgColor="F5F7FA")
-        thin = Side(style="thin", color="D9D9D9")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        money_fmt = '#,##0.00'
-
-        ws.merge_cells("B1:E1")
-        ws["B1"] = f"{period_text} 记账凭证"
-        ws["B1"].font = XFont(bold=True, color="FFFFFF", size=14)
-        ws["B1"].fill = title_fill
-        ws["B1"].alignment = Alignment(horizontal="center", vertical="center")
-        ws.row_dimensions[1].height = 26
-
-        row_idx = 3
+        # ── 构建版面列表 ──
+        slots = []
         for v in vouchers:
-            c.execute("""SELECT line_no,summary,account_code,account_name,debit,credit
-                FROM voucher_entries
-                WHERE voucher_id=?
-                ORDER BY line_no""", (v["id"],))
-            entries = c.fetchall()
-            if not entries:
-                continue
-
-            ws.cell(row_idx, 2, f"日期:{v['date']}    凭证字号:{v['voucher_no']}")
-            ws.cell(row_idx, 2).font = XFont(bold=True)
-            ws.cell(row_idx, 2).fill = sub_fill
-            ws.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="center")
-            for col in range(2, 6):
-                ws.cell(row_idx, col).border = border
-                if col > 2:
-                    ws.cell(row_idx, col).fill = sub_fill
-            row_idx += 1
-
-            headers = ["摘要", "科目", "借方金额", "贷方金额"]
-            for ci, text in enumerate(headers, start=2):
-                cell = ws.cell(row_idx, ci, text)
-                cell.font = XFont(bold=True)
-                cell.fill = head_fill
-                cell.border = border
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-            row_idx += 1
-
-            for ent in entries:
-                ws.cell(row_idx, 2, ent["summary"] or "")
-                ws.cell(row_idx, 3, f"{ent['account_code'] or ''} {ent['account_name'] or ''}".strip())
-                ws.cell(row_idx, 4, ent["debit"] or 0)
-                ws.cell(row_idx, 5, ent["credit"] or 0)
-                ws.cell(row_idx, 4).number_format = money_fmt
-                ws.cell(row_idx, 5).number_format = money_fmt
-                for col in range(2, 6):
-                    ws.cell(row_idx, col).border = border
-                    ws.cell(row_idx, col).alignment = Alignment(vertical="center")
-                row_idx += 1
-
-            total_debit = sum((ent["debit"] or 0) for ent in entries)
-            total_credit = sum((ent["credit"] or 0) for ent in entries)
-            ws.cell(row_idx, 2, "合计：")
-            ws.cell(row_idx, 4, total_debit)
-            ws.cell(row_idx, 5, total_credit)
-            ws.cell(row_idx, 4).number_format = money_fmt
-            ws.cell(row_idx, 5).number_format = money_fmt
-            for col in range(2, 6):
-                ws.cell(row_idx, col).border = border
-                ws.cell(row_idx, col).fill = sub_fill
-                ws.cell(row_idx, col).font = XFont(bold=True)
-            row_idx += 1
-
-            ws.cell(row_idx, 2, f"附单据 {v['attachment_count'] or 0} 张")
-            ws.cell(row_idx, 2).font = XFont(bold=True)
-            ws.cell(row_idx, 2).alignment = Alignment(horizontal="left", vertical="center")
-            for col in range(2, 6):
-                ws.cell(row_idx, col).border = border
-            row_idx += 2
-
-        ws.column_dimensions["A"].width = 4
-        ws.column_dimensions["B"].width = 28
-        ws.column_dimensions["C"].width = 36
-        ws.column_dimensions["D"].width = 14
-        ws.column_dimensions["E"].width = 14
-
+            cur.execute("""SELECT line_no, summary, account_code, account_name, debit, credit
+                FROM voucher_entries WHERE voucher_id=? ORDER BY line_no""", (v['id'],))
+            entries = list(cur.fetchall())
+            total_debit  = sum(e['debit']  or 0 for e in entries)
+            total_credit = sum(e['credit'] or 0 for e in entries)
+            chunks = [entries[i:i+MAX_ROWS] for i in range(0, max(len(entries), 1), MAX_ROWS)]
+            if not chunks: chunks = [[]]
+            for idx, chunk in enumerate(chunks):
+                slots.append(dict(
+                    voucher=dict(v),
+                    entries=chunk,
+                    slot_no=idx + 1,
+                    total_slots=len(chunks),
+                    total_debit=total_debit,
+                    total_credit=total_credit,
+                    company=company_name,
+                ))
         conn.close()
-        wb.save(path)
-        QMessageBox.information(self, "成功", f"已导出:\n{path}")
+
+        # ── PDF 参数 ──
+        page_w, page_h = A4          # 595 x 842 pt
+        mg_x, mg_y = 25, 15
+        slot_w = page_w - 2 * mg_x
+        slot_h = (page_h - 2 * mg_y) / SLOTS_PER_PAGE
+
+        cv = rl_canvas.Canvas(path, pagesize=A4)
+
+        def draw_slot(sd, ox, oy):
+            """在 (ox, oy) 底部左角绘制一张凭证版面。"""
+            H_HDR   = 17   # 记账/制单栏
+            H_COL   = 16   # 列标题
+            H_SUM   = 17   # 合计栏
+            H_AUDIT = 15   # 审核栏
+            H_STAMP = 16   # 记账凭证/附单据数
+            H_FOOT  = 17   # 核算单位/日期/凭证号
+            fixed_h = H_HDR + H_COL + H_SUM + H_AUDIT + H_STAMP + H_FOOT
+            row_h   = (slot_h - fixed_h) / MAX_ROWS   # 动态行高撑满版面
+
+            # 列宽
+            cw = [slot_w * r for r in [0.27, 0.43, 0.15, 0.15]]
+            cx = [ox, ox + cw[0], ox + cw[0] + cw[1], ox + cw[0] + cw[1] + cw[2]]
+
+            cv.setStrokeColor(rl_colors.black)
+            cv.setLineWidth(0.4)
+
+            def cell(x, y, w, h, text='', fs=8, align='left'):
+                cv.rect(x, y, w, h)
+                if not text: return
+                cv.setFont(FONT, fs)
+                text = str(text)
+                base_y = y + h * 0.28
+                if align == 'center':
+                    cv.drawCentredString(x + w / 2, base_y, text)
+                elif align == 'right':
+                    cv.drawRightString(x + w - 3, base_y, text)
+                else:
+                    cv.drawString(x + 3, base_y, text)
+
+            cur_y = oy + slot_h   # 从顶部往下画
+
+            # ① 记账 / 制单
+            cur_y -= H_HDR
+            preparer = sd['voucher'].get('preparer') or '未来'
+            cell(ox, cur_y, slot_w, H_HDR,
+                 f"记账：{preparer}    制单：{preparer}", fs=8)
+
+            # ② 列标题
+            cur_y -= H_COL
+            for i, label in enumerate(["摘  要", "科  目", "借  方", "贷  方"]):
+                cell(cx[i], cur_y, cw[i], H_COL, label, fs=8, align='center')
+
+            # ③ 分录行（固定 MAX_ROWS 行，空行留白）
+            entries = sd['entries']
+            for j in range(MAX_ROWS):
+                cur_y -= row_h
+                if j < len(entries):
+                    e = entries[j]
+                    summary  = (e['summary'] or '')[:14]
+                    code     = e['account_code'] or ''
+                    name     = e['account_name'] or ''
+                    acct     = f"{code} {name}"
+                    if len(acct) > 26: acct = acct[:26]
+                    dbt = e['debit']  or 0
+                    crd = e['credit'] or 0
+                    cell(cx[0], cur_y, cw[0], row_h, summary, fs=7)
+                    cell(cx[1], cur_y, cw[1], row_h, acct,    fs=7)
+                    cell(cx[2], cur_y, cw[2], row_h,
+                         fmt_amt(dbt) if dbt else '', fs=7, align='right')
+                    cell(cx[3], cur_y, cw[3], row_h,
+                         fmt_amt(crd) if crd else '', fs=7, align='right')
+                else:
+                    for i in range(4):
+                        cv.rect(cx[i], cur_y, cw[i], row_h)
+
+            # ④ 合计行（大写 + 数字）
+            cur_y -= H_SUM
+            td = sd['total_debit']; tc = sd['total_credit']
+            summary_col_w = cw[0] + cw[1]
+            cv.rect(ox, cur_y, summary_col_w, H_SUM)
+            cv.setFont(FONT, 7.5)
+            cv.drawString(ox + 3, cur_y + H_SUM * 0.28,
+                          f"合计：{cn_amount(td) if td else '零元整'}")
+            cell(cx[2], cur_y, cw[2], H_SUM,
+                 fmt_amt(td) if td else '', fs=7.5, align='right')
+            cell(cx[3], cur_y, cw[3], H_SUM,
+                 fmt_amt(tc) if tc else '', fs=7.5, align='right')
+
+            # ⑤ 审核
+            cur_y -= H_AUDIT
+            cell(ox, cur_y, slot_w, H_AUDIT, "审核：", fs=8)
+
+            # ⑥ 记账凭证 / 附单据数
+            cur_y -= H_STAMP
+            attach = sd['voucher'].get('attachment_count') or 0
+            cell(ox, cur_y, slot_w, H_STAMP,
+                 f"记账凭证          附单据数：{attach} 张", fs=8)
+
+            # ⑦ 核算单位 / 日期 / 凭证号
+            cur_y -= H_FOOT
+            vno = sd['voucher']['voucher_no']
+            date = sd['voucher']['date']
+            sn = sd['slot_no']; ts = sd['total_slots']
+            vno_str = f"{vno} ({sn}/{ts})" if ts > 1 else vno
+            cell(ox, cur_y, slot_w, H_FOOT,
+                 f"核算单位：{sd['company']}    日期：{date}    凭证号：{vno_str}",
+                 fs=8)
+
+        # ── 分页输出 ──
+        for i, slot in enumerate(slots):
+            page_slot = i % SLOTS_PER_PAGE
+            if page_slot == 0 and i > 0:
+                cv.showPage()
+            slot_bottom = mg_y + (SLOTS_PER_PAGE - 1 - page_slot) * slot_h
+            draw_slot(slot, mg_x, slot_bottom)
+
+        cv.save()
+        QMessageBox.information(self, "成功", f"已导出记账凭证 PDF：\n{path}")
+
 
     def _export_balance(self):
         if not self.client_id: return
@@ -649,6 +725,3 @@ class VoucherPage(QWidget):
             ws.append([code,a['name'],od,oc,td,tc,end_d,end_c])
         for col in ws.columns: ws.column_dimensions[col[0].column_letter].width=14
         wb.save(path); QMessageBox.information(self,"成功",f"已导出:\n{path}")
-
-
-

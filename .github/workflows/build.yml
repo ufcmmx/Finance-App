@@ -24,7 +24,7 @@ jobs:
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
-        pip install PySide6 openpyxl pandas xlrd pyinstaller
+        pip install PySide6 openpyxl pandas xlrd reportlab pyinstaller
 
     - name: 执行 PyInstaller 打包
       run: pyinstaller --noconsole --onefile --name "智一会计" --icon main.ico --add-data "pages;pages" --add-data "dialogs;dialogs" --hidden-import=pages.client --hidden-import=pages.voucher --hidden-import=pages.account --hidden-import=pages.settle --hidden-import=pages.report --hidden-import=pages.audit --hidden-import=pages.system --hidden-import=dialogs.client_dialogs --hidden-import=dialogs.voucher_dialogs --hidden-import=dialogs.import_dialogs --hidden-import=dialogs.account_dialogs main.py
