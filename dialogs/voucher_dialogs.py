@@ -546,13 +546,19 @@ class AuxPage(QWidget):
 
         # ── 左栏：维度列表 ──
         left = QWidget(); left.setFixedWidth(200)
-        left.setStyleSheet("background:#f7f9fc; border-right:1px solid #e8ecf2;")
+        left.setStyleSheet("QWidget#aux_left_panel{background:#f7f9fc; border-right:1px solid #e8ecf2;}")
+        left.setObjectName("aux_left_panel")
         ll = QVBoxLayout(left); ll.setContentsMargins(0,0,0,0); ll.setSpacing(0)
-        hdr_l = QWidget(); hdr_l.setStyleSheet("background:#fff; border-bottom:1px solid #eee;")
+        hdr_l = QWidget(); hdr_l.setObjectName("aux_dim_hdr")
+        hdr_l.setStyleSheet("QWidget#aux_dim_hdr{background:#fff; border-bottom:1px solid #eee;}")
         hl = QHBoxLayout(hdr_l); hl.setContentsMargins(12,10,8,10)
         hl.addWidget(lbl("核算维度", bold=True)); hl.addStretch()
-        b_adddim = QPushButton("＋"); b_adddim.setObjectName("btn_primary")
-        b_adddim.setFixedSize(28,28); b_adddim.setToolTip("新增维度")
+        b_adddim = QPushButton("+ 新增")
+        b_adddim.setFixedHeight(28)
+        b_adddim.setStyleSheet(
+            "QPushButton{background:#3d6fdb;color:white;border:none;border-radius:6px;"
+            "font-size:12px;font-weight:bold;padding:0 10px;}"
+            "QPushButton:hover{background:#2d5dc8;}")
         b_adddim.clicked.connect(self._add_dim)
         hl.addWidget(b_adddim); ll.addWidget(hdr_l)
 
@@ -779,7 +785,7 @@ class AuxPage(QWidget):
             bw = QWidget(); bl = QHBoxLayout(bw); bl.setContentsMargins(4,3,4,3); bl.setSpacing(4)
             b_ed = QPushButton("编辑"); b_ed.setObjectName("btn_outline"); b_ed.setFixedSize(64,26)
             b_ed.clicked.connect(lambda _, rr=r: self._edit_item(rr))
-            b_dl = QPushButton("删除"); b_dl.setObjectName("btn_red"); b_dl.setFixedSize(30,26)
+            b_dl = QPushButton("删除"); b_dl.setObjectName("btn_red"); b_dl.setFixedSize(64,26)
             b_dl.clicked.connect(lambda _, rid=r["id"]: self._del_item(rid))
             bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
             self.item_tbl.setCellWidget(i, 4, bw)

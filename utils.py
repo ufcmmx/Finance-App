@@ -61,6 +61,9 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
 QScrollBar:horizontal { height:5px; background:transparent; }
 QScrollBar::handle:horizontal { background:#dde1ea; border-radius:2px; }
 QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal { width:0; }
+/* Tooltips */
+QToolTip { background:#fff; color:#333; border:1px solid #d9d9d9;
+    border-radius:5px; padding:4px 8px; font-size:12px; }
 """
 
 def lbl(text, bold=False, color=None, size=None):
