@@ -684,10 +684,14 @@ class VoucherPage(QWidget):
                 cv.line(margin_left, y_line, margin_left + content_w, y_line)
             cv.line(margin_left, table_bottom + total_h_row, margin_left + content_w, table_bottom + total_h_row)
 
+            # ── 表头行：浅灰底 + 加粗 ──
+            cv.setFillColor(rl_colors.Color(0.92, 0.93, 0.95))  # 浅灰背景
+            cv.rect(margin_left, y_header_bottom, content_w, header_h, stroke=0, fill=1)
+            cv.setFillColor(rl_colors.black)
             headers = ["摘要", "科目", "借方", "贷方"]
             for idx, title in enumerate(headers):
                 draw_cell_text(col_x[idx], y_header_bottom, col_widths[idx], header_h,
-                               title, fs=14, align='center', max_lines=1)
+                               title, fs=16, align='center', bold=True, max_lines=1)
 
             entries = sd['entries']
             for idx in range(MAX_ROWS):
@@ -699,33 +703,37 @@ class VoucherPage(QWidget):
                     part for part in [entry['account_code'] or '', entry['account_name'] or ''] if part
                 )
                 draw_cell_text(col_x[0], row_bottom, col_widths[0], row_h,
-                               entry['summary'] or '', fs=11, align='left', max_lines=2)
+                               entry['summary'] or '', fs=12, align='left', max_lines=2)
                 draw_cell_text(col_x[1], row_bottom, col_widths[1], row_h,
-                               account_text, fs=10, align='left', max_lines=2)
+                               account_text, fs=12, align='left', max_lines=2)
                 draw_cell_text(col_x[2], row_bottom, col_widths[2], row_h,
                                fmt_amt(entry['debit']) if entry['debit'] else '',
-                               fs=11, align='right', max_lines=1)
+                               fs=12, align='right', max_lines=1)
                 draw_cell_text(col_x[3], row_bottom, col_widths[3], row_h,
                                fmt_amt(entry['credit']) if entry['credit'] else '',
-                               fs=11, align='right', max_lines=1)
+                               fs=12, align='right', max_lines=1)
 
             td = sd['total_debit']
             tc = sd['total_credit']
             amount_cn = cn_amount(td) if td else "零元整"
+            # ── 合计行：浅灰底 + 加粗 ──
+            cv.setFillColor(rl_colors.Color(0.92, 0.93, 0.95))  # 浅灰背景
+            cv.rect(margin_left, table_bottom, content_w, total_h_row, stroke=0, fill=1)
+            cv.setFillColor(rl_colors.black)
             draw_cell_text(margin_left, table_bottom, col_widths[0] + col_widths[1], total_h_row,
-                           f"合计： {amount_cn}", fs=12, align='left', max_lines=1)
+                           f"合计： {amount_cn}", fs=14, align='left', bold=True, max_lines=1)
             draw_cell_text(col_x[2], table_bottom, col_widths[2], total_h_row,
-                           fmt_amt(td) if td else "0.00", fs=12, align='right', max_lines=1)
+                           fmt_amt(td) if td else "0.00", fs=14, align='right', bold=True, max_lines=1)
             draw_cell_text(col_x[3], table_bottom, col_widths[3], total_h_row,
-                           fmt_amt(tc) if tc else "0.00", fs=12, align='right', max_lines=1)
+                           fmt_amt(tc) if tc else "0.00", fs=14, align='right', bold=True, max_lines=1)
 
             # 底部签字区与裁切线
             preparer = sd['voucher'].get('preparer') or ""
             footer_y = margin_bottom + 10
-            cv.setFont(FONT, 11)
+            cv.setFont(FONT, 12)
             cv.drawString(margin_left, footer_y, f"记账：{preparer}")
-            cv.drawCentredString(page_w / 2, footer_y, "审核：")
-            cv.drawString(page_w * 0.62, footer_y, f"制单：{preparer}")
+            cv.drawString(page_w * 0.36, footer_y, "审核：")
+            cv.drawString(page_w * 0.54, footer_y, f"制单：{preparer}")
 
             cv.setDash(1, 2)
             cv.line(0, 6, page_w, 6)

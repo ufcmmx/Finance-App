@@ -354,6 +354,7 @@ class ReportPage(QWidget):
             c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period"""+period_filter+""" AND v.status='已审核'
+                AND e.summary NOT LIKE '结转本期损益%'
                 GROUP BY e.account_code""", (self.client_id,))
             return {r[0]: r[1] or 0 for r in c.fetchall()}
 
@@ -377,54 +378,30 @@ class ReportPage(QWidget):
             return total
         def gy(codes): return g(codes, ytd)
 
-        # Try 6xxx first, fall back to 5xxx
-        use_6xxx = bool(g(["6001","6002","6401","6601","6602"]))
-
-        if use_6xxx:
-            # 6xxx科目体系（用友/金蝶新版）
-            rev      = g(["6001","6002","6051"])         # 主营+其他业务收入（贷方余额为正）
-            cost_n   = -g(["6401","6402"])               # 主营+其他业务成本（借方为正，取负得正数成本）
-            tax      = -g(["6403"])                      # 税金及附加
-            sell     = -g(["6601"])                      # 销售费用
-            mgmt     = -g(["6602"])                      # 管理费用
-            rnd      = -g(["6604"])                      # 研发费用
-            fin_net  = g(["6603"])                       # 财务费用净额（正=净收益，负=净支出）
-            inv_g    = g(["6111"])                       # 投资收益
-            fv_g     = g(["6121"])                       # 公允价值变动
-            asset_d  = g(["6301"])                       # 营业外收入（此处作资产处置收益）
-            op_profit = rev - cost_n - tax - sell - mgmt - rnd + fin_net + inv_g + fv_g
-            nop_inc   = g(["6301"])                      # 营业外收入
-            nop_exp   = -g(["6711"])                     # 营业外支出
-            tax_exp   = -g(["6801"])                     # 所得税费用
-            # YTD
-            rev_y    = gy(["6001","6002","6051"])
-            cost_y   = -gy(["6401","6402"])
-            sell_y   = -gy(["6601"]); mgmt_y = -gy(["6602"])
-            fin_y    = gy(["6603"]); inv_y = gy(["6111"])
-            nop_y    = gy(["6301"]); nopx_y = -gy(["6711"])
-            tax_y    = -gy(["6801"])
-            op_y     = rev_y - cost_y - gy(["6403"]) - sell_y - mgmt_y + fin_y + inv_y
-            net_y    = op_y + nop_y + nopx_y + tax_y
-        else:
-            # 5xxx科目体系（旧版/标准）
-            rev      = g(["5001","5051"])
-            cost_n   = -g(["5401","5402"])
-            tax      = -g(["5403"])
-            sell     = -g(["5501"])
-            mgmt     = -g(["5502"])
-            rnd      = 0
-            fin_net  = g(["5503"])
-            inv_g    = g(["5111"])
-            fv_g     = g(["5121"])
-            asset_d  = 0
-            op_profit = rev + cost_n + tax + sell + mgmt + fin_net + inv_g + fv_g
-            nop_inc   = g(["5301"])
-            nop_exp   = -g(["5601"])
-            tax_exp   = -g(["5701"])
-            rev_y    = gy(["5001","5051"])
-            cost_y   = -gy(["5401"])
-            op_y     = rev_y + cost_y - abs(gy(["5501"])) - abs(gy(["5502"])) + gy(["5111"])
-            net_y    = op_y + gy(["5301"]) - abs(gy(["5601"])) - abs(gy(["5701"]))
+        # 6xxx科目体系
+        rev      = g(["6001","6002","6051"])         # 主营+其他业务收入（贷方余额为正）
+        cost_n   = -g(["6401","6402"])               # 主营+其他业务成本（借方为正，取负得正数成本）
+        tax      = -g(["6403"])                      # 税金及附加
+        sell     = -g(["6601"])                      # 销售费用
+        mgmt     = -g(["6602"])                      # 管理费用
+        rnd      = -g(["6604"])                      # 研发费用
+        fin_net  = g(["6603"])                       # 财务费用净额（正=净收益，负=净支出）
+        inv_g    = g(["6111"])                       # 投资收益
+        fv_g     = g(["6121"])                       # 公允价值变动
+        asset_d  = g(["6301"])                       # 营业外收入（此处作资产处置收益）
+        op_profit = rev - cost_n - tax - sell - mgmt - rnd + fin_net + inv_g + fv_g
+        nop_inc   = g(["6301"])                      # 营业外收入
+        nop_exp   = -g(["6711"])                     # 营业外支出
+        tax_exp   = -g(["6801"])                     # 所得税费用
+        # YTD
+        rev_y    = gy(["6001","6002","6051"])
+        cost_y   = -gy(["6401","6402"])
+        sell_y   = -gy(["6601"]); mgmt_y = -gy(["6602"])
+        fin_y    = gy(["6603"]); inv_y = gy(["6111"])
+        nop_y    = gy(["6301"]); nopx_y = -gy(["6711"])
+        tax_y    = -gy(["6801"])
+        op_y     = rev_y - cost_y - gy(["6403"]) - sell_y - mgmt_y + fin_y + inv_y
+        net_y    = op_y + nop_y + nopx_y + tax_y
 
         total_profit = op_profit + nop_inc + nop_exp
         net_profit   = total_profit + tax_exp
@@ -433,18 +410,18 @@ class ReportPage(QWidget):
             ("一、营业收入",           "1",  rev,           rev_y,    True),
             ("  减：营业成本",          "2",  cost_n,        cost_y,   False),
             ("      税金及附加",        "3",  tax,           0,        False),
-            ("      销售费用",          "4",  sell,          sell_y if use_6xxx else 0, False),
-            ("      管理费用",          "5",  mgmt,          mgmt_y if use_6xxx else 0, False),
+            ("      销售费用",          "4",  sell,          sell_y, False),
+            ("      管理费用",          "5",  mgmt,          mgmt_y, False),
             ("      研发费用",          "6",  rnd,           0,        False),
-            ("  加：财务费用（收益以-号填列）","7", fin_net, fin_y if use_6xxx else 0, False),
-            ("      投资收益",          "8",  inv_g,         inv_y if use_6xxx else 0, False),
+            ("  加：财务费用（收益以-号填列）","7", fin_net, fin_y, False),
+            ("      投资收益",          "8",  inv_g,         inv_y, False),
             ("      公允价值变动收益",   "9",  fv_g,          0,        False),
             ("      资产处置收益",       "9a", asset_d,       0,        False),
             ("二、营业利润（亏损）",     "10", op_profit,     op_y,     True),
-            ("  加：营业外收入",         "11", nop_inc,       nop_y if use_6xxx else 0, False),
-            ("  减：营业外支出",         "12", nop_exp,       nopx_y if use_6xxx else 0, False),
+            ("  加：营业外收入",         "11", nop_inc,       nop_y, False),
+            ("  减：营业外支出",         "12", nop_exp,       nopx_y, False),
             ("三、利润总额（亏损总额）", "13", total_profit,  0,        True),
-            ("  减：所得税费用",         "14", tax_exp,       tax_y if use_6xxx else 0, False),
+            ("  减：所得税费用",         "14", tax_exp,       tax_y, False),
             ("四、净利润（净亏损）",     "15", net_profit,    net_y,    True),
             ("  其中：归属于母公司股东的净利润","16", net_profit, 0, False),
             ("        少数股东损益",    "17", 0,             0,        False),
@@ -656,15 +633,14 @@ class ReportPage(QWidget):
                         p = code[:4]
                         # Revenue accounts → 销售商品收到现金
                         if (code.startswith('6001') or code.startswith('6002') or
-                            code.startswith('6051') or code.startswith('5001') or
-                            code.startswith('5051') or code.startswith('1122') or
+                            code.startswith('6051') or code.startswith('1122') or
                             code.startswith('2203')):
                             add('r1', amt)
                         elif code.startswith('2221') or code.startswith('1321'):
                             add('r2', amt)  # 税费返还
-                        elif code.startswith('6301') or code.startswith('5301'):
+                        elif code.startswith('6301'):
                             add('r3', amt)  # 其他经营收入
-                        elif (code.startswith('6111') or code.startswith('5111') or
+                        elif (code.startswith('6111') or
                               code.startswith('1511') or code.startswith('1521') or
                               code.startswith('1131') or code.startswith('1132')):
                             add('r12', amt)  # 取得投资收益
@@ -684,8 +660,7 @@ class ReportPage(QWidget):
                         if amt <= 0: continue
                         if (code.startswith('1403') or code.startswith('1401') or
                             code.startswith('1405') or code.startswith('6401') or
-                            code.startswith('6402') or code.startswith('5401') or
-                            code.startswith('5402') or code.startswith('2202') or
+                            code.startswith('6402') or code.startswith('2202') or
                             code.startswith('1221')):
                             add('r5', amt)   # 购买商品
                         elif code.startswith('2211'):
@@ -693,8 +668,7 @@ class ReportPage(QWidget):
                         elif code.startswith('2221') or code.startswith('2231'):
                             add('r7', amt)   # 支付税费
                         elif (code.startswith('6601') or code.startswith('6602') or
-                              code.startswith('6603') or code.startswith('5501') or
-                              code.startswith('5502') or code.startswith('5503') or
+                              code.startswith('6603') or
                               code.startswith('2241') or code.startswith('1461')):
                             add('r8', amt)   # 其他经营支出
                         elif (code.startswith('1601') or code.startswith('1604') or
@@ -776,15 +750,9 @@ class ReportPage(QWidget):
         conn.close()
 
         def net_profit(mv):
-            use6 = any(k.startswith('6') for k in mv)
-            if use6:
-                rev  = sum(v for k,v in mv.items() if k[:4]<'6400' and k[0]=='6')
-                cost = -sum(v for k,v in mv.items() if k[:4]>='6400' and k[0]=='6')
-                return rev + cost
-            else:
-                rev  = sum(v for k,v in mv.items() if k[0]=='5' and k[:4]<'5400')
-                cost = -sum(v for k,v in mv.items() if k[0]=='5' and k[:4]>='5400')
-                return rev + cost
+            rev  = sum(v for k,v in mv.items() if k[:4]<'6400' and k[0]=='6')
+            cost = -sum(v for k,v in mv.items() if k[:4]>='6400' and k[0]=='6')
+            return rev + cost
 
         np_cur = net_profit(mv_cur)
         np_ytd = net_profit(mv_ytd)
@@ -1034,7 +1002,9 @@ class ReportPage(QWidget):
             QMessageBox.warning(self, "错误", "请选择报告期间")
             return
         c.execute("""SELECT e.account_code,SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
-            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period>=? AND v.period<=? GROUP BY e.account_code""",
+            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period>=? AND v.period<=?
+            AND v.status='已审核' AND e.summary NOT LIKE '结转本期损益%'
+            GROUP BY e.account_code""",
                   (self.client_id, start_period, end_period))
         cur = {r[0]:r[1] or 0 for r in c.fetchall()}
         def g(code):
@@ -1043,16 +1013,10 @@ class ReportPage(QWidget):
                 if k == code or k.startswith(code+".") or k.startswith(code+"_"):
                     total += (v or 0)
             return total
-        use_6 = bool(g("6001") or g("6401"))
-        if use_6:
-            income = g("6001") + g("6051")
-            cost   = -(g("6401") + g("6402"))
-            ops    = income + cost - abs(g("6403")) - abs(g("6601")) - abs(g("6602")) + g("6603") - abs(g("6604"))
-            net    = ops + g("6301") - abs(g("6711")) - abs(g("6801"))
-        else:
-            income = g("5001") + g("5051"); cost = -g("5401") - g("5402")
-            ops    = income + cost - abs(g("5501")) - abs(g("5502")) + g("5503")
-            net    = ops + g("5301") - abs(g("5601")) - abs(g("5701"))
+        income = g("6001") + g("6051")
+        cost   = -(g("6401") + g("6402"))
+        ops    = income + cost - abs(g("6403")) - abs(g("6601")) - abs(g("6602")) + g("6603") - abs(g("6604"))
+        net    = ops + g("6301") - abs(g("6711")) - abs(g("6801"))
         ws.append(["营业收入","1",income,""]); ws.append(["营业成本","2",cost,""])
         ws.append(["营业利润","10",ops,""])
         ws.append(["净利润","17",net,""])

@@ -66,7 +66,7 @@ class SettlePage(QWidget):
 
         # ── New: period activity summary table ──
         L.addWidget(lbl("本期收入/费用科目发生额（仅显示已审核凭证）", bold=True, size=13))
-        hint = QLabel("  结转的前提：凭证中需要有 5001-5899 或 6001-6899 收入/费用科目，且凭证状态为【已审核】。")
+        hint = QLabel("  结转的前提：凭证中需要有 6001-6899 收入/费用科目，且凭证状态为【已审核】。")
         hint.setStyleSheet("color:#ad6800;background:#fffbe6;border-radius:5px;padding:6px 10px;font-size:12px;")
         L.addWidget(hint)
         f = card(); vl2 = QVBoxLayout(f); vl2.setContentsMargins(0,0,0,0)
@@ -331,14 +331,13 @@ class SettlePage(QWidget):
         c.execute("""SELECT SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND ((e.account_code >= '5001' AND e.account_code < '5400')
-              OR (e.account_code >= '6001' AND e.account_code < '6400'))""",
+            AND (e.account_code >= '6001' AND e.account_code < '6400')""",
                   (self.client_id, self.period))
         income = c.fetchone()[0] or 0
         c.execute("""SELECT SUM(e.debit)-SUM(e.credit) FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND (e.account_code >= '5401' OR (e.account_code >= '6400' AND e.account_code < '7000'))""",
+            AND (e.account_code >= '6400' AND e.account_code < '7000')""",
                   (self.client_id, self.period))
         expense = c.fetchone()[0] or 0
         conn.close()
@@ -352,13 +351,12 @@ class SettlePage(QWidget):
         conn = get_db(); c = conn.cursor()
         # All income+expense accounts with any activity, approved vouchers only
         c.execute("""SELECT e.account_code, e.account_name,
-            CASE WHEN (e.account_code >= '5001' AND e.account_code < '5400')
-                   OR (e.account_code >= '6001' AND e.account_code < '6400')
+            CASE WHEN (e.account_code >= '6001' AND e.account_code < '6400')
                  THEN '收入' ELSE '费用' END as cat,
             SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND (e.account_code >= '5001' OR (e.account_code >= '6001' AND e.account_code < '7000'))
+            AND (e.account_code >= '6001' AND e.account_code < '7000')
             GROUP BY e.account_code ORDER BY e.account_code""",
                   (self.client_id, self.period))
         rows = c.fetchall()
@@ -372,7 +370,7 @@ class SettlePage(QWidget):
         self.activity_tbl.setRowCount(len(rows))
         if not rows:
             self.activity_tbl.setRowCount(1)
-            msg = f"本期已审核凭证中无收入/费用科目（5001-5899 或 6001-6899）发生额。"
+            msg = f"本期已审核凭证中无收入/费用科目（6001-6899）发生额。"
             if pending:
                 msg += f"  ⚠ 有 {pending} 张凭证【待审核】，请先审核后再结转。"
             it = QTableWidgetItem(msg)
@@ -437,8 +435,7 @@ class SettlePage(QWidget):
                 SUM(e.credit)-SUM(e.debit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
-                AND ((e.account_code >= '5001' AND e.account_code < '5400')
-                  OR (e.account_code >= '6001' AND e.account_code < '6400'))
+                AND (e.account_code >= '6001' AND e.account_code < '6400')
                 GROUP BY e.account_code,e.account_name HAVING net>0.005""",
                 (self.client_id, self.period))
             income_rows = c.fetchall()
@@ -462,8 +459,7 @@ class SettlePage(QWidget):
                 SUM(e.debit)-SUM(e.credit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
-                AND (e.account_code >= '5401'
-                  OR (e.account_code >= '6400' AND e.account_code < '7000'))
+                AND (e.account_code >= '6400' AND e.account_code < '7000')
                 GROUP BY e.account_code,e.account_name HAVING net>0.005""",
                 (self.client_id, self.period))
             expense_rows = c.fetchall()
