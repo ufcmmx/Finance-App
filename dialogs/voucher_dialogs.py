@@ -50,6 +50,13 @@ class VoucherDialog(QDialog):
         for row in c.fetchall():
             self._aux_items.setdefault(row["dimension_id"], []).append(
                 {"id": row["id"], "name": row["name"], "code": row["code"] or ""})
+        # 建立非末级科目集合（有子科目的父科目，不允许直接录入凭证）
+        all_codes = {a['code'] for a in r}
+        self._parent_codes = set()
+        for code in all_codes:
+            parts = code.split('.')
+            for depth in range(1, len(parts)):
+                self._parent_codes.add('.'.join(parts[:depth]))
         conn.close(); return r
 
     def _build(self):
@@ -427,6 +434,42 @@ class VoucherDialog(QDialog):
             entries.append((i, sw.text().strip() if sw else "", code, aname, d, cr, aux_sel))
 
         if not entries: QMessageBox.warning(self,"提示","请至少填写一行分录"); return
+
+        # ── 校验一：同行借贷方不能同时有值 ──
+        for i, sw, code, aname, d, cr, aux_sel in entries:
+            if d > 0.005 and cr > 0.005:
+                QMessageBox.warning(self, "录入错误",
+                    f"第{i+1}行【{code} {aname}】借方和贷方不能同时有金额。\n"
+                    "请将其拆分为两行，或清空其中一方。")
+                return
+
+        # ── 校验二：只允许录入末级科目 ──
+        parent_codes = getattr(self, '_parent_codes', set())
+        for i, sw, code, aname, d, cr, aux_sel in entries:
+            if code in parent_codes:
+                # Find any child code to show as hint
+                children = [a['code'] for a in self._accounts
+                            if a['code'].startswith(code + '.')]
+                hint = f"\n例如应使用子科目：{children[0]}" if children else ""
+                QMessageBox.warning(self, "科目层级错误",
+                    f"第{i+1}行【{code} {aname}】下设有子科目，不能直接使用父科目录凭证。"
+                    f"请选择最末级科目。{hint}")
+                return
+
+        # ── 校验三：绑定辅助核算的科目必须选择核算对象 ──
+        for i, sw, code, aname, d, cr, aux_sel in entries:
+            required_dims = self._aux_config.get(code, [])
+            if not required_dims:
+                continue
+            selected_dim_ids = {dim_id for dim_id, _, _ in aux_sel}
+            missing = [dim['dim_name'] for dim in required_dims
+                       if dim['dim_id'] not in selected_dim_ids]
+            if missing:
+                QMessageBox.warning(self, "辅助核算未填写",
+                    f"第{i+1}行【{code} {aname}】已绑定辅助核算，"
+                    f"以下核算对象必须填写：\n\n" + "\n".join(f"· {m}" for m in missing))
+                return
+
         td = sum(e[4] for e in entries); tc = sum(e[5] for e in entries)
         if abs(td-tc) > 0.005:
             QMessageBox.warning(self,"借贷不平",f"借方合计 {td:.2f} ≠ 贷方合计 {tc:.2f}\n请检查金额"); return
@@ -546,19 +589,13 @@ class AuxPage(QWidget):
 
         # ── 左栏：维度列表 ──
         left = QWidget(); left.setFixedWidth(200)
-        left.setStyleSheet("QWidget#aux_left_panel{background:#f7f9fc; border-right:1px solid #e8ecf2;}")
-        left.setObjectName("aux_left_panel")
+        left.setStyleSheet("background:#f7f9fc; border-right:1px solid #e8ecf2;")
         ll = QVBoxLayout(left); ll.setContentsMargins(0,0,0,0); ll.setSpacing(0)
-        hdr_l = QWidget(); hdr_l.setObjectName("aux_dim_hdr")
-        hdr_l.setStyleSheet("QWidget#aux_dim_hdr{background:#fff; border-bottom:1px solid #eee;}")
+        hdr_l = QWidget(); hdr_l.setStyleSheet("background:#fff; border-bottom:1px solid #eee;")
         hl = QHBoxLayout(hdr_l); hl.setContentsMargins(12,10,8,10)
         hl.addWidget(lbl("核算维度", bold=True)); hl.addStretch()
-        b_adddim = QPushButton("+ 新增")
-        b_adddim.setFixedHeight(28)
-        b_adddim.setStyleSheet(
-            "QPushButton{background:#3d6fdb;color:white;border:none;border-radius:6px;"
-            "font-size:12px;font-weight:bold;padding:0 10px;}"
-            "QPushButton:hover{background:#2d5dc8;}")
+        b_adddim = QPushButton("＋"); b_adddim.setObjectName("btn_primary")
+        b_adddim.setFixedSize(28,28); b_adddim.setToolTip("新增维度")
         b_adddim.clicked.connect(self._add_dim)
         hl.addWidget(b_adddim); ll.addWidget(hdr_l)
 
@@ -785,7 +822,7 @@ class AuxPage(QWidget):
             bw = QWidget(); bl = QHBoxLayout(bw); bl.setContentsMargins(4,3,4,3); bl.setSpacing(4)
             b_ed = QPushButton("编辑"); b_ed.setObjectName("btn_outline"); b_ed.setFixedSize(64,26)
             b_ed.clicked.connect(lambda _, rr=r: self._edit_item(rr))
-            b_dl = QPushButton("删除"); b_dl.setObjectName("btn_red"); b_dl.setFixedSize(64,26)
+            b_dl = QPushButton("删除"); b_dl.setObjectName("btn_red"); b_dl.setFixedSize(30,26)
             b_dl.clicked.connect(lambda _, rid=r["id"]: self._del_item(rid))
             bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
             self.item_tbl.setCellWidget(i, 4, bw)
@@ -950,5 +987,3 @@ class AuxPage(QWidget):
             conn.execute("DELETE FROM account_aux_config WHERE client_id=? AND account_code=? AND dimension_id=?",
                          (self.client_id, code, self._cur_dim_id))
             conn.commit(); conn.close(); self._load_bindings()
-
-

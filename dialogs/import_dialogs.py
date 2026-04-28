@@ -419,6 +419,7 @@ class ImportAccountSetDialog(QDialog):
         import re
         df = self._read_df(self._files["balance"])
         ok = err = 0
+        aux_bindings = []   # 收集 (parent_code, dim_name) 用于创建辅助核算
         for ri in range(len(df)):
             row = df.iloc[ri]
             code = str(row.iloc[1]).strip()
@@ -446,10 +447,52 @@ class ImportAccountSetDialog(QDialog):
                     direction,parent_code,level,opening_debit,opening_credit)
                     VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (self._client_id,code,name,name,atype,direction,parent,level,od,oc))
+            # 检测辅助核算：科目编码含 _ 且下划线后面是中文维度名（如 1122_客户）
+            if "_" in code:
+                parts = code.split("_", 1)
+                parent_code = parts[0]
+                dim_name = parts[1]
+                # 维度名应为非数字的有意义文字
+                if dim_name and not dim_name.isdigit():
+                    aux_bindings.append((parent_code, dim_name))
             ok += 1
             if ok <= 5 or ok % 30 == 0:
                 self._log(f"  {code}  {name}  借={od:.2f}  贷={oc:.2f}")
         self._log(f"  → 处理科目 {ok} 个")
+
+        # 自动创建辅助核算维度 & 绑定
+        if aux_bindings:
+            # 去重：(parent_code, dim_name) → 同一维度只建一次
+            unique_dims = {}  # dim_name -> set of parent_codes
+            for parent_code, dim_name in aux_bindings:
+                unique_dims.setdefault(dim_name, set()).add(parent_code)
+
+            dim_count = bind_count = 0
+            for dim_name, parent_codes in unique_dims.items():
+                # 创建维度（如果不存在）
+                c.execute("SELECT id FROM aux_dimensions WHERE client_id=? AND name=?",
+                          (self._client_id, dim_name))
+                row = c.fetchone()
+                if row:
+                    dim_id = row[0]
+                else:
+                    c.execute("INSERT INTO aux_dimensions(client_id,name) VALUES(?,?)",
+                              (self._client_id, dim_name))
+                    dim_id = c.lastrowid
+                    dim_count += 1
+
+                # 为每个父级科目创建绑定
+                for pc in sorted(parent_codes):
+                    c.execute("SELECT id FROM account_aux_config WHERE client_id=? AND account_code=? AND dimension_id=?",
+                              (self._client_id, pc, dim_id))
+                    if not c.fetchone():
+                        c.execute("INSERT INTO account_aux_config(client_id,account_code,dimension_id) VALUES(?,?,?)",
+                                  (self._client_id, pc, dim_id))
+                        bind_count += 1
+
+            if dim_count or bind_count:
+                self._log(f"  → 自动创建辅助核算维度 {dim_count} 个，绑定科目 {bind_count} 个")
+
         return ok, err
 
     # ── 记账凭证 ──
