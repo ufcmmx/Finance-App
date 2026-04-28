@@ -63,17 +63,19 @@ class ClientDialog(QDialog):
 
 
 class AccountInitDialog(QDialog):
-    """科目期初设置"""
+    """科目期初设置 — 只允许编辑末级科目，保存后自动汇总到上级科目"""
     def __init__(self, parent, client_id, period):
         super().__init__(parent)
         self.client_id = client_id; self.period = period
-        self.setWindowTitle("科目期初余额"); self.setMinimumSize(680, 500)
+        self.setWindowTitle("科目期初余额"); self.setMinimumSize(680, 520)
         self._build()
 
     def _build(self):
         L = QVBoxLayout(self); L.setContentsMargins(16,16,16,16); L.setSpacing(10)
         L.addWidget(lbl("科目期初余额设置", bold=True, size=14))
-        L.addWidget(lbl(f"期间：{self.period}  （仅显示末级科目）", color="#888"))
+        hint = QLabel("  只需填写末级科目期初余额，保存时自动汇总到上级科目。上级科目显示为灰色，不可直接编辑。")
+        hint.setStyleSheet("background:#f6f8ff;color:#444;border-radius:5px;padding:6px 10px;font-size:12px;")
+        hint.setWordWrap(True); L.addWidget(hint)
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["科目编号","科目名称","期初借方","期初贷方"])
@@ -93,23 +95,61 @@ class AccountInitDialog(QDialog):
         bs.clicked.connect(self._save); bc.clicked.connect(self.accept)
         row.addWidget(bc); row.addWidget(bs); L.addLayout(row)
 
+    @staticmethod
+    def _rollup(acct_map):
+        """从末级科目向上累加期初余额，返回 {code: (debit, credit)} 汇总字典。"""
+        totals = {code: [a['opening_debit'] or 0, a['opening_credit'] or 0]
+                  for code, a in acct_map.items()}
+        all_codes = set(acct_map.keys())
+        # Identify leaf codes (no child exists)
+        leaf_codes = {c for c in all_codes
+                      if not any(o != c and (o.startswith(c+'.')) for o in all_codes)}
+        # Zero out parent codes so we start fresh from leaves
+        for code in all_codes - leaf_codes:
+            totals[code] = [0.0, 0.0]
+        # Bubble up: for every leaf, add to each ancestor
+        for code in leaf_codes:
+            parts = code.split('.')
+            d, cr = totals[code]
+            for depth in range(1, len(parts)):
+                parent = '.'.join(parts[:depth])
+                if parent in totals:
+                    totals[parent][0] += d
+                    totals[parent][1] += cr
+        return totals
+
     def _load(self):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT id,code,name,opening_debit,opening_credit FROM accounts WHERE client_id=? ORDER BY code",
                   (self.client_id,))
         rows = c.fetchall(); conn.close()
+
+        # Build maps
+        all_codes = {r['code'] for r in rows}
+        leaf_codes = {c for c in all_codes
+                      if not any(o != c and o.startswith(c+'.') for o in all_codes)}
+
         self.table.setRowCount(len(rows))
-        self._ids = []
-        for i,r in enumerate(rows):
-            self.table.setRowHeight(i, 40)          # 行高足够容纳输入框
+        self._ids = []; self._leaf_flags = []
+        for i, r in enumerate(rows):
+            self.table.setRowHeight(i, 40)
             self._ids.append(r["id"])
+            is_leaf = r['code'] in leaf_codes
+            self._leaf_flags.append(is_leaf)
+
             code_it = QTableWidgetItem(r["code"])
-            code_it.setForeground(QColor("#3d6fdb"))
             name_it = QTableWidgetItem(r["name"])
-            self.table.setItem(i,0,code_it)
-            self.table.setItem(i,1,name_it)
-            # Spinbox with explicit minimum size so numbers are readable
-            def make_spin(val):
+            if is_leaf:
+                code_it.setForeground(QColor("#3d6fdb"))
+            else:
+                code_it.setForeground(QColor("#aaa"))
+                name_it.setForeground(QColor("#aaa"))
+                name_it.setFont(QFont("", weight=QFont.Bold))
+
+            self.table.setItem(i, 0, code_it)
+            self.table.setItem(i, 1, name_it)
+
+            def make_spin(val, editable):
                 sp = NoScrollDoubleSpinBox()
                 sp.setRange(0, 9999999999)
                 sp.setDecimals(2)
@@ -117,35 +157,76 @@ class AccountInitDialog(QDialog):
                 sp.setMinimumHeight(32)
                 sp.setMinimumWidth(140)
                 sp.setAlignment(Qt.AlignRight)
-                sp.setStyleSheet("QDoubleSpinBox{padding:4px 8px;font-size:13px;}")
+                if editable:
+                    sp.setStyleSheet("QDoubleSpinBox{padding:4px 8px;font-size:13px;}")
+                else:
+                    sp.setReadOnly(True)
+                    sp.setStyleSheet(
+                        "QDoubleSpinBox{padding:4px 8px;font-size:13px;"
+                        "background:#f5f7fa;color:#aaa;border:1px solid #e8ecf2;}")
                 return sp
-            d_spin  = make_spin(r["opening_debit"])
-            cr_spin = make_spin(r["opening_credit"])
-            self.table.setCellWidget(i,2,d_spin)
-            self.table.setCellWidget(i,3,cr_spin)
+
+            d_spin  = make_spin(r["opening_debit"],  is_leaf)
+            cr_spin = make_spin(r["opening_credit"], is_leaf)
+
+            # Connect leaf spinboxes to auto-refresh parent totals
+            if is_leaf:
+                d_spin.valueChanged.connect(self._refresh_parents)
+                cr_spin.valueChanged.connect(self._refresh_parents)
+
+            self.table.setCellWidget(i, 2, d_spin)
+            self.table.setCellWidget(i, 3, cr_spin)
+
+        self._refresh_parents()
+
+    def _refresh_parents(self):
+        """Recompute and display rolled-up totals for all parent rows."""
+        # Collect current leaf values
+        leaf_vals = {}
+        for i, (aid, is_leaf) in enumerate(zip(self._ids, self._leaf_flags)):
+            if not is_leaf: continue
+            code_item = self.table.item(i, 0)
+            if not code_item: continue
+            dw = self.table.cellWidget(i, 2)
+            cw = self.table.cellWidget(i, 3)
+            leaf_vals[code_item.text()] = (
+                dw.value() if dw else 0,
+                cw.value() if cw else 0
+            )
+
+        # Bubble up to parents
+        parent_totals = {}
+        all_leaf_codes = set(leaf_vals.keys())
+        for code, (d, cr) in leaf_vals.items():
+            parts = code.split('.')
+            for depth in range(1, len(parts)):
+                parent = '.'.join(parts[:depth])
+                if parent not in parent_totals:
+                    parent_totals[parent] = [0.0, 0.0]
+                parent_totals[parent][0] += d
+                parent_totals[parent][1] += cr
+
+        # Update parent rows in table
+        for i, (aid, is_leaf) in enumerate(zip(self._ids, self._leaf_flags)):
+            if is_leaf: continue
+            code_item = self.table.item(i, 0)
+            if not code_item: continue
+            code = code_item.text()
+            d_total, cr_total = parent_totals.get(code, (0.0, 0.0))
+            dw = self.table.cellWidget(i, 2)
+            cw = self.table.cellWidget(i, 3)
+            if dw: dw.blockSignals(True); dw.setValue(d_total); dw.blockSignals(False)
+            if cw: cw.blockSignals(True); cw.setValue(cr_total); cw.blockSignals(False)
 
     def _save(self):
-        # 校验：期初借方合计 = 期初贷方合计
-        total_debit = 0.0
-        total_credit = 0.0
-        for i in range(len(self._ids)):
-            total_debit += self.table.cellWidget(i, 2).value()
-            total_credit += self.table.cellWidget(i, 3).value()
-        diff = abs(total_debit - total_credit)
-        if diff > 0.005:
-            QMessageBox.warning(self, "借贷不平衡",
-                f"期初借方合计与贷方合计不相等，无法保存。\n\n"
-                f"借方合计：{total_debit:,.2f}\n"
-                f"贷方合计：{total_credit:,.2f}\n"
-                f"差额：{diff:,.2f}\n\n"
-                f"请检查并修正后重新保存。")
-            return
         conn = get_db(); c = conn.cursor()
-        for i,aid in enumerate(self._ids):
-            d = self.table.cellWidget(i,2).value()
-            cr = self.table.cellWidget(i,3).value()
-            c.execute("UPDATE accounts SET opening_debit=?,opening_credit=? WHERE id=?", (d,cr,aid))
+        # Save all rows (both leaf and parent — parents have already been rolled up in UI)
+        for i, aid in enumerate(self._ids):
+            dw = self.table.cellWidget(i, 2)
+            cw = self.table.cellWidget(i, 3)
+            d  = dw.value() if dw else 0
+            cr = cw.value() if cw else 0
+            c.execute("UPDATE accounts SET opening_debit=?,opening_credit=? WHERE id=?",
+                      (d, cr, aid))
         conn.commit(); conn.close()
-        QMessageBox.information(self,"成功","期初余额已保存")
-
-
+        QMessageBox.information(self, "成功", "期初余额已保存（末级科目已自动汇总到上级）")

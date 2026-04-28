@@ -267,50 +267,89 @@ class VoucherPage(QWidget):
 
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
-        accts = {r['code']:dict(r) for r in c.fetchall()}
+        accts = {r['code']: dict(r) for r in c.fetchall()}
         # Aggregate voucher entries for period range
         c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period >= ? AND v.period <= ? GROUP BY e.account_code""",
                   (self.client_id, start_period, end_period))
-        activity = {r['account_code']:(r['td'] or 0, r['tc'] or 0) for r in c.fetchall()}
+        leaf_activity = {r['account_code']: (r['td'] or 0, r['tc'] or 0)
+                         for r in c.fetchall()}
         conn.close()
 
+        all_codes = set(accts.keys())
+        # Identify leaf accounts (no children)
+        leaf_codes = {c for c in all_codes
+                      if not any(o != c and o.startswith(c + '.') for o in all_codes)}
+
+        # ── Roll up opening balances from leaves to parents ──
+        open_d = {code: accts[code]['opening_debit'] or 0 for code in all_codes}
+        open_c = {code: accts[code]['opening_credit'] or 0 for code in all_codes}
+        act_d  = {code: leaf_activity.get(code, (0, 0))[0] for code in all_codes}
+        act_c  = {code: leaf_activity.get(code, (0, 0))[1] for code in all_codes}
+
+        # Zero parent accounts, then bubble up from leaves
+        for code in all_codes - leaf_codes:
+            open_d[code] = open_c[code] = 0.0
+            act_d[code]  = act_c[code]  = 0.0
+        for code in sorted(leaf_codes, reverse=True):   # deepest first
+            parts = code.split('.')
+            for depth in range(1, len(parts)):
+                parent = '.'.join(parts[:depth])
+                if parent in all_codes:
+                    open_d[parent] += open_d[code]
+                    open_c[parent] += open_c[code]
+                    act_d[parent]  += act_d[code]
+                    act_c[parent]  += act_c[code]
+
+        # ── Build display rows ──
         rows = []
         for code, a in sorted(accts.items()):
-            od = a['opening_debit'] or 0; oc = a['opening_credit'] or 0
-            td, tc = activity.get(code,(0,0))
-            # Compute ending balance
-            if a['direction'] == '借':
+            is_leaf = code in leaf_codes
+            od, oc = open_d[code], open_c[code]
+            td, tc = act_d[code],  act_c[code]
+            direction = a['direction']
+            if direction == '借':
                 end_d = od + td - tc; end_c = 0
                 if end_d < 0: end_c = -end_d; end_d = 0
             else:
                 end_c = oc + tc - td; end_d = 0
                 if end_c < 0: end_d = -end_c; end_c = 0
-            rows.append((code, a['name'], od, oc, td, tc, end_d, end_c))
+            rows.append((code, a['name'], od, oc, td, tc, end_d, end_c, is_leaf))
 
-        # Totals
-        totals = [sum(r[i] for r in rows) for i in range(2,8)]
+        # Only sum leaf rows for the grand total (avoid double-counting)
+        totals = [sum(r[i] for r in rows if r[8]) for i in range(2, 8)]
 
-        self.bal_tbl.setRowCount(len(rows)+1)
-        for i,r in enumerate(rows):
-            self.bal_tbl.setRowHeight(i,36)
-            for j,v in enumerate(r):
+        self.bal_tbl.setRowCount(len(rows) + 1)
+        for i, r in enumerate(rows):
+            self.bal_tbl.setRowHeight(i, 36)
+            is_leaf = r[8]
+            for j, v in enumerate(r[:8]):
                 text = v if j < 2 else fmt_amt(v)
-                it = QTableWidgetItem(text); it.setTextAlignment(Qt.AlignCenter if j<2 else Qt.AlignRight|Qt.AlignVCenter)
-                if j==0: it.setForeground(QColor("#3d6fdb"))
-                self.bal_tbl.setItem(i,j,it)
-        # Total row
-        self.bal_tbl.setRowHeight(len(rows),38)
-        it0 = QTableWidgetItem(""); it1 = QTableWidgetItem("合  计")
-        it1.setFont(QFont("",weight=QFont.Bold))
+                it = QTableWidgetItem(text)
+                it.setTextAlignment(
+                    Qt.AlignCenter if j < 2 else Qt.AlignRight | Qt.AlignVCenter)
+                if j == 0:
+                    it.setForeground(QColor("#3d6fdb" if is_leaf else "#888"))
+                if not is_leaf:
+                    # Parent rows: bold, light background
+                    it.setBackground(QColor("#f9fafc"))
+                    it.setFont(QFont("", weight=QFont.Bold))
+                self.bal_tbl.setItem(i, j, it)
+        # Grand total row (leaf sums only)
+        self.bal_tbl.setRowHeight(len(rows), 38)
+        it0 = QTableWidgetItem(""); it1 = QTableWidgetItem("合  计（末级合计）")
+        it1.setFont(QFont("", weight=QFont.Bold))
         it0.setBackground(QColor("#f5f7fa")); it1.setBackground(QColor("#f5f7fa"))
         it1.setTextAlignment(Qt.AlignCenter)
-        self.bal_tbl.setItem(len(rows),0,it0); self.bal_tbl.setItem(len(rows),1,it1)
-        for j,v in enumerate(totals,2):
-            it = QTableWidgetItem(fmt_amt(v)); it.setTextAlignment(Qt.AlignRight|Qt.AlignVCenter)
-            it.setBackground(QColor("#f5f7fa")); it.setFont(QFont("",weight=QFont.Bold))
-            self.bal_tbl.setItem(len(rows),j,it)
+        self.bal_tbl.setItem(len(rows), 0, it0)
+        self.bal_tbl.setItem(len(rows), 1, it1)
+        for j, v in enumerate(totals, 2):
+            it = QTableWidgetItem(fmt_amt(v))
+            it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            it.setBackground(QColor("#f5f7fa"))
+            it.setFont(QFont("", weight=QFont.Bold))
+            self.bal_tbl.setItem(len(rows), j, it)
 
     # ─ Ledger (明细账) ─
     def _build_ledger(self):
