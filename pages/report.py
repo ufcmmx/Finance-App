@@ -179,14 +179,19 @@ class ReportPage(QWidget):
         div_rec_y   = bal_ys(["1131"])
         oth_rec_y   = bal_ys(["1221"])
         cash_y      = bal_ys(["1001","1002","1012"])
-        inventory_y = bal_ys(["1401","1402","1403","1404","1405","1406","1408","1411"])
+        inventory_y = (bal_ys(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
+                      - abs(bal_ys(["1471","1472"])))
         prepd_exp_y = bal_ys(["1901"])
         fa_y        = bal_ys(["1601"]) - abs(bal_ys(["1602"])) - abs(bal_ys(["1603"]))
         wip_y       = bal_ys(["1604"])
         intangible_y= bal_ys(["1701"]) - abs(bal_ys(["1702"])) - abs(bal_ys(["1703"]))
         lt_prepaid_y= bal_ys(["1801"])
         deferred_a_y= bal_ys(["1811"])
-        lt_equity_y = bal_ys(["1503","1511","1521"])
+        avail_sale_y   = bal_ys(["1503"])
+        held_to_mat_y  = bal_ys(["1501"]) - abs(bal_ys(["1502"]))
+        lt_eq_invest_y = bal_ys(["1511"])
+        invest_prop_y  = bal_ys(["1521"])
+        lt_equity_y    = avail_sale_y + held_to_mat_y + lt_eq_invest_y + invest_prop_y
         cur_asset_y  = cash_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y+oth_rec_y+inventory_y+prepd_exp_y
         noncur_asset_y = fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
         total_asset_y  = cur_asset_y + noncur_asset_y
@@ -208,14 +213,20 @@ class ReportPage(QWidget):
         tsy_y     = bal_ys(["4201"])
         total_equity_y = cap_y + cap_res_y + surp_res_y + profit_y - tsy_y
         total_le_y     = total_liab_y + total_equity_y
-        inventory = bal(["1401","1402","1403","1404","1405","1406","1408","1411"])
+        # 存货 = 各存货科目合计 - 存货跌价准备 - 消耗性生物资产跌价准备
+        inventory = (bal(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
+                     - abs(bal(["1471","1472"])))
         prepd_exp = bal(["1901"])   # 待处理财产损溢
         fa        = bal(["1601"]) - abs(bal(["1602"])) - abs(bal(["1603"]))
         wip       = bal(["1604"])
         intangible= bal(["1701"]) - abs(bal(["1702"])) - abs(bal(["1703"]))
         lt_prepaid= bal(["1801"])   # 长期待摊费用
         deferred_a= bal(["1811"])   # 递延所得税资产
-        lt_equity = bal(["1503","1511","1521"])   # 可供出售+长期股权+投资性房地产
+        avail_sale  = bal(["1503"])                    # 可供出售金融资产
+        held_to_mat = bal(["1501"]) - abs(bal(["1502"]))  # 持有至到期投资净额
+        lt_eq_invest= bal(["1511"])                    # 长期股权投资
+        invest_prop = bal(["1521"])                    # 投资性房地产
+        lt_equity   = avail_sale + held_to_mat + lt_eq_invest + invest_prop
         cur_asset = cash+notes_rec+acct_rec+prepay+int_rec+div_rec+oth_rec+inventory+prepd_exp
         noncur_asset = fa+wip+intangible+lt_prepaid+lt_equity+deferred_a
         total_asset = cur_asset + noncur_asset
@@ -272,11 +283,11 @@ class ReportPage(QWidget):
             R("其他流动资产","13",prepd_exp,    "一年内到期的非流动负债","46",0, left_ys=prepd_exp_y),
             R("流动资产合计","14",cur_asset,   "其他流动负债","47",0,   False,True, left_ys=cur_asset_y, right_ys=cur_liab_y),
             R("非流动资产：","","",            "流动负债合计","48",cur_liab,True,True,                  right_ys=cur_liab_y),
-            R("可供出售金融资产","15",lt_equity,"非流动负债：","","",   False,False, left_ys=lt_equity_y),
-            R("持有至到期投资","16",0,          "长期借款","49",lt_loan,                                right_ys=lt_loan_y),
-            R("长期应收款","17",0,             "应付债券","50",bonds_pay),
-            R("长期股权投资","18",0,            "其中：优先股","51",0),
-            R("投资性房地产","19",0,            "永续债","52",0),
+            R("可供出售金融资产","15",avail_sale,   "非流动负债：","","",   False,False, left_ys=avail_sale_y),
+            R("持有至到期投资","16",held_to_mat,    "长期借款","49",lt_loan, left_ys=held_to_mat_y,  right_ys=lt_loan_y),
+            R("长期应收款","17",0,                  "应付债券","50",bonds_pay),
+            R("长期股权投资","18",lt_eq_invest,     "其中：优先股","51",0,  left_ys=lt_eq_invest_y),
+            R("投资性房地产","19",invest_prop,       "永续债","52",0,        left_ys=invest_prop_y),
             R("固定资产","20",fa,              "长期应付款","53",lt_payable,    left_ys=fa_y,           right_ys=lt_payable_y),
             R("在建工程","21",wip,             "专项应付款","54",0,             left_ys=wip_y),
             R("工程物资","22",0,               "预计负债","55",est_liab,                               right_ys=est_liab_y),
