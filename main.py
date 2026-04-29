@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
         sl.addWidget(div)
         self._nav_btns = []
-        for name in ["客户管理","记账（凭证）","科目管理","期末结账","财务报表","审计日志","系统管理"]:
+        for name in ["客户管理","科目管理","记账（凭证）","期末结账","财务报表","审计日志","系统管理"]:
             b = QPushButton(name); b.setObjectName("nav"); b.setProperty("active","false")
             b.clicked.connect(lambda _,n=name: self._nav(n))
             sl.addWidget(b); self._nav_btns.append(b)
@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         self.pg_reports = ReportPage()
         self.pg_audit = AuditPage()
         self.pg_system = SystemPage()
-        for pg in [self.pg_clients, self.pg_vouchers, self.pg_accounts,
+        for pg in [self.pg_clients, self.pg_accounts, self.pg_vouchers,
                    self.pg_settle, self.pg_reports, self.pg_audit, self.pg_system]:
             self.stack.addWidget(pg)
         self.pg_clients.client_opened.connect(self._open_client)
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self._nav("记账（凭证）")
 
     def _nav(self, name):
-        mapping = {"客户管理":0,"记账（凭证）":1,"科目管理":2,"期末结账":3,
+        mapping = {"客户管理":0,"科目管理":1,"记账（凭证）":2,"期末结账":3,
                    "财务报表":4,"审计日志":5,"系统管理":6}
         self.stack.setCurrentIndex(mapping[name])
         for b in self._nav_btns:
