@@ -1,3 +1,4 @@
+import re
 """dialogs/account_dialogs.py — 科目编辑和Excel导入"""
 from datetime import datetime
 from PySide6.QtWidgets import *
@@ -6,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QPalette
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES
 from utils import (lbl, sep, card, fmt_amt, cn_amount,
+                   process_aux_from_code,
                    NoScrollSpinBox, NoScrollDoubleSpinBox,
                    infer_account_type_direction)
 
@@ -379,6 +381,19 @@ class ImportExcelDialog(QDialog):
                 created += 1
                 self.b_log.append(f"  ✓ 新建 {code} {name}  期初借={od:.2f} 贷={oc:.2f}")
 
+        # ── 第二遍：处理含 _ 的辅助核算科目 ──
+        aux_created = 0
+        for ri in range(len(df)):
+            row = df.iloc[ri]
+            code = str(row.iloc[1]).strip()
+            name = str(row.iloc[2]).strip() if df.shape[1] > 2 else ""
+            if '_' not in code: continue
+            if not re.match(r"^\d[\d._]*$", code): continue
+            if process_aux_from_code(conn.cursor(), self.client_id, code, name):
+                aux_created += 1
+        if aux_created:
+            self.b_log.append(f"  → 同步创建辅助核算对象 {aux_created} 个")
+
         conn.commit(); conn.close()
         self.b_log.append(f"\n✅ 完成：新建科目 {created} 个，更新期初 {updated} 个，跳过 {skipped} 个")
 
@@ -474,5 +489,3 @@ class ImportExcelDialog(QDialog):
 
         conn.commit(); conn.close()
         self.k_log.append(f"\n✅ 完成：导入 {ok} 条，跳过重复 {skip} 条")
-
-

@@ -61,9 +61,6 @@ QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
 QScrollBar:horizontal { height:5px; background:transparent; }
 QScrollBar::handle:horizontal { background:#dde1ea; border-radius:2px; }
 QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal { width:0; }
-/* Tooltips */
-QToolTip { background:#fff; color:#333; border:1px solid #d9d9d9;
-    border-radius:5px; padding:4px 8px; font-size:12px; }
 """
 
 def lbl(text, bold=False, color=None, size=None):
@@ -178,4 +175,91 @@ def cn_amount(n):
     elif d_part % 10 == 0: result += f"元{jiao}角"
     else: result += f"元{jiao}角{fen}分"
     return sign + result
+
+# ── 科目编码 → 辅助核算维度 映射规则 ──
+_AUX_DIM_RULES = [
+    # (科目编码前缀列表,  维度名)
+    # 客户：往来应收/应付类、收入类
+    (["1122","1123","2202","2203","1221","1131","1132","6001","6051"], "客户"),
+    # 员工：薪酬类、个人往来
+    (["2211","2241.001"],                                              "员工"),
+    # 项目：成本费用类
+    (["5001","5101","5201","5401","6401","6402","6601","6602","6604"], "项目"),
+]
+_AUX_DIM_DEFAULT = "客户"
+
+def _infer_aux_dim_name(base_code):
+    """根据科目编码推断应归属的辅助核算维度名称。"""
+    for prefixes, dim_name in _AUX_DIM_RULES:
+        for prefix in prefixes:
+            if base_code == prefix or base_code.startswith(prefix + '.'):
+                return dim_name
+    return _AUX_DIM_DEFAULT
+
+
+def process_aux_from_code(c, client_id, code, name):
+    """
+    如果科目编码中含 _ ，自动创建辅助核算维度（客户/员工/项目）、核算对象，
+    并绑定到基础科目。
+
+    例：1122_007 / 应收账款_葫芦岛爱科科技有限公司
+      → 基础科目 1122，维度 "客户"，对象编码 007，对象名 "葫芦岛爱科科技有限公司"
+       2241.001_001 / 其他应付款-个人_曾立华
+      → 基础科目 2241.001，维度 "员工"，对象编码 001，对象名 "曾立华"
+
+    返回 True 表示是辅助核算条目，False 表示普通科目。
+    """
+    if '_' not in code:
+        return False
+
+    last_u = code.rindex('_')
+    base_code     = code[:last_u]
+    aux_item_code = code[last_u + 1:]
+    if not base_code or not aux_item_code:
+        return False
+
+    # 从名称中分离辅助对象名称（取 _ 后半段）
+    if '_' in name:
+        aux_item_name = name[name.rindex('_') + 1:].strip()
+    else:
+        aux_item_name = aux_item_code
+
+    # 验证基础科目存在
+    c.execute("SELECT id FROM accounts WHERE client_id=? AND code=?",
+              (client_id, base_code))
+    if not c.fetchone():
+        return False   # 基础科目不存在，跳过
+
+    # 推断维度名称
+    dim_name = _infer_aux_dim_name(base_code)
+
+    # 创建或获取维度
+    c.execute("SELECT id FROM aux_dimensions WHERE client_id=? AND name=?",
+              (client_id, dim_name))
+    dim = c.fetchone()
+    if dim:
+        dim_id = dim[0] if not hasattr(dim, 'keys') else dim['id']
+    else:
+        c.execute("INSERT INTO aux_dimensions(client_id, name) VALUES(?,?)",
+                  (client_id, dim_name))
+        dim_id = c.lastrowid
+
+    # 绑定维度到基础科目（如果未绑定）
+    c.execute("""SELECT id FROM account_aux_config
+                 WHERE client_id=? AND account_code=? AND dimension_id=?""",
+              (client_id, base_code, dim_id))
+    if not c.fetchone():
+        c.execute("""INSERT INTO account_aux_config(client_id, account_code, dimension_id)
+                     VALUES(?,?,?)""", (client_id, base_code, dim_id))
+
+    # 创建或获取核算对象（同名不重复创建）
+    c.execute("""SELECT id FROM aux_items
+                 WHERE client_id=? AND dimension_id=? AND code=?""",
+              (client_id, dim_id, aux_item_code))
+    if not c.fetchone():
+        c.execute("""INSERT INTO aux_items(client_id, dimension_id, name, code)
+                     VALUES(?,?,?,?)""",
+                  (client_id, dim_id, aux_item_name, aux_item_code))
+
+    return True
 
