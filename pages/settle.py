@@ -139,7 +139,7 @@ class SettlePage(QWidget):
         periods = set()
         now = datetime.now()
         year, month = now.year, now.month
-        for _ in range(36):
+        while year > 2018 or (year == 2018 and month >= 1):
             periods.add(f"{year}-{month:02d}")
             month -= 1
             if month == 0:

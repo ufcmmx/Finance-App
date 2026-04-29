@@ -987,7 +987,7 @@ class ReportPage(QWidget):
         self.rep_end_period.clear()
         now = datetime.now()
         periods = []
-        for y in range(now.year, now.year-3, -1):
+        for y in range(now.year, 2018-1, -1):
             for m in range(12,0,-1):
                 period_str = f"{y}-{m:02d}"
                 display_str = f"{y}年{m:02d}期"
