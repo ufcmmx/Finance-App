@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, QTimer
 from PySide6.QtGui import QColor, QFont, QPalette
 
-from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES
+from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES, STANDARD_ACCOUNTS_SMALL
 from utils import (lbl, sep, card, fmt_amt, cn_amount,
                    NoScrollSpinBox, NoScrollDoubleSpinBox,
                    infer_account_type_direction)
@@ -27,10 +27,12 @@ class ClientDialog(QDialog):
         self.name = QLineEdit(); self.name.setPlaceholderText("公司全称（必填）")
         self.code = QLineEdit(); self.code.setPlaceholderText("如 ZY")
         self.typ = QComboBox(); self.typ.addItems(["小规模纳税人","一般纳税人","其他"])
+        self.std = QComboBox(); self.std.addItems(["企业会计准则","小企业会计制度"])
         self.taxid = QLineEdit(); self.taxid.setPlaceholderText("统一社会信用代码")
         self.contact = QLineEdit(); self.phone = QLineEdit()
         F.addRow("公司名称 *", self.name); F.addRow("助记码", self.code)
-        F.addRow("客户类型", self.typ);   F.addRow("税号", self.taxid)
+        F.addRow("客户类型", self.typ);   F.addRow("会计制度", self.std)
+        F.addRow("税号", self.taxid)
         F.addRow("联系人", self.contact); F.addRow("电话", self.phone)
         L.addLayout(F)
         row = QHBoxLayout(); row.addStretch()
@@ -45,20 +47,26 @@ class ClientDialog(QDialog):
         self.taxid.setText(c["tax_id"] or ""); self.contact.setText(c["contact"] or "")
         self.phone.setText(c["phone"] or "")
         idx = self.typ.findText(c["client_type"] or ""); self.typ.setCurrentIndex(max(0,idx))
+        try:
+            idx2 = self.std.findText(c["accounting_std"] or "企业会计准则")
+            self.std.setCurrentIndex(max(0, idx2))
+        except Exception:
+            pass
 
     def _save(self):
         n = self.name.text().strip()
         if not n: QMessageBox.warning(self,"提示","公司名称不能为空"); return
         conn = get_db(); c = conn.cursor()
-        d = (n, self.code.text().strip(), self.typ.currentText(),
+        std = self.std.currentText()
+        d = (n, self.code.text().strip(), self.typ.currentText(), std,
              self.taxid.text().strip(), self.contact.text().strip(), self.phone.text().strip())
         if self.client:
-            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,tax_id=?,contact=?,phone=? WHERE id=?",
+            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=? WHERE id=?",
                       d+(self.client["id"],))
         else:
-            c.execute("INSERT INTO clients(name,short_code,client_type,tax_id,contact,phone) VALUES(?,?,?,?,?,?)",d)
+            c.execute("INSERT INTO clients(name,short_code,client_type,accounting_std,tax_id,contact,phone) VALUES(?,?,?,?,?,?,?)",d)
             cid = c.lastrowid
-            seed_client_accounts(cid, conn)   # reuse same connection — no lock
+            seed_client_accounts(cid, conn, accounting_std=std)
         conn.commit(); conn.close(); self.accept()
 
 

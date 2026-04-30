@@ -19,7 +19,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
-from db import init_db, get_db, log_action
+from db import init_db, get_db, log_action, STANDARD_ACCOUNTS_SMALL
 from utils import SS, lbl
 from dialogs import ImportAccountSetDialog
 from pages.client  import ClientPage

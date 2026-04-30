@@ -141,9 +141,12 @@ class ImportAccountSetDialog(QDialog):
         self.f_code  = QLineEdit(); self.f_code.setPlaceholderText("助记码，如 ZY")
         self.f_type  = QComboBox()
         self.f_type.addItems(["小规模纳税人","一般纳税人","其他"])
+        self.f_std = QComboBox()
+        self.f_std.addItems(["企业会计准则","小企业会计制度"])
         self.f_taxid = QLineEdit(); self.f_taxid.setPlaceholderText("统一社会信用代码")
         fn.addRow("公司名称 *", self.f_name); fn.addRow("助记码", self.f_code)
-        fn.addRow("客户类型", self.f_type);   fn.addRow("税号",    self.f_taxid)
+        fn.addRow("客户类型", self.f_type);   fn.addRow("会计制度", self.f_std)
+        fn.addRow("税号",    self.f_taxid)
         L.addWidget(self.form_new)
 
         # 已有账套
@@ -356,14 +359,15 @@ class ImportAccountSetDialog(QDialog):
                     self._client_id = row[0]
                     log(f"ℹ 账套已存在，追加数据到：{name}")
                 else:
+                    std = self.f_std.currentText()
                     c.execute(
-                        "INSERT INTO clients(name,short_code,client_type,tax_id)"
-                        " VALUES(?,?,?,?)",
+                        "INSERT INTO clients(name,short_code,client_type,accounting_std,tax_id)"
+                        " VALUES(?,?,?,?,?)",
                         (name, self.f_code.text().strip(),
-                         self.f_type.currentText(),
+                         self.f_type.currentText(), std,
                          self.f_taxid.text().strip()))
                     self._client_id = c.lastrowid
-                    seed_client_accounts(self._client_id, conn)
+                    seed_client_accounts(self._client_id, conn, accounting_std=std)
                     conn.commit()
                     log(f"✓ 新建账套：{name}（ID={self._client_id}）")
             else:
