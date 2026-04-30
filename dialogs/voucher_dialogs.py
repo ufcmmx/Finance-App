@@ -205,24 +205,30 @@ class VoucherDialog(QDialog):
 
         rebuild_aux(acct_code, aux_data)
 
-        # ── 借方金额 ──
+        # ── 借方金额（支持 = 键自动补平） ──
         d_spin = NoScrollDoubleSpinBox(); d_spin.setRange(0,999999999); d_spin.setDecimals(2)
         d_spin.setSpecialValueText(""); d_spin.setValue(debit)
         d_spin.valueChanged.connect(self._update_totals)
+
+        orig_d_key = d_spin.keyPressEvent
+        def d_key(event, _d=d_spin):
+            if event.text() == "=":
+                self._auto_balance_debit(_d)
+            else:
+                orig_d_key(event)
+        d_spin.keyPressEvent = d_key
 
         # ── 贷方金额（支持 = 键自动补平） ──
         cr_spin = NoScrollDoubleSpinBox(); cr_spin.setRange(0,999999999); cr_spin.setDecimals(2)
         cr_spin.setSpecialValueText(""); cr_spin.setValue(credit)
         cr_spin.valueChanged.connect(self._update_totals)
 
-        # Patch keyPressEvent on cr_spin to handle "=" auto-balance
-        _row_ref = [i]  # mutable ref so lambda can find the row
-        orig_key = cr_spin.keyPressEvent
+        orig_cr_key = cr_spin.keyPressEvent
         def cr_key(event, _cr=cr_spin):
             if event.text() == "=":
                 self._auto_balance_credit(_cr)
             else:
-                orig_key(event)
+                orig_cr_key(event)
         cr_spin.keyPressEvent = cr_key
 
         self.table.setCellWidget(i,0,summary_edit)
@@ -232,8 +238,19 @@ class VoucherDialog(QDialog):
         self.table.setCellWidget(i,4,cr_spin)
         self._update_totals()
 
+    def _auto_balance_debit(self, target_spin):
+        """在借方按 = 键：将 target_spin 设为令借贷平衡所需的金额（以贷方合计为准）。"""
+        tc = td_other = 0
+        for i in range(self.table.rowCount()):
+            dw = self.table.cellWidget(i,3); cw = self.table.cellWidget(i,4)
+            if cw: tc += cw.value()
+            if dw and dw is not target_spin: td_other += dw.value()
+        needed = max(0, round(tc - td_other, 2))
+        target_spin.setValue(needed)
+        self._update_totals()
+
     def _auto_balance_credit(self, target_spin):
-        """按 = 键时，将 target_spin 设为令借贷平衡所需的金额。"""
+        """在贷方按 = 键：将 target_spin 设为令借贷平衡所需的金额（以借方合计为准）。"""
         td = tc_other = 0
         for i in range(self.table.rowCount()):
             dw = self.table.cellWidget(i,3); cw = self.table.cellWidget(i,4)
