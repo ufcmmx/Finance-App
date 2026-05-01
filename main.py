@@ -23,6 +23,7 @@ from db import init_db, get_db, log_action, STANDARD_ACCOUNTS_SMALL
 from utils import SS, lbl
 from dialogs import ImportAccountSetDialog
 from pages.client  import ClientPage
+from pages.opening import OpeningBalancePage
 from pages.voucher import VoucherPage
 from pages.account import AccountPage
 from pages.settle  import SettlePage
@@ -56,7 +57,7 @@ class MainWindow(QMainWindow):
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
         sl.addWidget(div)
         self._nav_btns = []
-        for name in ["客户管理","科目管理","记账（凭证）","期末结账","财务报表","审计日志","系统管理"]:
+        for name in ["客户管理","科目管理","科目期初","记账（凭证）","期末结账","财务报表","审计日志","系统管理"]:
             b = QPushButton(name); b.setObjectName("nav"); b.setProperty("active","false")
             b.clicked.connect(lambda _,n=name: self._nav(n))
             sl.addWidget(b); self._nav_btns.append(b)
@@ -68,15 +69,17 @@ class MainWindow(QMainWindow):
 
         # Content
         self.stack = QStackedWidget(); row.addWidget(self.stack)
-        self.pg_clients = ClientPage()
+        self.pg_clients  = ClientPage()
+        self.pg_opening  = OpeningBalancePage()
         self.pg_vouchers = VoucherPage()
         self.pg_accounts = AccountPage()
         self.pg_settle = SettlePage()
         self.pg_reports = ReportPage()
         self.pg_audit = AuditPage()
         self.pg_system = SystemPage()
-        for pg in [self.pg_clients, self.pg_accounts, self.pg_vouchers,
-                   self.pg_settle, self.pg_reports, self.pg_audit, self.pg_system]:
+        for pg in [self.pg_clients, self.pg_accounts, self.pg_opening,
+                   self.pg_vouchers, self.pg_settle, self.pg_reports,
+                   self.pg_audit, self.pg_system]:
             self.stack.addWidget(pg)
         self.pg_clients.client_opened.connect(self._open_client)
         self.pg_settle.carryforward_done.connect(self._on_carryforward_done)
@@ -88,8 +91,8 @@ class MainWindow(QMainWindow):
         self._nav("记账（凭证）")
 
     def _nav(self, name):
-        mapping = {"客户管理":0,"科目管理":1,"记账（凭证）":2,"期末结账":3,
-                   "财务报表":4,"审计日志":5,"系统管理":6}
+        mapping = {"客户管理":0,"科目管理":1,"科目期初":2,"记账（凭证）":3,
+                   "期末结账":4,"财务报表":5,"审计日志":6,"系统管理":7}
         self.stack.setCurrentIndex(mapping[name])
         for b in self._nav_btns:
             b.setProperty("active","true" if b.text()==name else "false")
@@ -103,6 +106,7 @@ class MainWindow(QMainWindow):
         self._client_info.setText(f"当前客户:\n{name}\n({code})")
         self.pg_vouchers.set_client(client_id, name, self._cur_period)
         self.pg_accounts.set_client(client_id)
+        self.pg_opening.set_client(client_id, name, self._cur_period)
         self.pg_settle.set_client(client_id, name, self._cur_period)
         self.pg_reports.set_client(client_id, name, self._cur_period)
         self.pg_audit.set_client(client_id)

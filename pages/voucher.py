@@ -21,7 +21,7 @@ class VoucherPage(QWidget):
         self.toolbar.setStyleSheet("background:#fff; border-bottom:1px solid #e8ecf2;")
         tl = QHBoxLayout(self.toolbar); tl.setContentsMargins(16,0,16,0); tl.setSpacing(0)
         self._tabs = []
-        for name in ["新增凭证","查凭证","科目余额表","明细账","科目期初","辅助核算"]:
+        for name in ["新增凭证","查凭证","科目余额表","明细账","辅助核算"]:
             b = QPushButton(name); b.setObjectName("nav_tab")
             b.setStyleSheet("""QPushButton{background:transparent;color:#888;border:none;
                 padding:12px 16px;border-bottom:2px solid transparent;}
@@ -45,12 +45,11 @@ class VoucherPage(QWidget):
 
     def _switch_tab(self, name):
         mapping = {"新增凭证":None,"查凭证":0,"科目余额表":1,"明细账":2,
-                   "科目期初":None,"辅助核算":3}
+                   "辅助核算":3}
         for b in self._tabs:
             b.setProperty("active","true" if b.text()==name else "false")
             b.style().unpolish(b); b.style().polish(b)
         if name == "新增凭证": self._new_voucher()
-        elif name == "科目期初": self._open_period_init()
         elif name == "辅助核算":
             self.stack.setCurrentIndex(3)
             if self.client_id: self._aux_page.set_client(self.client_id, self.period)
