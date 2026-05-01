@@ -77,6 +77,7 @@ class AccountPage(QWidget):
         c.execute("SELECT DISTINCT account_code FROM voucher_entries")
         for row in c.fetchall():
             used_accounts.add(row['account_code'])
+
         conn.close()
 
         self.tbl.setRowCount(len(rows))
@@ -88,8 +89,21 @@ class AccountPage(QWidget):
             indent = "    " * (level-1)
             code_it = QTableWidgetItem(r["code"])
             code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignCenter)
-            name_it = QTableWidgetItem(indent + r["name"])
+            # Mark accounts with _ in code as aux dimension entries
+            code_str = r["code"] or ""
+            is_aux_entry = '_' in code_str
+            if is_aux_entry:
+                # Extract dim name from utils helper
+                from utils import _infer_aux_dim_name
+                base = code_str[:code_str.rindex('_')]
+                dim_name = _infer_aux_dim_name(base)
+                dim_tag = f"  [{dim_name}]"
+            else:
+                dim_tag = ""
+            name_it = QTableWidgetItem(indent + r["name"] + dim_tag)
             if level == 1: name_it.setFont(QFont("",weight=QFont.Bold))
+            if is_aux_entry:
+                name_it.setToolTip(f"辅助核算条目 · 维度：{dim_name}")
             
             # If account is frozen, show gray text
             try:
@@ -99,6 +113,8 @@ class AccountPage(QWidget):
             if is_frozen:
                 code_it.setForeground(QColor("#ccc"))
                 name_it.setForeground(QColor("#ccc"))
+            elif is_aux_entry:
+                name_it.setForeground(QColor("#1e2130"))  # normal name color
             
             type_it = QTableWidgetItem(r["type"] or "")
             type_it.setForeground(QColor(type_colors.get(r["type"],"#888")))
@@ -253,5 +269,3 @@ class AccountPage(QWidget):
         dlg = ImportExcelDialog(self, self.client_id)
         dlg.exec()
         self.load()
-
-
