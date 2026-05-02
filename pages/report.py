@@ -128,7 +128,7 @@ class ReportPage(QWidget):
             GROUP BY e.account_code""", (self.client_id, year_start))
         mv_ys = {r[0]: r[1] or 0 for r in c.fetchall()}
 
-        c.execute("SELECT code,opening_debit,opening_credit,direction FROM accounts WHERE client_id=?",
+        c.execute("SELECT code, name, opening_debit, opening_credit, direction FROM accounts WHERE client_id=?",
                   (self.client_id,))
         accts = {r['code']: r for r in c.fetchall()}
         conn.close()
@@ -142,6 +142,34 @@ class ReportPage(QWidget):
                 for other in all_codes
             )
         }
+
+        def _vat_split(movements):
+            """
+            拆分 2221 应交税费，返回 (tax_pay_net, to_oth_cur_asset, to_oth_cur_liab)
+            - 借方余额明细（留底税/待抵扣/待认证）→ 其他流动资产
+            - 含"待转"的明细科目贷方余额         → 其他流动负债
+            - 其余贷方余额                       → 应交税费
+            """
+            to_asset = 0.0; to_liab = 0.0; to_tax = 0.0
+            leaf_2221 = [code for code in accts
+                         if code in leaf_codes and
+                         (code == "2221" or code.startswith("2221.") or code.startswith("2221_"))]
+            if not leaf_2221:
+                # 无子科目，按整体余额处理
+                b = _bal_with_mv(["2221"], movements)
+                if b < 0: to_asset += -b
+                else: to_tax += b
+                return to_tax, to_asset, to_liab
+            for code in leaf_2221:
+                aname = (accts[code]['name'] or "").strip()
+                b = _bal_with_mv([code], movements)
+                if "待转" in aname:
+                    to_liab += max(0.0, b)   # 待转销项税 → 其他流动负债
+                elif b < 0:
+                    to_asset += -b           # 借方余额（留底税等）→ 其他流动资产
+                else:
+                    to_tax += b              # 正常贷方余额 → 应交税费
+            return to_tax, to_asset, to_liab
 
         def _bal_with_mv(code_prefix_list, movements):
             """通用余额计算：末级科目取期初+发生额，父科目只取发生额"""
@@ -171,6 +199,10 @@ class ReportPage(QWidget):
         def bal_ys(code_prefix_list):
             """年初余额（上年年末 = 期初 + 本年首期前发生额）"""
             return _bal_with_mv(code_prefix_list, mv_ys)
+
+        # ── 应交税费重分类（须在 _bal_with_mv 定义后调用）──
+        tax_pay_net,   vat_to_asset,   vat_to_liab   = _vat_split(mv)
+        tax_pay_net_y, vat_to_asset_y, vat_to_liab_y = _vat_split(mv_ys)
 
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
@@ -207,16 +239,22 @@ class ReportPage(QWidget):
         lt_eq_invest_y = bal_ys(["1511"])
         invest_prop_y  = bal_ys(["1521"])
         lt_equity_y    = avail_sale_y + held_to_mat_y + lt_eq_invest_y + invest_prop_y
-        cur_asset_y  = cash_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y+oth_rec_y+inventory_y+prepd_exp_y
         noncur_asset_y = fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
-        total_asset_y  = cur_asset_y + noncur_asset_y
 
         st_loan_y   = bal_ys(["2001"]); notes_pay_y = bal_ys(["2201"])
         acct_pay_y  = bal_ys(["2202"]); adv_rec_y   = max(0.0, _advrec_y) + max(0.0, -_prepay_y)
-        emp_pay_y   = bal_ys(["2211"]); tax_pay_y   = bal_ys(["2221"])
+        emp_pay_y   = bal_ys(["2211"]); tax_pay_y   = tax_pay_net_y
         int_pay_y   = bal_ys(["2231"]); div_pay_y   = bal_ys(["2232"])
         oth_pay_y   = bal_ys(["2241"])
-        cur_liab_y  = st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y+int_pay_y+div_pay_y+oth_pay_y
+        # 其他流动资产（年初）= 待处理财产损溢 + 待摊费用 + 应交税费借方余额重分类
+        oth_cur_asset_y = prepd_exp_y + bal_ys(["1461"]) + vat_to_asset_y
+        # 其他流动负债（年初）= 待转销项税额
+        oth_cur_liab_y  = vat_to_liab_y
+        cur_asset_y  = (cash_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y
+                        +oth_rec_y+inventory_y+oth_cur_asset_y)
+        cur_liab_y  = (st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y
+                       +int_pay_y+div_pay_y+oth_pay_y+oth_cur_liab_y)
+        total_asset_y  = cur_asset_y + noncur_asset_y
         lt_loan_y   = bal_ys(["2501"]); bonds_pay_y = bal_ys(["2502"])
         lt_payable_y= bal_ys(["2701"]); est_liab_y  = bal_ys(["2801"])
         deferred_l_y= bal_ys(["2901"])
@@ -242,9 +280,7 @@ class ReportPage(QWidget):
         lt_eq_invest= bal(["1511"])                    # 长期股权投资
         invest_prop = bal(["1521"])                    # 投资性房地产
         lt_equity   = avail_sale + held_to_mat + lt_eq_invest + invest_prop
-        cur_asset = cash+notes_rec+acct_rec+prepay+int_rec+div_rec+oth_rec+inventory+prepd_exp
         noncur_asset = fa+wip+intangible+lt_prepaid+lt_equity+deferred_a
-        total_asset = cur_asset + noncur_asset
 
         # ── 负债方 ──
         st_loan   = bal(["2001"])
@@ -252,11 +288,19 @@ class ReportPage(QWidget):
         acct_pay  = bal(["2202"])
         adv_rec   = max(0.0, _advrec_raw) + max(0.0, -_prepay_raw)
         emp_pay   = bal(["2211"])
-        tax_pay   = bal(["2221"])
+        tax_pay   = tax_pay_net   # 应交税费贷方净额（借方余额已重分类到其他流动资产）
         int_pay   = bal(["2231"])
         div_pay   = bal(["2232"])
         oth_pay   = bal(["2241"])
-        cur_liab  = st_loan+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay+int_pay+div_pay+oth_pay
+        # 其他流动资产 = 待处理财产损溢(1901) + 待摊费用(1461) + 应交税费借方余额重分类
+        oth_cur_asset = prepd_exp + bal(["1461"]) + vat_to_asset
+        # 其他流动负债 = 待转销项税额（应交税费下贷方余额重分类）
+        oth_cur_liab  = vat_to_liab
+        cur_asset = (cash+notes_rec+acct_rec+prepay+int_rec+div_rec
+                     +oth_rec+inventory+oth_cur_asset)
+        cur_liab  = (st_loan+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay
+                     +int_pay+div_pay+oth_pay+oth_cur_liab)
+        total_asset = cur_asset + noncur_asset
         lt_loan   = bal(["2501"])
         bonds_pay = bal(["2502"])
         lt_payable= bal(["2701"])   # 长期应付款
@@ -295,8 +339,8 @@ class ReportPage(QWidget):
             R("存货","10",inventory,           "应付股利","43",div_pay,         left_ys=inventory_y,   right_ys=div_pay_y),
             R("持有待售资产","11",0,            "其他应付款","44",oth_pay,                              right_ys=oth_pay_y),
             R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0),
-            R("其他流动资产","13",prepd_exp,    "一年内到期的非流动负债","46",0, left_ys=prepd_exp_y),
-            R("流动资产合计","14",cur_asset,   "其他流动负债","47",0,   False,True, left_ys=cur_asset_y, right_ys=cur_liab_y),
+            R("其他流动资产","13",oth_cur_asset, "一年内到期的非流动负债","46",0, left_ys=oth_cur_asset_y),
+            R("流动资产合计","14",cur_asset,   "其他流动负债","47",oth_cur_liab, False,True, left_ys=cur_asset_y, right_ys=cur_liab_y),
             R("非流动资产：","","",            "流动负债合计","48",cur_liab,True,True,                  right_ys=cur_liab_y),
             R("可供出售金融资产","15",avail_sale,   "非流动负债：","","",   False,False, left_ys=avail_sale_y),
             R("持有至到期投资","16",held_to_mat,    "长期借款","49",lt_loan, left_ys=held_to_mat_y,  right_ys=lt_loan_y),
