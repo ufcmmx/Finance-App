@@ -1,8 +1,8 @@
 """dialogs/voucher_dialogs.py — 凭证录入对话框和辅助核算"""
 from datetime import datetime
 from PySide6.QtWidgets import *
-from PySide6.QtCore import Qt, QDate, QTimer
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtCore import Qt, QDate, QTimer, QSize, QPoint
+from PySide6.QtGui import QColor, QFont, QPalette, QIcon, QPixmap, QPainter, QPen, QCursor
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES
 from utils import (lbl, sep, card, fmt_amt, cn_amount,
@@ -10,6 +10,68 @@ from utils import (lbl, sep, card, fmt_amt, cn_amount,
                    infer_account_type_direction)
 
 # openpyxl imported lazily inside each export function
+
+
+class HoverTipPopup(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(
+            parent,
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet(
+            "QFrame{background:#ffffff;border:1px solid #3d6fdb;border-radius:6px;}"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        self.label = QLabel("")
+        self.label.setStyleSheet(
+            "QLabel{color:#2d5dc8;font-size:12px;font-weight:bold;border:none;background:transparent;}"
+        )
+        layout.addWidget(self.label)
+        self.hide()
+
+
+class HoverTipButton(QToolButton):
+    _tip_popup = None
+
+    @classmethod
+    def _popup(cls):
+        if cls._tip_popup is None:
+            cls._tip_popup = HoverTipPopup()
+        return cls._tip_popup
+
+    def __init__(self):
+        super().__init__()
+        self.setMouseTracking(True)
+
+    def _show_tip(self):
+        tip = getattr(self, "_hover_tip_text", "")
+        if not tip:
+            return
+        QToolTip.hideText()
+        popup = self._popup()
+        popup.label.setText(tip)
+        popup.adjustSize()
+        popup.move(QCursor.pos() + QPoint(8, 10))
+        popup.show()
+        popup.raise_()
+
+    def enterEvent(self, event):
+        self._show_tip()
+        super().enterEvent(event)
+
+    def mouseMoveEvent(self, event):
+        popup = self._popup()
+        if popup.isVisible():
+            popup.move(QCursor.pos() + QPoint(8, 10))
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        self._popup().hide()
+        super().leaveEvent(event)
 
 class VoucherDialog(QDialog):
     """新增/编辑凭证 — 智一会计风格"""
@@ -611,8 +673,9 @@ class AuxPage(QWidget):
         hdr_l = QWidget(); hdr_l.setStyleSheet("background:#fff; border-bottom:1px solid #eee;")
         hl = QHBoxLayout(hdr_l); hl.setContentsMargins(12,10,8,10)
         hl.addWidget(lbl("核算维度", bold=True)); hl.addStretch()
-        b_adddim = QPushButton("＋"); b_adddim.setObjectName("btn_primary")
-        b_adddim.setFixedSize(28,28); b_adddim.setToolTip("新增维度")
+        b_adddim = self._make_icon_btn(
+            self._theme_icon("list-add", QStyle.SP_FileDialogNewFolder),
+            "新增维度", primary=True, size=28)
         b_adddim.clicked.connect(self._add_dim)
         hl.addWidget(b_adddim); ll.addWidget(hdr_l)
 
@@ -646,9 +709,9 @@ class AuxPage(QWidget):
         hdr_r = QHBoxLayout()
         self.dim_title = lbl("请选择左侧维度", bold=True, size=15)
         hdr_r.addWidget(self.dim_title); hdr_r.addStretch()
-        self.b_additem = QPushButton("＋ 新增对象"); self.b_additem.setObjectName("btn_primary")
+        self.b_additem = self._make_icon_btn(self._glyph_icon("add", "#ffffff"), "新增对象", primary=True)
         self.b_additem.clicked.connect(self._add_item)
-        b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
+        b_exp = self._make_icon_btn(self._glyph_icon("export"), "导出对象列表")
         b_exp.clicked.connect(self._export_items)
         hdr_r.addWidget(b_exp); hdr_r.addWidget(self.b_additem)
         tl.addLayout(hdr_r)
@@ -672,7 +735,7 @@ class AuxPage(QWidget):
         f2 = card(); v2 = QVBoxLayout(f2); v2.setContentsMargins(12,10,12,10); v2.setSpacing(8)
         bind_hdr = QHBoxLayout()
         bind_hdr.addWidget(lbl("已绑定科目", bold=True)); bind_hdr.addStretch()
-        b_bind = QPushButton("＋ 绑定科目"); b_bind.setObjectName("btn_outline")
+        b_bind = self._make_icon_btn(self._glyph_icon("bind"), "绑定科目")
         b_bind.clicked.connect(self._bind_account)
         bind_hdr.addWidget(b_bind); v2.addLayout(bind_hdr)
         self.bind_list = QListWidget()
@@ -692,7 +755,7 @@ class AuxPage(QWidget):
 
         rpt_hdr = QHBoxLayout()
         rpt_hdr.addWidget(lbl("往来对账表", bold=True, size=15)); rpt_hdr.addStretch()
-        b_rpt_exp = QPushButton("导出Excel"); b_rpt_exp.setObjectName("btn_outline")
+        b_rpt_exp = self._make_icon_btn(self._glyph_icon("export"), "导出往来对账")
         b_rpt_exp.clicked.connect(self._export_aux_report)
         rpt_hdr.addWidget(b_rpt_exp); tr.addLayout(rpt_hdr)
 
@@ -708,7 +771,7 @@ class AuxPage(QWidget):
         self.rpt_acct_combo = QComboBox(); self.rpt_acct_combo.setMinimumWidth(200)
         self.rpt_acct_combo.addItem("全部科目", "")
         fr.addWidget(self.rpt_acct_combo)
-        b_q = QPushButton("查询"); b_q.setObjectName("btn_primary")
+        b_q = self._make_icon_btn(self._glyph_icon("query", "#ffffff"), "查询", primary=True)
         b_q.clicked.connect(self._load_aux_report)
         fr.addWidget(b_q); fr.addStretch()
         tr.addLayout(fr)
@@ -728,6 +791,76 @@ class AuxPage(QWidget):
 
         rl.addWidget(self.right_tabs)
         L.addWidget(right)
+
+    def _theme_icon(self, primary, fallback):
+        icon = QIcon.fromTheme(primary)
+        if icon.isNull():
+            icon = self.style().standardIcon(fallback)
+        return icon
+
+    def _glyph_icon(self, kind, color="#3d6fdb"):
+        size = 18
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(color))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+
+        if kind == "add":
+            p.drawLine(9, 3, 9, 15)
+            p.drawLine(3, 9, 15, 9)
+        elif kind == "edit":
+            p.drawLine(4, 13, 13, 4)
+            p.drawLine(11, 4, 13, 6)
+            p.drawLine(4, 11, 6, 13)
+            p.drawLine(3, 15, 7, 15)
+        elif kind == "delete":
+            p.drawLine(4, 4, 14, 14)
+            p.drawLine(14, 4, 4, 14)
+        elif kind == "export":
+            p.drawLine(9, 3, 9, 11)
+            p.drawLine(6, 8, 9, 11)
+            p.drawLine(12, 8, 9, 11)
+            p.drawLine(4, 15, 14, 15)
+        elif kind == "bind":
+            p.drawArc(2, 6, 7, 6, 270 * 16, 180 * 16)
+            p.drawArc(9, 6, 7, 6, 90 * 16, 180 * 16)
+            p.drawLine(7, 9, 11, 9)
+        elif kind == "query":
+            p.drawEllipse(3, 3, 8, 8)
+            p.drawLine(10, 10, 14, 14)
+
+        p.end()
+        return QIcon(pm)
+
+    def _make_icon_btn(self, icon, tooltip, primary=False, danger=False, size=30):
+        btn = HoverTipButton()
+        btn.setFixedSize(size, size)
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(18, 18))
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        if primary:
+            btn.setStyleSheet(
+                "QToolButton{background:#3d6fdb;color:#fff;border:none;border-radius:6px;}"
+                "QToolButton:hover{background:#2d5dc8;}"
+            )
+        elif danger:
+            btn.setStyleSheet(
+                "QToolButton{background:#ff4d4f;color:#fff;border:none;border-radius:6px;}"
+                "QToolButton:hover{background:#e63b3d;}"
+            )
+        else:
+            btn.setStyleSheet(
+                "QToolButton{background:transparent;color:#3d6fdb;border:1px solid #3d6fdb;border-radius:6px;}"
+                "QToolButton:hover{background:#eef3ff;}"
+            )
+        btn._hover_tip_text = tooltip
+        btn.setToolTip("")
+        return btn
 
     def set_client(self, client_id, period=""):
         self.client_id = client_id
@@ -882,9 +1015,13 @@ class AuxPage(QWidget):
                 it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
                 self.item_tbl.setItem(i, j, it)
             bw = QWidget(); bl = QHBoxLayout(bw); bl.setContentsMargins(4,3,4,3); bl.setSpacing(4)
-            b_ed = QPushButton("编辑"); b_ed.setObjectName("btn_outline"); b_ed.setFixedSize(64,26)
+            b_ed = self._make_icon_btn(
+                self._glyph_icon("edit"),
+                "编辑对象", size=30)
             b_ed.clicked.connect(lambda _, rr=r: self._edit_item(rr))
-            b_dl = QPushButton("删除"); b_dl.setObjectName("btn_red"); b_dl.setFixedSize(30,26)
+            b_dl = self._make_icon_btn(
+                self._glyph_icon("delete", "#ffffff"),
+                "删除对象", danger=True, size=30)
             b_dl.clicked.connect(lambda _, rid=r["id"]: self._del_item(rid))
             bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
             self.item_tbl.setCellWidget(i, 4, bw)

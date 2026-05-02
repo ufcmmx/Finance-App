@@ -1,8 +1,8 @@
 """pages/account.py — AccountPage — 会计科目管理"""
 from datetime import datetime
 from PySide6.QtWidgets import *
-from PySide6.QtCore import Qt, QDate, Signal, QTimer, QPoint
-from PySide6.QtGui import QColor, QFont, QBrush, QPalette, QCursor
+from PySide6.QtCore import Qt, QDate, Signal, QTimer, QPoint, QSize
+from PySide6.QtGui import QColor, QFont, QBrush, QPalette, QCursor, QIcon, QPixmap, QPainter, QPen
 
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
@@ -31,7 +31,7 @@ class HoverTipPopup(QFrame):
         self.hide()
 
 
-class HoverTipButton(QPushButton):
+class HoverTipButton(QToolButton):
     """Custom hover tip that stays close to the cursor."""
     _tip_popup = None
 
@@ -42,7 +42,9 @@ class HoverTipButton(QPushButton):
         return cls._tip_popup
 
     def __init__(self, text=""):
-        super().__init__(text)
+        super().__init__()
+        if text:
+            self.setText(text)
         self.setMouseTracking(True)
 
     def _show_tip(self):
@@ -122,10 +124,50 @@ class AccountPage(QWidget):
         self.client_id = client_id
         self.load()
 
-    def _make_icon_btn(self, text, tooltip, style, width=34):
-        btn = HoverTipButton(text)
+    def _glyph_icon(self, kind, color="#3d6fdb"):
+        size = 16
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(color))
+        pen.setWidth(2)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+
+        if kind == "add":
+            p.drawLine(8, 3, 8, 13)
+            p.drawLine(3, 8, 13, 8)
+        elif kind == "edit":
+            p.drawLine(4, 12, 12, 4)
+            p.drawLine(10, 4, 12, 6)
+            p.drawLine(4, 10, 6, 12)
+        elif kind == "aux":
+            p.drawEllipse(3, 3, 10, 10)
+            p.drawEllipse(6, 6, 4, 4)
+        elif kind == "view":
+            p.drawRect(3, 4, 10, 8)
+            p.drawLine(5, 7, 11, 7)
+            p.drawLine(5, 10, 11, 10)
+        elif kind == "freeze":
+            p.drawArc(4, 2, 8, 8, 0, 180 * 16)
+            p.drawRect(3, 7, 10, 6)
+        elif kind == "delete":
+            p.drawLine(4, 4, 12, 12)
+            p.drawLine(12, 4, 4, 12)
+
+        p.end()
+        return QIcon(pm)
+
+    def _make_icon_btn(self, icon, tooltip, style, width=34):
+        btn = HoverTipButton()
         btn.setFixedSize(width, 30)
         btn.setStyleSheet(style)
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(16, 16))
+        btn.setAutoRaise(False)
+        btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
         btn._hover_tip_text = tooltip
         btn.setToolTip("")
         return btn
@@ -221,20 +263,28 @@ class AccountPage(QWidget):
                 self.tbl.setCellWidget(i,4,bw)
                 continue
             
-            b_sub = self._make_icon_btn("＋", "新增子科目", outline_style)
+            b_sub = self._make_icon_btn(
+                self._glyph_icon("add"),
+                "新增子科目", outline_style)
             b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
-            b_ed = self._make_icon_btn("✎", "编辑科目", outline_style)
+            b_ed = self._make_icon_btn(
+                self._glyph_icon("edit"),
+                "编辑科目", outline_style)
             b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
             bl.addWidget(b_sub); bl.addWidget(b_ed)
 
             if not is_aux_entry:
                 bound_dims = aux_bound_map.get(r["code"], [])
                 if bound_dims:
-                    b_aux_view = self._make_icon_btn("☰", f"查看辅助核算：{', '.join(bound_dims)}", outline_style)
+                    b_aux_view = self._make_icon_btn(
+                        self._glyph_icon("view"),
+                        f"查看辅助核算：{', '.join(bound_dims)}", outline_style)
                     b_aux_view.clicked.connect(lambda _,rr=r, dims=bound_dims: self._open_aux_page(rr, dims[0]))
                     bl.addWidget(b_aux_view)
                 else:
-                    b_aux = self._make_icon_btn("◎", "辅助核算", outline_style)
+                    b_aux = self._make_icon_btn(
+                        self._glyph_icon("aux"),
+                        "辅助核算", outline_style)
                     b_aux.clicked.connect(lambda _,rr=r: self._setup_aux(rr))
                     bl.addWidget(b_aux)
             
@@ -242,12 +292,16 @@ class AccountPage(QWidget):
                 is_used = r['code'] in used_accounts
                 if is_used:
                     # Account has been used, show freeze button instead of delete
-                    b_freeze = self._make_icon_btn("❄", "冻结科目", outline_style)
+                    b_freeze = self._make_icon_btn(
+                        self._glyph_icon("freeze"),
+                        "冻结科目", outline_style)
                     b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
                     bl.addWidget(b_freeze)
                 else:
                     # Account not used, show delete button
-                    b_del = self._make_icon_btn("×", "删除科目", red_style)
+                    b_del = self._make_icon_btn(
+                        self._glyph_icon("delete", "#ffffff"),
+                        "删除科目", red_style)
                     b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
                     bl.addWidget(b_del)
             bl.addStretch()
