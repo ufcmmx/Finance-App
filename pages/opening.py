@@ -20,6 +20,7 @@ class OpeningBalancePage(QWidget):
         super().__init__()
         self.client_id = None
         self.client_name = ""
+        self._preview_display = []
         self._build()
 
     def _build(self):
@@ -65,10 +66,12 @@ class OpeningBalancePage(QWidget):
         # ── 当前期初余额预览表 ──
         L.addWidget(lbl("当前期初余额（末级科目）", bold=True, size=13))
         f = card(); vl = QVBoxLayout(f); vl.setContentsMargins(0, 0, 0, 0)
+        f.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.tbl = QTableWidget()
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.setShowGrid(True)
         self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.tbl.setColumnCount(4)
         self.tbl.setHorizontalHeaderLabels(["科目编号", "科目名称", "期初借方", "期初贷方"])
         hh = self.tbl.horizontalHeader()
@@ -77,9 +80,9 @@ class OpeningBalancePage(QWidget):
         self.tbl.setColumnWidth(0, 130)
         self.tbl.setColumnWidth(2, 130)
         self.tbl.setColumnWidth(3, 130)
+        self.tbl.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         vl.addWidget(self.tbl)
-        L.addWidget(f)
-        L.addStretch()
+        L.addWidget(f, 1)
 
         self._set_ui_enabled(False)
 
@@ -190,9 +193,21 @@ class OpeningBalancePage(QWidget):
             self.status_lbl.setText(f"期间 {period}  尚未录入期初余额")
             self.status_lbl.setStyleSheet("color:#fa8c16;")
 
-        self.tbl.setRowCount(len(display))
+        self._preview_display = list(display)
+        self._render_preview_table()
+
+    def _render_preview_table(self):
+        display = list(getattr(self, "_preview_display", []))
+        row_h = 34
+        data_rows = len(display)
+        extra_rows = 0
+        viewport_h = max(0, self.tbl.viewport().height())
+        if viewport_h > 0:
+            extra_rows = max(0, viewport_h // row_h - data_rows)
+
+        self.tbl.setRowCount(data_rows + extra_rows)
         for i, r in enumerate(display):
-            self.tbl.setRowHeight(i, 34)
+            self.tbl.setRowHeight(i, row_h)
             od = r['opening_debit'] or 0
             oc = r['opening_credit'] or 0
             code_it = QTableWidgetItem(r['code'])
@@ -206,6 +221,18 @@ class OpeningBalancePage(QWidget):
             if oc: c_it.setForeground(QColor("#e05252"))
             for j, it in enumerate([code_it, name_it, d_it, c_it]):
                 self.tbl.setItem(i, j, it)
+
+        for i in range(data_rows, data_rows + extra_rows):
+            self.tbl.setRowHeight(i, row_h)
+            for j in range(self.tbl.columnCount()):
+                it = QTableWidgetItem("")
+                it.setFlags(Qt.ItemIsEnabled)
+                self.tbl.setItem(i, j, it)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self, "_preview_display", None) is not None:
+            QTimer.singleShot(0, self._render_preview_table)
 
     def _open_dialog(self):
         if not self.client_id:

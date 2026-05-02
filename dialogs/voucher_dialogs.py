@@ -739,6 +739,51 @@ class AuxPage(QWidget):
         self._load_dims()
         self._refresh_rpt_combos()
 
+    def ensure_dimension(self, dim_name):
+        """Create the dimension when missing and return its id."""
+        if not self.client_id:
+            raise ValueError("请先选择客户")
+        name = (dim_name or "").strip()
+        if not name:
+            raise ValueError("维度名称不能为空")
+
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT id FROM aux_dimensions WHERE client_id=? AND name=?",
+                  (self.client_id, name))
+        row = c.fetchone()
+        if row:
+            dim_id = row["id"]
+        else:
+            c.execute("INSERT INTO aux_dimensions(client_id,name) VALUES(?,?)",
+                      (self.client_id, name))
+            conn.commit()
+            dim_id = c.lastrowid
+        conn.close()
+        self._load_dims()
+        self._refresh_rpt_combos()
+        return dim_id
+
+    def bind_account_dimension(self, account_code, dimension_id):
+        """Bind an account to a dimension if it is not already bound."""
+        if not self.client_id:
+            raise ValueError("请先选择客户")
+        conn = get_db()
+        conn.execute("""INSERT OR IGNORE INTO account_aux_config(client_id,account_code,dimension_id)
+                        VALUES(?,?,?)""",
+                     (self.client_id, account_code, dimension_id))
+        conn.commit()
+        conn.close()
+        if self._cur_dim_id == dimension_id:
+            self._load_bindings()
+
+    def focus_dimension(self, dimension_id):
+        """Select a dimension row by id."""
+        for idx, dim in enumerate(getattr(self, "_dims", [])):
+            if dim["id"] == dimension_id:
+                self.dim_list.setCurrentRow(idx)
+                self.right_tabs.setCurrentIndex(0)
+                return
+
     def _refresh_rpt_combos(self):
         if not self.client_id: return
         # Period

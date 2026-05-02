@@ -72,6 +72,77 @@ class AccountEditDialog(QDialog):
             if self.parent_cb.itemData(i) == p["code"]:
                 self.parent_cb.setCurrentIndex(i); break
 
+    def _pick_opening_balance_target(self, c, parent_code, parent_name, opening_debit, opening_credit):
+        """Ask which leaf child should receive the parent's opening balance."""
+        c.execute(
+            "SELECT code, name FROM accounts WHERE client_id=? AND code LIKE ? ORDER BY code",
+            (self.client_id, f"{parent_code}.%"))
+        descendants = c.fetchall()
+        if not descendants:
+            return None
+
+        all_codes = {row["code"] for row in descendants}
+        leaf_rows = [
+            row for row in descendants
+            if not any(other != row["code"] and other.startswith(row["code"] + ".")
+                       for other in all_codes)
+        ]
+        if not leaf_rows:
+            return None
+
+        amount_parts = []
+        if opening_debit:
+            amount_parts.append(f"期初借方 {opening_debit:.2f}")
+        if opening_credit:
+            amount_parts.append(f"期初贷方 {opening_credit:.2f}")
+        amount_text = "，".join(amount_parts) if amount_parts else "期初余额 0.00"
+
+        options = [f"{row['code']}  {row['name']}" for row in leaf_rows]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "迁移期初余额",
+            f"科目【{parent_code} {parent_name}】已有 {amount_text}。\n"
+            "新增下级科目后，当前余额需要下移到哪个末级科目？",
+            options,
+            0,
+            False
+        )
+        if not ok or not selected:
+            return None
+
+        return selected.split("  ", 1)[0]
+
+    def _migrate_opening_balance(self, c, parent_code, target_code):
+        c.execute(
+            "SELECT id, name, opening_debit, opening_credit FROM accounts WHERE client_id=? AND code=?",
+            (self.client_id, parent_code))
+        parent = c.fetchone()
+        c.execute(
+            "SELECT id, name, opening_debit, opening_credit FROM accounts WHERE client_id=? AND code=?",
+            (self.client_id, target_code))
+        target = c.fetchone()
+        if not parent or not target:
+            raise ValueError("余额迁移目标不存在")
+
+        parent_debit = parent["opening_debit"] or 0
+        parent_credit = parent["opening_credit"] or 0
+        if parent_debit == 0 and parent_credit == 0:
+            return
+
+        c.execute(
+            "UPDATE accounts SET opening_debit=?, opening_credit=?, is_leaf=0 WHERE id=?",
+            (0, 0, parent["id"]))
+        c.execute(
+            "UPDATE accounts SET opening_debit=?, opening_credit=?, is_leaf=1 WHERE id=?",
+            ((target["opening_debit"] or 0) + parent_debit,
+             (target["opening_credit"] or 0) + parent_credit,
+             target["id"]))
+
+        detail = (f"将科目【{parent_code} {parent['name']}】期初余额 "
+                  f"借{parent_debit:.2f}/贷{parent_credit:.2f} "
+                  f"迁移至【{target_code} {target['name']}】")
+        log_action(c.connection, self.client_id, "迁移科目期初余额", "account", target_code, detail)
+
     def _save(self):
         code = self.code.text().strip(); name = self.name.text().strip()
         if not code or not name: QMessageBox.warning(self,"提示","编号和名称不能为空"); return
@@ -87,12 +158,36 @@ class AccountEditDialog(QDialog):
                      parent,level,self.od.value(),self.oc.value(),self.account["id"]))
             else:
                 c.execute("""INSERT INTO accounts(client_id,code,name,full_name,type,direction,
-                    parent_code,level,opening_debit,opening_credit) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    parent_code,level,opening_debit,opening_credit,is_leaf) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                     (self.client_id,code,name,full,self.type_cb.currentText(),
-                     self.dir_cb.currentText(),parent,level,self.od.value(),self.oc.value()))
+                     self.dir_cb.currentText(),parent,level,self.od.value(),self.oc.value(),1))
+                if parent:
+                    c.execute(
+                        "SELECT name, opening_debit, opening_credit FROM accounts WHERE client_id=? AND code=?",
+                        (self.client_id, parent))
+                    parent_row = c.fetchone()
+                    if not parent_row:
+                        raise ValueError("上级科目不存在")
+
+                    c.execute(
+                        "UPDATE accounts SET is_leaf=0 WHERE client_id=? AND code=?",
+                        (self.client_id, parent))
+
+                    opening_debit = parent_row["opening_debit"] or 0
+                    opening_credit = parent_row["opening_credit"] or 0
+                    if opening_debit != 0 or opening_credit != 0:
+                        target_code = self._pick_opening_balance_target(
+                            c, parent, parent_row["name"], opening_debit, opening_credit)
+                        if not target_code:
+                            conn.rollback()
+                            QMessageBox.information(
+                                self, "已取消",
+                                "未选择余额承接科目，本次新增已取消。")
+                            return
+                        self._migrate_opening_balance(c, parent, target_code)
             conn.commit(); conn.close(); self.accept()
         except Exception as e:
-            conn.close(); QMessageBox.warning(self,"错误",f"保存失败：{e}")
+            conn.rollback(); conn.close(); QMessageBox.warning(self,"错误",f"保存失败：{e}")
 
 
 class ImportExcelDialog(QDialog):
