@@ -184,11 +184,37 @@ class ImportAccountSetDialog(QDialog):
                            "padding:8px 12px;font-size:12px;")
         hint.setWordWrap(True); L.addWidget(hint)
 
-        file_types = [
+        # ── 凭证行：支持多文件 ──
+        vchr_w = QFrame()
+        vchr_w.setStyleSheet("QFrame{background:#fff;border:1px solid #e8ecf2;border-radius:8px;}")
+        vchr_outer = QVBoxLayout(vchr_w); vchr_outer.setContentsMargins(16,10,16,10); vchr_outer.setSpacing(6)
+        vchr_hdr = QHBoxLayout()
+        vchr_hdr.addWidget(lbl("📝 记账凭证", bold=True))
+        vchr_hdr.addSpacing(8)
+        vchr_hdr.addWidget(lbl("支持同时选择多个文件（如每月一个凭证文件）", color="#888", size=12))
+        vchr_hdr.addStretch()
+        b_vchr_add = QPushButton("＋ 添加文件"); b_vchr_add.setObjectName("btn_outline"); b_vchr_add.setFixedWidth(90)
+        b_vchr_clr = QPushButton("清空");        b_vchr_clr.setObjectName("btn_gray");    b_vchr_clr.setFixedWidth(52)
+        b_vchr_add.clicked.connect(self._pick_voucher_files)
+        b_vchr_clr.clicked.connect(self._clear_voucher_files)
+        vchr_hdr.addWidget(b_vchr_add); vchr_hdr.addWidget(b_vchr_clr)
+        vchr_outer.addLayout(vchr_hdr)
+        self._vchr_list_widget = QListWidget()
+        self._vchr_list_widget.setStyleSheet(
+            "QListWidget{border:1px solid #e8ecf2;border-radius:4px;background:#fafafa;}"
+            "QListWidget::item{padding:3px 8px;font-size:11px;color:#3d6fdb;}"
+            "QListWidget::item:selected{background:#e6f0ff;}")
+        self._vchr_list_widget.setMaximumHeight(72)
+        self._vchr_list_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        self._vchr_count_lbl = lbl("未选择", color="#bbb", size=11)
+        vchr_outer.addWidget(self._vchr_list_widget)
+        vchr_outer.addWidget(self._vchr_count_lbl)
+        L.addWidget(vchr_w)
+
+        # ── 其余单文件类型 ──
+        single_types = [
             ("balance", "📊 科目余额表",
              "含科目编号、名称、期初余额 — 自动建科目并写期初数（必选）"),
-            ("voucher", "📝 记账凭证",
-             "全部凭证分录，自动识别用友 / 通用模板格式"),
             ("bank",    "🏦 银行存款日记账",
              "银行流水逐笔明细，写入 bank_statements 表供对账"),
             ("ledger",  "📒 总账 / 明细账",
@@ -199,7 +225,7 @@ class ImportAccountSetDialog(QDialog):
              "资产负债期末数，仅用于人工核对，不写入账套"),
         ]
         self._file_path_lbls = {}
-        for key, label, desc in file_types:
+        for key, label, desc in single_types:
             row_w = QFrame()
             row_w.setStyleSheet("QFrame{background:#fff;border:1px solid #e8ecf2;"
                                 "border-radius:8px;}")
@@ -219,6 +245,28 @@ class ImportAccountSetDialog(QDialog):
             L.addWidget(row_w)
         L.addStretch()
         self.right.addWidget(w)
+
+    def _pick_voucher_files(self):
+        """多选凭证文件，追加到队列，不覆盖已有。"""
+        import os
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择记账凭证文件（可多选）", "", "Excel 文件 (*.xls *.xlsx)")
+        if not paths: return
+        existing = self._files.get("voucher", [])
+        for p in paths:
+            if p not in existing:
+                existing.append(p)
+                self._vchr_list_widget.addItem(os.path.basename(p))
+        self._files["voucher"] = existing
+        n = len(existing)
+        self._vchr_count_lbl.setText(f"已选 {n} 个文件")
+        self._vchr_count_lbl.setStyleSheet("color:#3d6fdb;font-size:11px;")
+
+    def _clear_voucher_files(self):
+        self._files.pop("voucher", None)
+        self._vchr_list_widget.clear()
+        self._vchr_count_lbl.setText("未选择")
+        self._vchr_count_lbl.setStyleSheet("color:#bbb;font-size:11px;")
 
     def _pick_file(self, key, lbl_w):
         path, _ = QFileDialog.getOpenFileName(
@@ -258,7 +306,13 @@ class ImportAccountSetDialog(QDialog):
                   "ledger":"总账","income":"利润表","bs":"资产负债表"}
         for k, v in labels.items():
             import os
-            mark = f"✓  {os.path.basename(self._files[k])}" if k in self._files else "○  跳过"
+            val = self._files.get(k)
+            if not val:
+                mark = "○  跳过"
+            elif isinstance(val, list):
+                mark = f"✓  {len(val)} 个文件"
+            else:
+                mark = f"✓  {os.path.basename(val)}"
             lines.append(f"{v}：{mark}")
         self.preview_info.setText("\n".join(lines))
 
@@ -266,7 +320,9 @@ class ImportAccountSetDialog(QDialog):
         if not first:
             self.preview_tbl.setRowCount(0); self.preview_tbl.setColumnCount(0); return
         try:
-            df = self._read_df(self._files[first])
+            val = self._files[first]
+            preview_path = val[0] if isinstance(val, list) else val
+            df = self._read_df(preview_path)
             df = df.iloc[:20]
             cols = min(df.shape[1], 10)
             self.preview_tbl.setColumnCount(cols); self.preview_tbl.setRowCount(len(df))
@@ -380,11 +436,26 @@ class ImportAccountSetDialog(QDialog):
                 ok, err = self._imp_balance(conn, c)
                 ok_total += ok; err_total += err
 
-            # ── 2. 记账凭证 ──
+            # ── 2. 记账凭证（支持多文件） ──
             if "voucher" in self._files:
-                log("\n─── 导入记账凭证 ───")
-                ok, err = self._imp_voucher(conn, c)
-                ok_total += ok; err_total += err
+                vchr_files = self._files["voucher"]
+                if isinstance(vchr_files, str):
+                    vchr_files = [vchr_files]   # 兼容旧格式
+                log(f"\n─── 导入记账凭证（共 {len(vchr_files)} 个文件）───")
+                all_unknown = {}
+                for fi, vpath in enumerate(vchr_files, 1):
+                    import os as _os
+                    log(f"  [{fi}/{len(vchr_files)}] {_os.path.basename(vpath)}")
+                    ok, err, unk = self._imp_voucher(conn, c, vpath)
+                    ok_total += ok; err_total += err
+                    all_unknown.update(unk)
+                    conn.commit()   # 每个文件单独提交，保留已成功的进度
+                if all_unknown:
+                    log(f"\n  ⚠ 共发现 {len(all_unknown)} 个未知科目（凭证已导入，但不计入余额表/报表）：")
+                    for code, aname in list(all_unknown.items())[:20]:
+                        log(f"     {code}  {aname}")
+                    if len(all_unknown) > 20:
+                        log(f"     …（共 {len(all_unknown)} 个）")
 
             # ── 3. 银行日记账 ──
             if "bank" in self._files:
@@ -471,10 +542,18 @@ class ImportAccountSetDialog(QDialog):
         return ok, err
 
     # ── 记账凭证 ──
-    def _imp_voucher(self, conn, c):
+    def _imp_voucher(self, conn, c, path=None):
         import re
-        df = self._read_df(self._files["voucher"])
+        if path is None:
+            val = self._files.get("voucher", "")
+            path = val[0] if isinstance(val, list) else val
+        df = self._read_df(path)
         ok = skip = err = 0
+        unknown_codes = {}   # code -> aname
+
+        # ── 预加载已知科目编码 ──
+        c.execute("SELECT code FROM accounts WHERE client_id=?", (self._client_id,))
+        known_codes = {r[0] for r in c.fetchall()}
 
         # 检测格式
         is_yonyou = any(
@@ -496,6 +575,13 @@ class ImportAccountSetDialog(QDialog):
                 if c.fetchone(): skip += 1; return
                 td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
                 if abs(td - tc) > 0.01: err += 1; return
+                # ── 检查未知科目 ──
+                for _, code, aname, _, _ in ents:
+                    if code and code not in known_codes:
+                        if code not in unknown_codes:
+                            unknown_codes[code] = aname
+                        self._log(f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
+                                  f"凭证已导入但不计入余额表/报表")
                 c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
                           " VALUES(?,?,?,?,?)",
                           (self._client_id, default_period, vno, date, "已审核"))
@@ -522,7 +608,6 @@ class ImportAccountSetDialog(QDialog):
                     af = str(row.iloc[2] if df.shape[1] > 2 else "").strip()
                     if not af: continue
                     parts = af.split(" ", 1)
-                    # Preserve auxiliary-account separators from source files.
                     code = parts[0]
                     aname = parts[1] if len(parts) > 1 else af
                     d  = self._flt(row.iloc[3]) if df.shape[1] > 3 else 0
@@ -562,6 +647,13 @@ class ImportAccountSetDialog(QDialog):
                 ents = v["entries"]
                 td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
                 if abs(td - tc) > 0.01: err += 1; continue
+                # ── 检查未知科目 ──
+                for _, code, aname, _, _ in ents:
+                    if code and code not in known_codes:
+                        if code not in unknown_codes:
+                            unknown_codes[code] = aname
+                        self._log(f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
+                                  f"凭证已导入但不计入余额表/报表")
                 c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
                           " VALUES(?,?,?,?,?)",
                           (self._client_id, period, vno, v["date"], "已审核"))
@@ -573,7 +665,11 @@ class ImportAccountSetDialog(QDialog):
                 ok += 1
 
         self._log(f"  → 凭证导入 {ok} 张，跳过 {skip}，失败 {err}")
-        return ok, skip + err
+        if unknown_codes:
+            self._log(f"  ⚠ 发现 {len(unknown_codes)} 个未知科目：" +
+                      "、".join(f"{k}({v})" for k, v in list(unknown_codes.items())[:8]) +
+                      ("…" if len(unknown_codes) > 8 else ""))
+        return ok, skip + err, unknown_codes
 
     # ── 银行日记账 → bank_statements ──
     def _imp_bank(self, conn, c):

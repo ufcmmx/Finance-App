@@ -155,20 +155,77 @@ class ImportExcelDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(self,"选择文件","","Excel(*.xls *.xlsx)")
         return path
 
-    # ── Tab 1: 记账凭证 ──
+    # ── Tab 1: 记账凭证（支持批量多文件） ──
     def _build_voucher_import(self):
         info = ("支持格式：从用友/金蝶等软件导出的记账凭证XLS文件。\n"
-                "识别规则：每张凭证以[日期:...凭证字号:记-xxx]开头，下方各行为分录，[合计]行结束。\n"
-                "也支持通用模板格式（A=期间 B=凭证号 C=日期 D=摘要 E=科目编号 F=科目名 G=借方 H=贷方）。")
+                "可一次选择多个文件（如每月一个凭证文件），程序将逐一解析合并导入。\n"
+                "同期间同凭证号自动跳过，不会重复写入。")
         w, L, self.v_log = self._make_tab(info)
+
+        # ── 文件列表区 ──
+        file_area = QFrame()
+        file_area.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:6px;}")
+        fa_layout = QVBoxLayout(file_area); fa_layout.setContentsMargins(0,0,0,0); fa_layout.setSpacing(0)
+
+        fa_hdr = QWidget()
+        fa_hdr.setStyleSheet("background:#f5f7fa;border-bottom:1px solid #e4e8f0;border-radius:6px 6px 0 0;")
+        fa_hl = QHBoxLayout(fa_hdr); fa_hl.setContentsMargins(12,8,12,8)
+        fa_hl.addWidget(lbl("待导入文件列表", bold=True, size=12)); fa_hl.addStretch()
+        self._ev_count_lbl = lbl("0 个文件", color="#888", size=11)
+        fa_hl.addWidget(self._ev_count_lbl)
+        fa_layout.addWidget(fa_hdr)
+
+        self._ev_file_list = QListWidget()
+        self._ev_file_list.setStyleSheet(
+            "QListWidget{border:none;background:#fff;}"
+            "QListWidget::item{padding:5px 12px;border-bottom:1px solid #f0f2f5;font-size:12px;}"
+            "QListWidget::item:selected{background:#e6f0ff;color:#3d6fdb;}")
+        self._ev_file_list.setMaximumHeight(110)
+        self._ev_file_list.setSelectionMode(QListWidget.ExtendedSelection)
+        fa_layout.addWidget(self._ev_file_list)
+        L.insertWidget(1, file_area)
+
+        # ── 按钮行 ──
         btn_row = QHBoxLayout()
         b_tmpl = QPushButton("↓ 下载通用模板"); b_tmpl.setObjectName("btn_outline")
         b_tmpl.clicked.connect(self._dl_voucher_template)
-        b_imp = QPushButton("导入凭证文件"); b_imp.setObjectName("btn_primary")
-        b_imp.clicked.connect(self._import_vouchers)
-        btn_row.addWidget(b_tmpl); btn_row.addWidget(b_imp); btn_row.addStretch()
-        L.insertLayout(1, btn_row)
+        b_add = QPushButton("＋ 添加文件"); b_add.setObjectName("btn_outline")
+        b_add.clicked.connect(self._ev_add_files)
+        b_del = QPushButton("删除选中"); b_del.setObjectName("btn_gray")
+        b_del.clicked.connect(self._ev_remove_selected)
+        b_clr = QPushButton("清空"); b_clr.setObjectName("btn_gray")
+        b_clr.clicked.connect(self._ev_clear_files)
+        self._ev_imp_btn = QPushButton("▶ 开始批量导入"); self._ev_imp_btn.setObjectName("btn_primary")
+        self._ev_imp_btn.clicked.connect(self._import_vouchers)
+        btn_row.addWidget(b_tmpl); btn_row.addWidget(b_add)
+        btn_row.addWidget(b_del); btn_row.addWidget(b_clr)
+        btn_row.addStretch(); btn_row.addWidget(self._ev_imp_btn)
+        L.insertLayout(2, btn_row)
+
+        self._ev_paths = []   # 文件队列
         self.istack.addWidget(w)
+
+    def _ev_add_files(self):
+        import os
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择凭证文件（可多选）", "", "Excel 文件 (*.xls *.xlsx)")
+        for p in paths:
+            if p not in self._ev_paths:
+                self._ev_paths.append(p)
+                self._ev_file_list.addItem(os.path.basename(p))
+        self._ev_count_lbl.setText(f"{len(self._ev_paths)} 个文件")
+
+    def _ev_remove_selected(self):
+        for item in reversed(self._ev_file_list.selectedItems()):
+            row = self._ev_file_list.row(item)
+            self._ev_file_list.takeItem(row)
+            self._ev_paths.pop(row)
+        self._ev_count_lbl.setText(f"{len(self._ev_paths)} 个文件")
+
+    def _ev_clear_files(self):
+        self._ev_paths.clear()
+        self._ev_file_list.clear()
+        self._ev_count_lbl.setText("0 个文件")
 
     def _dl_voucher_template(self):
         import openpyxl
@@ -192,123 +249,188 @@ class ImportExcelDialog(QDialog):
         wb.save(path); self.v_log.append(f"✓ 模板已保存: {path}")
 
     def _import_vouchers(self):
-        path = self._pick_xls()
-        if not path: return
+        if not self._ev_paths:
+            QMessageBox.information(self, "提示", "请先点击【添加文件】选择要导入的凭证文件。")
+            return
+        import os, re
+        paths = list(self._ev_paths)
+        n = len(paths)
+        total_ok = total_skip = total_err = 0
+        all_unknown = {}   # 全部文件汇总的未知科目
         self.v_log.clear()
-        try:
-            import pandas as pd
-            df = pd.read_excel(path, engine="xlrd" if path.endswith(".xls") else "openpyxl",
-                               header=None, dtype=str)
-            df = df.fillna("")
-        except Exception as e:
-            self.v_log.append(f"✗ 读取失败: {e}"); return
-
-        # Detect format: 用友-style vs generic template
-        # 用友 style: row with "日期:…凭证字号:" header rows
-        is_yonyou = any("凭证字号" in str(df.iloc[r,1]) for r in range(min(10,len(df))))
-
+        self.v_log.append(f"🚀 批量导入开始，共 {n} 个文件…\n")
+        self._ev_imp_btn.setEnabled(False)
         conn = get_db(); c = conn.cursor()
-        ok = skip = err = 0
 
-        if is_yonyou:
-            # Parse 用友/金蝶 style
-            # Extract period from title row (row 0, col 1: "2026年03期 凭证")
-            title = str(df.iloc[0,1])
-            import re
-            pm = re.search(r"(\d{4})年(\d{2})期", title)
-            period = f"{pm.group(1)}-{pm.group(2)}" if pm else "2026-01"
-            self.v_log.append(f"检测到期间: {period}，开始解析…")
+        for file_idx, path in enumerate(paths, 1):
+            fname = os.path.basename(path)
+            self.v_log.append(f"─── [{file_idx}/{n}] {fname} ───")
+            QApplication.processEvents()
+            try:
+                import pandas as pd
+                df = pd.read_excel(path,
+                    engine="xlrd" if path.endswith(".xls") else "openpyxl",
+                    header=None, dtype=str).fillna("")
+            except Exception as e:
+                self.v_log.append(f"  ✗ 读取失败: {e}\n")
+                total_err += 1; continue
 
-            cur_vno = None; cur_date = ""; entries = []
+            ok = skip = err = 0
+            unknown_codes = {}   # code -> aname，本文件发现的未知科目
 
-            def flush(vno, date, ents):
-                nonlocal ok, skip, err
-                if not vno or not ents: return
-                c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
-                          (self.client_id, period, vno))
-                if c.fetchone():
-                    self.v_log.append(f"  跳过 {vno}（已存在）"); skip += 1; return
-                td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
-                if abs(td-tc) > 0.01:
-                    self.v_log.append(f"  ✗ {vno} 借贷不平 差{td-tc:.2f}，跳过"); err += 1; return
-                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status) VALUES(?,?,?,?,?)",
-                          (self.client_id,period,vno,date,"已审核"))
-                vid = c.lastrowid
-                for ln,ent in enumerate(ents,1):
-                    c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                              (vid,ln)+ent)
-                ok += 1
-                self.v_log.append(f"  ✓ {vno}  {len(ents)}行  借={td:.2f}")
+            # ── 预加载已知科目编码集合 ──
+            c.execute("SELECT code FROM accounts WHERE client_id=?", (self.client_id,))
+            known_codes = {r[0] for r in c.fetchall()}
 
-            for ri in range(len(df)):
-                row = df.iloc[ri]
-                cell1 = str(row.iloc[1]).strip()
-                if "凭证字号" in cell1:
-                    flush(cur_vno, cur_date, entries)
-                    entries = []
-                    dm = re.search(r"日期:(\S+)", cell1)
-                    nm = re.search(r"凭证字号:(\S+)", cell1)
-                    cur_date = dm.group(1) if dm else period+"-28"
-                    cur_vno  = nm.group(1).split()[0] if nm else None
-                elif cell1 in ("合计：","合计:","") or not cell1:
-                    continue
-                else:
-                    # entry row: col1=summary, col2=account, col3=debit, col4=credit
-                    acct_full = str(row.iloc[2]).strip()
-                    if not acct_full: continue
-                    parts = acct_full.split(" ", 1)
-                    code = parts[0]; aname = parts[1] if len(parts)>1 else acct_full
-                    # Preserve auxiliary-account separators from source files.
-                    code_norm = code
-                    try: d = float(row.iloc[3]) if row.iloc[3] else 0
-                    except: d = 0
-                    try: cr = float(row.iloc[4]) if row.iloc[4] else 0
-                    except: cr = 0
-                    if d == 0 and cr == 0: continue
-                    entries.append((cell1, code_norm, aname, d, cr))
-            flush(cur_vno, cur_date, entries)
+            is_yonyou = any("凭证字号" in str(df.iloc[r,1])
+                            for r in range(min(10,len(df))))
 
-        else:
-            # Generic template format (cols: period,vno,date,summary,code,name,debit,credit)
-            from collections import OrderedDict
-            vouchers = OrderedDict()
-            n_cols = df.shape[1]
-            for ri in range(1, len(df)):
-                row = df.iloc[ri]
-                def gcol(i, default=""):
-                    try: v = str(row.iloc[i]).strip() if i < n_cols else default; return v if v != "nan" else default
-                    except: return default
-                def gcol_f(i):
-                    try: v = row.iloc[i] if i < n_cols else 0; return float(v) if v and str(v) != "nan" else 0
-                    except: return 0
-                period  = gcol(0); vno = gcol(1); date = gcol(2)
-                summary = gcol(3); code = gcol(4); aname = gcol(5)
-                d = gcol_f(6); cr = gcol_f(7)
-                if not period or not vno or not code: continue
-                key = (period, vno)
-                if key not in vouchers:
-                    vouchers[key] = {"period":period,"vno":vno,"date":date,"entries":[]}
-                vouchers[key]["entries"].append((summary,code,aname,d,cr))
-            for (period,vno),v in vouchers.items():
-                c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
-                          (self.client_id,period,vno))
-                if c.fetchone(): skip+=1; continue
-                ents = v["entries"]
-                td=sum(e[3] for e in ents); tc=sum(e[4] for e in ents)
-                if abs(td-tc)>0.01: err+=1; continue
-                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status) VALUES(?,?,?,?,?)",
-                          (self.client_id,period,vno,v["date"],"已审核"))
-                vid=c.lastrowid
-                for ln,ent in enumerate(ents,1):
-                    c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                              (vid,ln)+ent)
-                ok+=1
+            if is_yonyou:
+                title = str(df.iloc[0,1])
+                pm = re.search(r"(\d{4})年(\d{2})期", title)
+                period = f"{pm.group(1)}-{pm.group(2)}" if pm else "unknown"
+                self.v_log.append(f"  格式: 用友/金蝶  期间: {period}")
+                cur_vno = None; cur_date = ""; entries = []
 
-        if ok:
+                def flush(vno, date, ents, _period=period):
+                    nonlocal ok, skip, err, unknown_codes
+                    if not vno or not ents: return
+                    c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
+                              (self.client_id, _period, vno))
+                    if c.fetchone(): skip += 1; return
+                    td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
+                    if abs(td-tc) > 0.01:
+                        self.v_log.append(f"  ✗ {vno} 借贷不平 差{td-tc:.2f}，跳过")
+                        err += 1; return
+                    # ── 检查未知科目 ──
+                    for _, code, aname, _, _ in ents:
+                        if code and code not in known_codes:
+                            if code not in unknown_codes:
+                                unknown_codes[code] = aname
+                            self.v_log.append(
+                                f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
+                                f"凭证已导入但不计入余额表/报表")
+                    c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
+                              " VALUES(?,?,?,?,?)",
+                              (self.client_id, _period, vno, date, "已审核"))
+                    vid = c.lastrowid
+                    for ln, ent in enumerate(ents, 1):
+                        c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"
+                                  "account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
+                                  (vid, ln) + ent)
+                    ok += 1
+                    if ok <= 3 or ok % 20 == 0:
+                        self.v_log.append(f"  ✓ {vno}  {len(ents)}行  借={td:.2f}")
+                    QApplication.processEvents()
+
+                for ri in range(len(df)):
+                    row = df.iloc[ri]
+                    cell1 = str(row.iloc[1]).strip()
+                    if "凭证字号" in cell1:
+                        flush(cur_vno, cur_date, entries); entries = []
+                        dm = re.search(r"日期:(\S+)", cell1)
+                        nm = re.search(r"凭证字号:(\S+)", cell1)
+                        cur_date = dm.group(1) if dm else period+"-28"
+                        cur_vno  = nm.group(1).split()[0] if nm else None
+                    elif cell1 in ("合计：","合计:","") or not cell1: continue
+                    else:
+                        acct_full = str(row.iloc[2]).strip()
+                        if not acct_full: continue
+                        parts = acct_full.split(" ", 1)
+                        code = parts[0]; aname = parts[1] if len(parts)>1 else acct_full
+                        try: d = float(row.iloc[3]) if row.iloc[3] else 0
+                        except: d = 0
+                        try: cr = float(row.iloc[4]) if row.iloc[4] else 0
+                        except: cr = 0
+                        if d == 0 and cr == 0: continue
+                        entries.append((cell1, code, aname, d, cr))
+                flush(cur_vno, cur_date, entries)
+
+            else:
+                self.v_log.append("  格式: 通用模板")
+                from collections import OrderedDict
+                vouchers = OrderedDict()
+                n_cols = df.shape[1]
+                for ri in range(1, len(df)):
+                    row = df.iloc[ri]
+                    def gcol(i, default="", _row=row):
+                        try:
+                            v = str(_row.iloc[i]).strip() if i < n_cols else default
+                            return v if v != "nan" else default
+                        except: return default
+                    def gcol_f(i, _row=row):
+                        try:
+                            v = _row.iloc[i] if i < n_cols else 0
+                            return float(v) if v and str(v) != "nan" else 0
+                        except: return 0
+                    prd = gcol(0); vno = gcol(1); date = gcol(2)
+                    summary = gcol(3); code = gcol(4); aname = gcol(5)
+                    d = gcol_f(6); cr = gcol_f(7)
+                    if not prd or not vno or not code: continue
+                    key = (prd, vno)
+                    if key not in vouchers:
+                        vouchers[key] = {"period":prd,"vno":vno,"date":date,"entries":[]}
+                    vouchers[key]["entries"].append((summary,code,aname,d,cr))
+                for (prd,vno), v in vouchers.items():
+                    c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
+                              (self.client_id,prd,vno))
+                    if c.fetchone(): skip+=1; continue
+                    ents = v["entries"]
+                    td=sum(e[3] for e in ents); tc=sum(e[4] for e in ents)
+                    if abs(td-tc)>0.01: err+=1; continue
+                    # ── 检查未知科目 ──
+                    for _, code, aname, _, _ in ents:
+                        if code and code not in known_codes:
+                            if code not in unknown_codes:
+                                unknown_codes[code] = aname
+                            self.v_log.append(
+                                f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
+                                f"凭证已导入但不计入余额表/报表")
+                    c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
+                              " VALUES(?,?,?,?,?)",
+                              (self.client_id,prd,vno,v["date"],"已审核"))
+                    vid=c.lastrowid
+                    for ln,ent in enumerate(ents,1):
+                        c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"
+                                  "account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
+                                  (vid,ln)+ent)
+                    ok+=1
+                    QApplication.processEvents()
+
+            conn.commit()   # 每个文件单独提交
+            total_ok += ok; total_skip += skip; total_err += err
+            if unknown_codes:
+                self.v_log.append(
+                    f"  ⚠ 本文件发现 {len(unknown_codes)} 个未知科目，"
+                    f"请到【科目管理】确认是否需要补录：")
+                for code, aname in unknown_codes.items():
+                    self.v_log.append(f"     {code}  {aname}")
+                all_unknown.update(unknown_codes)
+            self.v_log.append(f"  → 本文件：导入 {ok} 张，跳过 {skip}，失败 {err}\n")
+
+        if total_ok:
             log_action(conn, self.client_id, "批量导入凭证", "import", "",
-                       f"导入{ok}张凭证，跳过{skip}张，失败{err}张")
-        conn.commit(); conn.close()
-        self.v_log.append(f"\n✅ 完成：导入 {ok} 张，跳过 {skip} 张，失败 {err} 张")
+                       f"共{n}个文件，导入{total_ok}张，跳过{total_skip}，失败{total_err}")
+            conn.commit()
+        conn.close()
+        self._ev_imp_btn.setEnabled(True)
+        self.v_log.append(
+            f"{'='*44}\n"
+            f"✅ 全部完成！共处理 {n} 个文件\n"
+            f"   导入成功：{total_ok} 张\n"
+            f"   跳过重复：{total_skip} 张\n"
+            f"   失败/不平：{total_err} 张"
+        )
+        # ── 未知科目汇总弹窗 ──
+        if all_unknown:
+            msg = (f"导入完成，但发现 {len(all_unknown)} 个科目编码不在当前科目表中：\n\n")
+            for code, aname in list(all_unknown.items())[:15]:
+                msg += f"  {code}  {aname}\n"
+            if len(all_unknown) > 15:
+                msg += f"  …（共 {len(all_unknown)} 个，详见导入日志）\n"
+            msg += ("\n这些科目的凭证已正常导入，但不会计入科目余额表和财务报表。\n"
+                    "如需统计，请先到【科目管理】手动添加对应科目。")
+            QMessageBox.warning(self, "⚠ 发现未知科目", msg)
 
     # ── Tab 2: 科目余额表期初 ──
     def _build_balance_import(self):
