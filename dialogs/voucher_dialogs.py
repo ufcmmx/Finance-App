@@ -799,8 +799,12 @@ class AuxPage(QWidget):
         return icon
 
     def _glyph_icon(self, kind, color="#3d6fdb"):
-        size = 18
-        pm = QPixmap(size, size)
+        base = 18
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        dpr = screen.devicePixelRatio() if screen else 1.0
+        pm = QPixmap(int(base * dpr), int(base * dpr))
+        pm.setDevicePixelRatio(dpr)
         pm.fill(Qt.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
@@ -1012,16 +1016,16 @@ class AuxPage(QWidget):
         for i, r in enumerate(self._items):
             self.item_tbl.setRowHeight(i, 40)
             for j, v in enumerate([r["code"] or "", r["name"], r["contact"] or "", r["phone"] or ""]):
-                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
+                it = QTableWidgetItem(v)
+                it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
                 self.item_tbl.setItem(i, j, it)
-            bw = QWidget(); bl = QHBoxLayout(bw); bl.setContentsMargins(4,3,4,3); bl.setSpacing(4)
+            bw = QWidget(); bl = QHBoxLayout(bw)
+            bl.setContentsMargins(6, 4, 6, 4); bl.setSpacing(6)
             b_ed = self._make_icon_btn(
-                self._glyph_icon("edit"),
-                "编辑对象", size=30)
+                self._glyph_icon("edit"), "编辑对象", size=30)
             b_ed.clicked.connect(lambda _, rr=r: self._edit_item(rr))
             b_dl = self._make_icon_btn(
-                self._glyph_icon("delete", "#ffffff"),
-                "删除对象", danger=True, size=30)
+                self._glyph_icon("delete", "#ffffff"), "删除对象", danger=True, size=30)
             b_dl.clicked.connect(lambda _, rid=r["id"]: self._del_item(rid))
             bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
             self.item_tbl.setCellWidget(i, 4, bw)
