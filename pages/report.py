@@ -12,6 +12,17 @@ from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBo
 class ReportPage(QWidget):
     """财务报表 — 资产负债表 + 利润表"""
 
+    def _log(self, msg):
+        import sys, os
+        try:
+            _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "startup.log")
+            with open(_log_path, "a", encoding="utf-8") as f:
+                from datetime import datetime as _dt
+                f.write(f"[{_dt.now()}] {msg}\n")
+            print(msg, file=sys.stderr, flush=True)
+        except:
+            pass
+
     def __init__(self):
         super().__init__()
         self.client_id = None; self.period = ""
@@ -75,6 +86,7 @@ class ReportPage(QWidget):
         vl.addStretch(); self.stack.addWidget(w)
 
     def _switch(self, name):
+        self._log(f"_switch: tab={name}, client_id={self.client_id}")
         mapping = {"资产负债表":0,"利润表":1,"所有者权益变动表":2,"现金流量表":3,"收支统计表":4}
         for b in self._rtabs:
             b.setProperty("active","true" if b.text()==name else "false")
@@ -414,25 +426,49 @@ class ReportPage(QWidget):
         L.addWidget(self.inc_tbl); self.stack.addWidget(w)
 
     def _load_income(self):
-        if not self.client_id: return
+        if not self.client_id:
+            self._log("_load_income: no client_id, returning")
+            return
         start_period = self.rep_start_period.currentData()
         end_period = self.rep_end_period.currentData()
-        if not start_period or not end_period: return
+        if not start_period or not end_period:
+            self._log(f"_load_income: no periods (start={start_period}, end={end_period}), returning")
+            return
+        self._log(f"_load_income: client={self.client_id}, start={start_period}, end={end_period}")
         conn = get_db(); c = conn.cursor()
 
-        def fetch_period(period_filter):
+        # ── 检测科目体系：根据客户选择的会计准则，而非活动数据 ──
+        c.execute("SELECT accounting_std FROM clients WHERE id=?",
+                  (self.client_id,))
+        row = c.fetchone()
+        use_6xxx = (row["accounting_std"] == "企业会计准则" if row else True)
+        self._log(f"_load_income: use_6xxx={use_6xxx} (std={row['accounting_std'] if row else 'NOT FOUND'})")
+
+        def fetch_period(p_start, p_end):
             c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-                WHERE v.client_id=? AND v.period"""+period_filter+""" AND v.status='已审核'
-                GROUP BY e.account_code""", (self.client_id,))
+                WHERE v.client_id=? AND v.period>=? AND v.period<=?
+                AND v.status='已审核'
+                AND v.id NOT IN (
+                    SELECT ve.voucher_id FROM voucher_entries ve
+                    WHERE ve.account_code IN ('4103','3103')
+                    AND EXISTS (
+                        SELECT 1 FROM voucher_entries ve2
+                        WHERE ve2.voucher_id = ve.voucher_id
+                        AND ve2.account_code >= '6001' AND ve2.account_code < '7000'
+                    )
+                )
+                GROUP BY e.account_code""", (self.client_id, p_start, p_end))
             return {r[0]: r[1] or 0 for r in c.fetchall()}
 
-        # Current period: from start to end
-        cur = fetch_period(f">='{start_period}' AND v.period<='{end_period}'")
+        # 本期：start_period ~ end_period
+        cur = fetch_period(start_period, end_period)
         year = end_period[:4]
-        # Year-to-date: from year start to end
-        ytd = fetch_period(f" LIKE '{year}%' AND v.period<='{end_period}'")
+        year_start = f"{year}-01"
+        # 本年累计：本年1月 ~ end_period（与start_period无关，始终从年初算起）
+        ytd = fetch_period(year_start, end_period)
         conn.close()
+        self._log(f"_load_income: cur entries={len(cur)}, ytd entries={len(ytd)}")
 
         def g(codes, d=None):
             """Sum credit-minus-debit net for all accounts matching any prefix in codes list."""
@@ -447,73 +483,104 @@ class ReportPage(QWidget):
             return total
         def gy(codes): return g(codes, ytd)
 
-        # Try 6xxx first, fall back to 5xxx
-        use_6xxx = bool(g(["6001","6401","6601","6602"]))  # 检测6xxx科目体系
-
         if use_6xxx:
-            # 6xxx科目体系（用友/金蝶新版）
-            rev      = g(["6001","6051"])   # 主营业务收入+其他业务收入         # 主营+其他业务收入（贷方余额为正）
-            cost_n   = -g(["6401","6402"])               # 主营+其他业务成本（借方为正，取负得正数成本）
-            tax      = -g(["6403"])                      # 税金及附加
-            sell     = -g(["6601"])                      # 销售费用
-            mgmt     = -g(["6602"])                      # 管理费用
-            rnd      = -g(["6604"])                      # 研发费用
-            fin_net  = g(["6603"])                       # 财务费用净额（正=净收益，负=净支出）
-            inv_g    = g(["6111"])                       # 投资收益
-            fv_g     = g(["6101"])   # 公允价值变动损益                       # 公允价值变动
-            asset_d  = g(["6301"])                       # 营业外收入（此处作资产处置收益）
+            # ── 本期 ──
+            rev      = g(["6001","6051"])
+            cost_n   = -g(["6401","6402"])
+            tax      = -g(["6403"])
+            sell     = -g(["6601"])
+            mgmt     = -g(["6602"])
+            rnd      = -g(["6604"])
+            fin_net  = g(["6603"])
+            inv_g    = g(["6111"])
+            fv_g     = g(["6101"])
+            asset_d  = g(["6301"])
             op_profit = rev - cost_n - tax - sell - mgmt - rnd + fin_net + inv_g + fv_g
-            nop_inc   = g(["6301"])                      # 营业外收入
-            nop_exp   = -g(["6711"])                     # 营业外支出
-            tax_exp   = -g(["6801"])                     # 所得税费用
-            # YTD
+            nop_inc   = g(["6301"])
+            nop_exp   = -g(["6711"])
+            tax_exp   = -g(["6801"])
+            total_profit = op_profit + nop_inc + nop_exp
+            net_profit   = total_profit - tax_exp
             rev_y    = gy(["6001","6051"])
             cost_y   = -gy(["6401","6402"])
-            sell_y   = -gy(["6601"]); mgmt_y = -gy(["6602"])
-            fin_y    = gy(["6603"]); inv_y = gy(["6111"])
-            nop_y    = gy(["6301"]); nopx_y = -gy(["6711"])
+            tax_y_al = -gy(["6403"])          # 税金及附加 ytd
+            sell_y   = -gy(["6601"])
+            mgmt_y   = -gy(["6602"])
+            rnd_y    = -gy(["6604"])
+            fin_y    = gy(["6603"])
+            inv_y    = gy(["6111"])
+            fv_y     = gy(["6101"])
+            nop_y    = gy(["6301"])
+            nopx_y   = -gy(["6711"])
             tax_y    = -gy(["6801"])
-            op_y     = rev_y - cost_y - gy(["6403"]) - sell_y - mgmt_y + fin_y + inv_y
-            net_y    = op_y + nop_y + nopx_y + tax_y
+            op_y     = rev_y - cost_y - tax_y_al - sell_y - mgmt_y - rnd_y + fin_y + inv_y + fv_y
+            total_y  = op_y + nop_y + nopx_y
+            net_y    = total_y - tax_y
         else:
-            # 未检测到6xxx科目凭证，所有值置零
-            rev = cost_n = tax = sell = mgmt = rnd = fin_net = 0
-            inv_g = fv_g = asset_d = nop_inc = nop_exp = tax_exp = 0
-            op_profit = rev_y = cost_y = sell_y = mgmt_y = 0
-            fin_y = inv_y = nop_y = nopx_y = tax_y = op_y = net_y = 0
-
-        total_profit = op_profit + nop_inc + nop_exp
-        net_profit   = total_profit + tax_exp
+            # 5xxx 科目体系
+            rev      = g(["5001","5051"])
+            cost_n   = -g(["5401","5402"])
+            tax      = -g(["5403"])
+            sell     = -g(["5501"])
+            mgmt     = -g(["5502"])
+            rnd      = 0
+            fin_net  = g(["5503"])
+            inv_g    = g(["5111"])
+            fv_g     = g(["5121"])
+            asset_d  = 0
+            op_profit = rev - cost_n - tax - sell - mgmt + fin_net + inv_g + fv_g
+            nop_inc   = g(["5301"])
+            nop_exp   = -g(["5601"])
+            tax_exp   = -g(["5701"])
+            total_profit = op_profit + nop_inc + nop_exp
+            net_profit   = total_profit - tax_exp
+            # ── 本年累计 ──
+            rev_y    = gy(["5001","5051"])
+            cost_y   = -gy(["5401","5402"])
+            tax_y_al = -gy(["5403"])
+            sell_y   = -gy(["5501"])
+            mgmt_y   = -gy(["5502"])
+            rnd_y    = 0
+            fin_y    = gy(["5503"])
+            inv_y    = gy(["5111"])
+            fv_y     = gy(["5121"])
+            nop_y    = gy(["5301"])
+            nopx_y   = -gy(["5601"])
+            tax_y    = -gy(["5701"])
+            op_y     = rev_y - cost_y - tax_y_al - sell_y - mgmt_y + fin_y + inv_y + fv_y
+            total_y  = op_y + nop_y + nopx_y
+            net_y    = total_y - tax_y
 
         rows_data = [
-            ("一、营业收入",           "1",  rev,           rev_y,    True),
-            ("  减：营业成本",          "2",  cost_n,        cost_y,   False),
-            ("      税金及附加",        "3",  tax,           0,        False),
-            ("      销售费用",          "4",  sell,          sell_y if use_6xxx else 0, False),
-            ("      管理费用",          "5",  mgmt,          mgmt_y if use_6xxx else 0, False),
-            ("      研发费用",          "6",  rnd,           0,        False),
-            ("  加：财务费用（收益以-号填列）","7", fin_net, fin_y if use_6xxx else 0, False),
-            ("      投资收益",          "8",  inv_g,         inv_y if use_6xxx else 0, False),
-            ("      公允价值变动收益",   "9",  fv_g,          0,        False),
-            ("      资产处置收益",       "9a", asset_d,       0,        False),
-            ("二、营业利润（亏损）",     "10", op_profit,     op_y,     True),
-            ("  加：营业外收入",         "11", nop_inc,       nop_y if use_6xxx else 0, False),
-            ("  减：营业外支出",         "12", nop_exp,       nopx_y if use_6xxx else 0, False),
-            ("三、利润总额（亏损总额）", "13", total_profit,  0,        True),
-            ("  减：所得税费用",         "14", tax_exp,       tax_y if use_6xxx else 0, False),
-            ("四、净利润（净亏损）",     "15", net_profit,    net_y,    True),
-            ("  其中：归属于母公司股东的净利润","16", net_profit, 0, False),
-            ("        少数股东损益",    "17", 0,             0,        False),
-            ("五、其他综合收益的税后净额","18", 0,            0,        True),
-            ("六、综合收益总额",         "19", net_profit,   0,        True),
-            ("  其中：归属于母公司股东的综合收益","20", net_profit, 0, False),
-            ("        归属于少数股东的综合收益","21", 0,      0,       False),
-            ("七、每股收益","","","",True),
-            ("  基本每股收益",           "22", 0,             0,        False),
-            ("  稀释每股收益",           "23", 0,             0,        False),
+            ("一、营业收入",                          "1",  rev,          rev_y,    True),
+            ("  减：营业成本",                        "2",  cost_n,       cost_y,   False),
+            ("      税金及附加",                      "3",  tax,          tax_y_al, False),
+            ("      销售费用",                        "4",  sell,         sell_y,   False),
+            ("      管理费用",                        "5",  mgmt,         mgmt_y,   False),
+            ("      研发费用",                        "6",  rnd,          rnd_y,    False),
+            ("  加：财务费用（收益以-号填列）",        "7",  fin_net,      fin_y,    False),
+            ("      投资收益",                        "8",  inv_g,        inv_y,    False),
+            ("      公允价值变动收益",                "9",  fv_g,         fv_y,     False),
+            ("      资产处置收益",                    "9a", asset_d,      0,        False),
+            ("二、营业利润（亏损）",                  "10", op_profit,    op_y,     True),
+            ("  加：营业外收入",                      "11", nop_inc,      nop_y,    False),
+            ("  减：营业外支出",                      "12", nop_exp,      nopx_y,   False),
+            ("三、利润总额（亏损总额）",              "13", total_profit, total_y,  True),
+            ("  减：所得税费用",                      "14", tax_exp,      tax_y,    False),
+            ("四、净利润（净亏损）",                  "15", net_profit,   net_y,    True),
+            ("  其中：归属于母公司股东的净利润",      "16", net_profit,   net_y,    False),
+            ("        少数股东损益",                  "17", 0,            0,        False),
+            ("五、其他综合收益的税后净额",            "18", 0,            0,        True),
+            ("六、综合收益总额",                      "19", net_profit,   net_y,    True),
+            ("  其中：归属于母公司股东的综合收益",    "20", net_profit,   net_y,    False),
+            ("        归属于少数股东的综合收益",      "21", 0,            0,        False),
+            ("七、每股收益",                          "",   "",           "",       True),
+            ("  基本每股收益",                        "22", 0,            0,        False),
+            ("  稀释每股收益",                        "23", 0,            0,        False),
         ]
 
         self.inc_tbl.setRowCount(len(rows_data))
+        self._log(f"_load_income: rendering {len(rows_data)} rows, rev={rev:,.2f}, cost={cost_n:,.2f}, op_profit={op_profit:,.2f}, net={net_profit:,.2f}")
         for i,row_item in enumerate(rows_data):
             name = row_item[0]; rowno = row_item[1]
             cur_v = row_item[2]; ytd_v = row_item[3]
@@ -818,15 +885,17 @@ class ReportPage(QWidget):
         fin_ny = fi_y - fo_y
         net_ytd = cn_y + inv_ny + fin_ny
 
-        # Net profit for supplementary
+        # Net profit for supplementary - exclude carryforward vouchers
         c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+            AND (v.note IS NULL OR v.note NOT IN ('结转收入','结转费用'))
             GROUP BY e.account_code""", (self.client_id, f"{year}-01", end_period))
         mv_ytd = {r[0]: r[1] or 0 for r in c.fetchall()}
         c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+            AND (v.note IS NULL OR v.note NOT IN ('结转收入','结转费用'))
             GROUP BY e.account_code""", (self.client_id, start_period, end_period))
         mv_cur = {r[0]: r[1] or 0 for r in c.fetchall()}
         conn.close()
@@ -961,23 +1030,49 @@ class ReportPage(QWidget):
         import openpyxl
         from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
 
-        end_period = self.rep_end_period.currentData() or self.period
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
         path, _ = QFileDialog.getSaveFileName(self, "保存",
             f"现金流量表_{end_period}.xlsx", "Excel(*.xlsx)")
         if not path: return
         wb = openpyxl.Workbook(); ws = wb.active; ws.title = "现金流量表"
+        
+        # 表头
+        ws['A1'] = self.client_name
+        ws['A1'].font = XFont(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A1:D1')
+        
+        ws['A2'] = "现金流量表"
+        ws['A2'].font = XFont(bold=True, size=14)
+        ws['A2'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A2:D2')
+        
+        period_text = f"期间：{start_period} 至 {end_period}"
+        ws['A3'] = period_text
+        ws['A3'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A3:D3')
+        
+        # 空行
+        ws['A4'] = ""
+        
+        # 数据表头
         hdrs = ["项目","行次","本期金额","本年累计金额"]
         fill_hdr = PatternFill("solid", fgColor="1C2340")
         for ci, h in enumerate(hdrs, 1):
-            cell = ws.cell(1, ci, h)
+            cell = ws.cell(5, ci, h)
             cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
             cell.alignment = Alignment(horizontal="center")
+        
+        # 数据行
         for ri in range(self.cf_stmt_tbl.rowCount()):
             row_vals = []
             for ci in range(4):
                 it = self.cf_stmt_tbl.item(ri, ci)
                 row_vals.append(it.text() if it else "")
             ws.append(row_vals)
+        
         ws.column_dimensions['A'].width = 45
         for col in ['B','C','D']: ws.column_dimensions[col].width = 16
         wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
@@ -1003,6 +1098,7 @@ class ReportPage(QWidget):
             SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period>=? AND v.period<=? AND v.status='已审核'
+            AND (v.note IS NULL OR v.note NOT IN ('结转收入','结转费用'))
             GROUP BY e.account_code ORDER BY e.account_code""",
             (self.client_id, start_period, end_period))
         entries = c.fetchall()
@@ -1039,9 +1135,21 @@ class ReportPage(QWidget):
             self.cf_tbl.setItem(n,j,it)
 
     def set_client(self, client_id, client_name, period):
-        self.client_id = client_id; self.period = period
+        self.client_id = client_id; self.client_name = client_name; self.period = period
         self.period_lbl.setText(f"【{client_name}】{period}")
-        # Initialize period ranges
+
+        # ── 查询该客户最近有已审核凭证的期间 ──
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT period FROM vouchers
+                     WHERE client_id=? AND status='已审核'
+                     ORDER BY period DESC LIMIT 1""", (client_id,))
+        row = c.fetchone()
+        conn.close()
+        latest_period = row[0] if row else period
+
+        # ── 填充期间下拉框（blockSignals 防止 addItem 时触发查询） ──
+        self.rep_start_period.blockSignals(True)
+        self.rep_end_period.blockSignals(True)
         self.rep_start_period.clear()
         self.rep_end_period.clear()
         now = datetime.now()
@@ -1056,13 +1164,15 @@ class ReportPage(QWidget):
             self.rep_start_period.addItem(display_str, period_str)
             self.rep_end_period.addItem(display_str, period_str)
 
-        # Set default to current period
-        current_period = f"{now.year}-{now.month:02d}"
+        # 默认选最近有数据的期间
         for i in range(self.rep_start_period.count()):
-            if self.rep_start_period.itemData(i) == current_period:
+            if self.rep_start_period.itemData(i) == latest_period:
                 self.rep_start_period.setCurrentIndex(i)
                 self.rep_end_period.setCurrentIndex(i)
                 break
+
+        self.rep_start_period.blockSignals(False)
+        self.rep_end_period.blockSignals(False)
 
         idx = self.stack.currentIndex()
         if idx==0: self._load_balance()
@@ -1073,45 +1183,226 @@ class ReportPage(QWidget):
 
     def _export(self):
         if not self.client_id: return
+        # Get current tab
+        current_tab = None
+        for b in self._rtabs:
+            if b.property("active") == "true":
+                current_tab = b.text()
+                break
+        if not current_tab: return
+        
+        # Call corresponding export method
+        if current_tab == "资产负债表":
+            self._export_balance()
+        elif current_tab == "利润表":
+            self._export_income()
+        elif current_tab == "所有者权益变动表":
+            self._export_equity()
+        elif current_tab == "现金流量表":
+            self._export_cf_stmt()
+        elif current_tab == "收支统计表":
+            self._export_cashflow()
+
+    def _export_balance(self):
+        if not self.client_id: return
         import openpyxl
         from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
-        end_period = self.rep_end_period.currentData()
-        if not end_period: return
-        path,_=QFileDialog.getSaveFileName(self,"保存",f"财务报表_{end_period}.xlsx","Excel(*.xlsx)")
-        if not path: return
-        wb = openpyxl.Workbook()
-        # Income sheet
-        ws = wb.active; ws.title="利润表"
-        ws.append(["项目","行次","本期金额","本年累计"])
-        conn = get_db(); c = conn.cursor()
         start_period = self.rep_start_period.currentData()
         end_period = self.rep_end_period.currentData()
-        if not start_period or not end_period:
-            QMessageBox.warning(self, "错误", "请选择报告期间")
-            return
-        c.execute("""SELECT e.account_code,SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
-            JOIN vouchers v ON v.id=e.voucher_id WHERE v.client_id=? AND v.period>=? AND v.period<=? GROUP BY e.account_code""",
-                  (self.client_id, start_period, end_period))
-        cur = {r[0]:r[1] or 0 for r in c.fetchall()}
-        def g(code):
-            total = 0
-            for k, v in cur.items():
-                if k == code or k.startswith(code+".") or k.startswith(code+"_"):
-                    total += (v or 0)
-            return total
-        use_6 = bool(g("6001") or g("6401"))
-        if use_6:
-            income = g("6001") + g("6051")
-            cost   = -(g("6401") + g("6402"))
-            ops    = income + cost - abs(g("6403")) - abs(g("6601")) - abs(g("6602")) + g("6603") - abs(g("6604"))
-            net    = ops + g("6301") - abs(g("6711")) - abs(g("6801"))
-        else:
-            income = g("5001") + g("5051"); cost = -g("5401") - g("5402")
-            ops    = income + cost - abs(g("5501")) - abs(g("5502")) + g("5503")
-            net    = ops + g("5301") - abs(g("5601")) - abs(g("5701"))
-        ws.append(["营业收入","1",income,""]); ws.append(["营业成本","2",cost,""])
-        ws.append(["营业利润","10",ops,""])
-        ws.append(["净利润","17",net,""])
-        conn.close()
-        for col in ws.columns: ws.column_dimensions[col[0].column_letter].width=20
-        wb.save(path); QMessageBox.information(self,"成功",f"报表已导出:\n{path}")
+        if not start_period or not end_period: return
+        path, _ = QFileDialog.getSaveFileName(self, "保存",
+            f"资产负债表_{end_period}.xlsx", "Excel(*.xlsx)")
+        if not path: return
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "资产负债表"
+        
+        # 表头
+        ws['A1'] = self.client_name
+        ws['A1'].font = XFont(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A1:H1')
+        
+        ws['A2'] = "资产负债表"
+        ws['A2'].font = XFont(bold=True, size=14)
+        ws['A2'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A2:H2')
+        
+        period_text = f"期间：{start_period} 至 {end_period}"
+        ws['A3'] = period_text
+        ws['A3'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A3:H3')
+        
+        # 空行
+        ws['A4'] = ""
+        
+        # 数据表头
+        hdrs = ["资产项目","行次","期末金额","年初金额","负债和所有者权益","行次","期末金额","年初金额"]
+        fill_hdr = PatternFill("solid", fgColor="1C2340")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(5, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+        
+        # 数据行
+        for ri in range(self.bs_tbl.rowCount()):
+            row_vals = []
+            for ci in range(8):
+                it = self.bs_tbl.item(ri, ci)
+                row_vals.append(it.text() if it else "")
+            ws.append(row_vals)
+        
+        ws.column_dimensions['A'].width = 30; ws.column_dimensions['E'].width = 30
+        for col in ['B','C','D','F','G','H']: ws.column_dimensions[col].width = 12
+        wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
+
+    def _export_income(self):
+        if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
+        path, _ = QFileDialog.getSaveFileName(self, "保存",
+            f"利润表_{end_period}.xlsx", "Excel(*.xlsx)")
+        if not path: return
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "利润表"
+        
+        # 表头
+        ws['A1'] = self.client_name
+        ws['A1'].font = XFont(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A1:D1')
+        
+        ws['A2'] = "利润表"
+        ws['A2'].font = XFont(bold=True, size=14)
+        ws['A2'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A2:D2')
+        
+        period_text = f"期间：{start_period} 至 {end_period}"
+        ws['A3'] = period_text
+        ws['A3'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A3:D3')
+        
+        # 空行
+        ws['A4'] = ""
+        
+        # 数据表头
+        hdrs = ["项目","行次","本期金额","本年累计"]
+        fill_hdr = PatternFill("solid", fgColor="1C2340")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(5, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+        
+        # 数据行
+        for ri in range(self.inc_tbl.rowCount()):
+            row_vals = []
+            for ci in range(4):
+                it = self.inc_tbl.item(ri, ci)
+                row_vals.append(it.text() if it else "")
+            ws.append(row_vals)
+        
+        ws.column_dimensions['A'].width = 30
+        for col in ['B','C','D']: ws.column_dimensions[col].width = 16
+        wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
+
+    def _export_equity(self):
+        if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
+        path, _ = QFileDialog.getSaveFileName(self, "保存",
+            f"所有者权益变动表_{end_period}.xlsx", "Excel(*.xlsx)")
+        if not path: return
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "所有者权益变动表"
+        
+        # 表头
+        ws['A1'] = self.client_name
+        ws['A1'].font = XFont(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A1:G1')
+        
+        ws['A2'] = "所有者权益变动表"
+        ws['A2'].font = XFont(bold=True, size=14)
+        ws['A2'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A2:G2')
+        
+        period_text = f"期间：{start_period} 至 {end_period}"
+        ws['A3'] = period_text
+        ws['A3'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A3:G3')
+        
+        # 空行
+        ws['A4'] = ""
+        
+        # 数据表头
+        hdrs = ["项目","实收资本(股本)","资本公积","其他综合收益","盈余公积","未分配利润","合计"]
+        fill_hdr = PatternFill("solid", fgColor="1C2340")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(5, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+        
+        # 数据行
+        for ri in range(self.eq_tbl.rowCount()):
+            row_vals = []
+            for ci in range(7):
+                it = self.eq_tbl.item(ri, ci)
+                row_vals.append(it.text() if it else "")
+            ws.append(row_vals)
+        
+        ws.column_dimensions['A'].width = 20
+        for col in ['B','C','D','E','F','G']: ws.column_dimensions[col].width = 14
+        wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
+
+    def _export_cashflow(self):
+        if not self.client_id: return
+        import openpyxl
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+        start_period = self.rep_start_period.currentData()
+        end_period = self.rep_end_period.currentData()
+        if not start_period or not end_period: return
+        path, _ = QFileDialog.getSaveFileName(self, "保存",
+            f"收支统计表_{end_period}.xlsx", "Excel(*.xlsx)")
+        if not path: return
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "收支统计表"
+        
+        # 表头
+        ws['A1'] = self.client_name
+        ws['A1'].font = XFont(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A1:F1')
+        
+        ws['A2'] = "收支统计表"
+        ws['A2'].font = XFont(bold=True, size=14)
+        ws['A2'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A2:F2')
+        
+        period_text = f"期间：{start_period} 至 {end_period}"
+        ws['A3'] = period_text
+        ws['A3'].alignment = Alignment(horizontal="center")
+        ws.merge_cells('A3:F3')
+        
+        # 空行
+        ws['A4'] = ""
+        
+        # 数据表头
+        hdrs = ["科目编号","科目名称","类型","本期借方","本期贷方","净额"]
+        fill_hdr = PatternFill("solid", fgColor="1C2340")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(5, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF"); cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+        
+        # 数据行
+        for ri in range(self.cf_tbl.rowCount()):
+            row_vals = []
+            for ci in range(6):
+                it = self.cf_tbl.item(ri, ci)
+                row_vals.append(it.text() if it else "")
+            ws.append(row_vals)
+        
+        ws.column_dimensions['A'].width = 12; ws.column_dimensions['B'].width = 25
+        for col in ['C','D','E','F']: ws.column_dimensions[col].width = 14
+        wb.save(path); QMessageBox.information(self, "成功", f"已导出:\n{path}")
