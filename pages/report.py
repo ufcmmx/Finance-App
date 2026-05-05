@@ -426,7 +426,7 @@ class ReportPage(QWidget):
     def _build_income(self):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14)
         self.inc_tbl = self._make_report_table(
-            ["项目","行次","本期金额","本年累计"],[-1,40,160,160])
+            ["项目","行次","本期金额","本年累计金额"],[-1,40,160,160])
         L.addWidget(self.inc_tbl); self.stack.addWidget(w)
 
     def _load_income(self):
@@ -488,99 +488,124 @@ class ReportPage(QWidget):
         def gy(codes): return g(codes, ytd)
 
         if use_6xxx:
-            # ── 本期 ──
-            rev      = g(["6001","6051"])
-            cost_n   = -g(["6401","6402"])
-            tax      = -g(["6403"])
-            sell     = -g(["6601"])
-            mgmt     = -g(["6602"])
-            rnd      = -g(["6604"])
-            fin_net  = g(["6603"])
-            inv_g    = g(["6111"])
-            fv_g     = g(["6101"])
-            asset_d  = g(["6301"])
-            op_profit = rev - cost_n - tax - sell - mgmt - rnd + fin_net + inv_g + fv_g
+            # ── 企业会计准则 ──
+            rev      = g(["6001","6051"])          # 营业收入
+            cost_n   = -g(["6401","6402"])         # 营业成本
+            tax      = -g(["6403"])                # 税金及附加
+            sell     = -g(["6601"])                # 销售费用
+            mgmt     = -g(["6602"])                # 管理费用
+            rnd      = -g(["6604"])                # 研发费用
+            fin_exp  = -g(["6603"])                # 财务费用（费用化列示）
+            impair   = -g(["6701"])                # 资产减值损失
+            oth_inc  = g(["6117"])                 # 其他收益
+            inv_g    = g(["6111"])                 # 投资收益
+            fv_g     = g(["6101"])                 # 公允价值变动收益
+            asset_d  = g(["6115"])                 # 资产处置收益
+            op_profit = (rev - cost_n - tax - sell - mgmt - rnd - fin_exp - impair
+                         + oth_inc + inv_g + fv_g + asset_d)
             nop_inc   = g(["6301"])
             nop_exp   = -g(["6711"])
             tax_exp   = -g(["6801"])
             total_profit = op_profit + nop_inc + nop_exp
             net_profit   = total_profit - tax_exp
-            rev_y    = gy(["6001","6051"])
-            cost_y   = -gy(["6401","6402"])
-            tax_y_al = -gy(["6403"])          # 税金及附加 ytd
-            sell_y   = -gy(["6601"])
-            mgmt_y   = -gy(["6602"])
-            rnd_y    = -gy(["6604"])
-            fin_y    = gy(["6603"])
-            inv_y    = gy(["6111"])
-            fv_y     = gy(["6101"])
-            nop_y    = gy(["6301"])
-            nopx_y   = -gy(["6711"])
-            tax_y    = -gy(["6801"])
-            op_y     = rev_y - cost_y - tax_y_al - sell_y - mgmt_y - rnd_y + fin_y + inv_y + fv_y
-            total_y  = op_y + nop_y + nopx_y
-            net_y    = total_y - tax_y
+            # ── 本年累计 ──
+            rev_y     = gy(["6001","6051"])
+            cost_y    = -gy(["6401","6402"])
+            tax_y_al  = -gy(["6403"])
+            sell_y    = -gy(["6601"])
+            mgmt_y    = -gy(["6602"])
+            rnd_y     = -gy(["6604"])
+            fin_exp_y = -gy(["6603"])
+            impair_y  = -gy(["6701"])
+            oth_inc_y = gy(["6117"])
+            inv_y     = gy(["6111"])
+            fv_y      = gy(["6101"])
+            asset_d_y = gy(["6115"])
+            op_y      = (rev_y - cost_y - tax_y_al - sell_y - mgmt_y - rnd_y
+                         - fin_exp_y - impair_y + oth_inc_y + inv_y + fv_y + asset_d_y)
+            nop_y     = gy(["6301"])
+            nopx_y    = -gy(["6711"])
+            tax_y     = -gy(["6801"])
+            total_y   = op_y + nop_y + nopx_y
+            net_y     = total_y - tax_y
         else:
-            # 5xxx 科目体系
+            # ── 小企业会计制度 ──
             rev      = g(["5001","5051"])
             cost_n   = -g(["5401","5402"])
             tax      = -g(["5403"])
             sell     = -g(["5501"])
             mgmt     = -g(["5502"])
             rnd      = 0
-            fin_net  = g(["5503"])
+            fin_exp  = -g(["5503"])
+            impair   = 0
+            oth_inc  = 0
             inv_g    = g(["5111"])
-            fv_g     = g(["5121"])
+            fv_g     = 0
             asset_d  = 0
-            op_profit = rev - cost_n - tax - sell - mgmt + fin_net + inv_g + fv_g
+            op_profit = rev - cost_n - tax - sell - mgmt - fin_exp + inv_g
             nop_inc   = g(["5301"])
             nop_exp   = -g(["5601"])
             tax_exp   = -g(["5701"])
             total_profit = op_profit + nop_inc + nop_exp
             net_profit   = total_profit - tax_exp
             # ── 本年累计 ──
-            rev_y    = gy(["5001","5051"])
-            cost_y   = -gy(["5401","5402"])
-            tax_y_al = -gy(["5403"])
-            sell_y   = -gy(["5501"])
-            mgmt_y   = -gy(["5502"])
-            rnd_y    = 0
-            fin_y    = gy(["5503"])
-            inv_y    = gy(["5111"])
-            fv_y     = gy(["5121"])
-            nop_y    = gy(["5301"])
-            nopx_y   = -gy(["5601"])
-            tax_y    = -gy(["5701"])
-            op_y     = rev_y - cost_y - tax_y_al - sell_y - mgmt_y + fin_y + inv_y + fv_y
-            total_y  = op_y + nop_y + nopx_y
-            net_y    = total_y - tax_y
+            rev_y     = gy(["5001","5051"])
+            cost_y    = -gy(["5401","5402"])
+            tax_y_al  = -gy(["5403"])
+            sell_y    = -gy(["5501"])
+            mgmt_y    = -gy(["5502"])
+            rnd_y     = 0
+            fin_exp_y = -gy(["5503"])
+            impair_y  = 0
+            oth_inc_y = 0
+            inv_y     = gy(["5111"])
+            fv_y      = 0
+            asset_d_y = 0
+            op_y      = rev_y - cost_y - tax_y_al - sell_y - mgmt_y - fin_exp_y + inv_y
+            nop_y     = gy(["5301"])
+            nopx_y    = -gy(["5601"])
+            tax_y     = -gy(["5701"])
+            total_y   = op_y + nop_y + nopx_y
+            net_y     = total_y - tax_y
 
         rows_data = [
-            ("一、营业收入",                          "1",  rev,          rev_y,    True),
-            ("  减：营业成本",                        "2",  cost_n,       cost_y,   False),
-            ("      税金及附加",                      "3",  tax,          tax_y_al, False),
-            ("      销售费用",                        "4",  sell,         sell_y,   False),
-            ("      管理费用",                        "5",  mgmt,         mgmt_y,   False),
-            ("      研发费用",                        "6",  rnd,          rnd_y,    False),
-            ("  加：财务费用（收益以-号填列）",        "7",  fin_net,      fin_y,    False),
-            ("      投资收益",                        "8",  inv_g,        inv_y,    False),
-            ("      公允价值变动收益",                "9",  fv_g,         fv_y,     False),
-            ("      资产处置收益",                    "9a", asset_d,      0,        False),
-            ("二、营业利润（亏损）",                  "10", op_profit,    op_y,     True),
-            ("  加：营业外收入",                      "11", nop_inc,      nop_y,    False),
-            ("  减：营业外支出",                      "12", nop_exp,      nopx_y,   False),
-            ("三、利润总额（亏损总额）",              "13", total_profit, total_y,  True),
-            ("  减：所得税费用",                      "14", tax_exp,      tax_y,    False),
-            ("四、净利润（净亏损）",                  "15", net_profit,   net_y,    True),
-            ("  其中：归属于母公司股东的净利润",      "16", net_profit,   net_y,    False),
-            ("        少数股东损益",                  "17", 0,            0,        False),
-            ("五、其他综合收益的税后净额",            "18", 0,            0,        True),
-            ("六、综合收益总额",                      "19", net_profit,   net_y,    True),
-            ("  其中：归属于母公司股东的综合收益",    "20", net_profit,   net_y,    False),
-            ("        归属于少数股东的综合收益",      "21", 0,            0,        False),
-            ("七、每股收益",                          "",   "",           "",       True),
-            ("  基本每股收益",                        "22", 0,            0,        False),
-            ("  稀释每股收益",                        "23", 0,            0,        False),
+            ("一、营业收入",                                   "1",  rev,          rev_y,      True),
+            ("减：营业成本",                                   "2",  cost_n,       cost_y,     False),
+            ("    税金及附加",                                 "3",  tax,          tax_y_al,   False),
+            ("    销售费用",                                   "4",  sell,         sell_y,     False),
+            ("    管理费用",                                   "5",  mgmt,         mgmt_y,     False),
+            ("    研发费用",                                   "6",  rnd,          rnd_y,      False),
+            ("    财务费用",                                   "7",  fin_exp,      fin_exp_y,  False),
+            ("    其中：利息费用",                             "8",  0,            0,          False),
+            ("          利息收入",                             "9",  0,            0,          False),
+            ("    资产减值损失",                               "10", impair,       impair_y,   False),
+            ("加：其他收益",                                   "11", oth_inc,      oth_inc_y,  False),
+            ("    投资收益（损失以\"-\"号填列）",              "12", inv_g,        inv_y,      False),
+            ("    其中：对联营企业和合营企业的投资收益",        "13", 0,            0,          False),
+            ("    公允价值变动收益（损失以\"-\"号填列）",      "14", fv_g,         fv_y,       False),
+            ("    资产处置收益（损失以\"-\"号填列）",          "15", asset_d,      asset_d_y,  False),
+            ("二、营业利润（亏损以\"-\"号填列）",              "16", op_profit,    op_y,       True),
+            ("加：营业外收入",                                 "17", nop_inc,      nop_y,      False),
+            ("减：营业外支出",                                 "18", nop_exp,      nopx_y,     False),
+            ("三、利润总额（亏损总额以\"-\"号填列）",          "19", total_profit, total_y,    True),
+            ("减：所得税费用",                                 "20", tax_exp,      tax_y,      False),
+            ("四、净利润（净亏损以\"-\"号填列）",              "21", net_profit,   net_y,      True),
+            ("（一）持续经营净利润（净亏损以\"-\"号填列）",    "22", net_profit,   net_y,      False),
+            ("（二）终止经营净利润（净亏损以\"-\"号填列）",    "23", 0,            0,          False),
+            ("五、其他综合收益的税后净额",                     "24", 0,            0,          True),
+            ("（一）以后不能重分类进损益的其他综合收益",       "25", 0,            0,          False),
+            ("    1.重新计量设定受益计划净负债或净资产的变动", "26", 0,            0,          False),
+            ("    2.权益法下在被投资单位不能重分类进损益的\n其他综合收益中享有的份额", "27", 0, 0, False),
+            ("（二）以后将重分类进损益的其他综合收益",         "28", 0,            0,          False),
+            ("    1.权益法下在被投资单位以后将重分类进损益的\n其他综合收益中享有的份额", "29", 0, 0, False),
+            ("    2.可供出售金融资产公允价值变动损益",         "30", 0,            0,          False),
+            ("    3.持有至到期投资重分类为可供出售金融资产损益","31", 0,            0,          False),
+            ("    4.现金流量套期损益的有效部分",               "32", 0,            0,          False),
+            ("    5.外币财务报表折算差额",                     "33", 0,            0,          False),
+            ("六、综合收益总额",                               "34", net_profit,   net_y,      True),
+            ("七、每股收益",                                   "35", "",           "",         True),
+            ("（一）基本每股收益",                             "36", 0,            0,          False),
+            ("（二）稀释每股收益",                             "37", 0,            0,          False),
         ]
 
         self.inc_tbl.setRowCount(len(rows_data))
@@ -1290,7 +1315,7 @@ class ReportPage(QWidget):
         ws['A4'] = ""
         
         # 数据表头
-        hdrs = ["项目","行次","本期金额","本年累计"]
+        hdrs = ["项目","行次","本期金额","本年累计金额"]
         fill_hdr = PatternFill("solid", fgColor="1C2340")
         for ci, h in enumerate(hdrs, 1):
             cell = ws.cell(5, ci, h)
