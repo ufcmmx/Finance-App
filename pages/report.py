@@ -219,24 +219,27 @@ class ReportPage(QWidget):
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
         notes_rec = bal(["1121"])
-        acct_rec  = bal(["1122"])
-        _prepay_raw = bal(["1123"])
-        _advrec_raw = bal(["2203"])
-        # 预付账款贷方余额 → 重分类为预收账款（确保资产负债表两边同步）
-        prepay  = max(0.0, _prepay_raw)  + max(0.0, -_advrec_raw)
+        # ── 重分类（应收↔预收、预付↔应付、其他应收↔其他应付）──
+        _ar_raw   = bal(["1122"]); _ad_raw   = bal(["2203"])
+        _pr_raw   = bal(["1123"]); _ap_raw   = bal(["2202"])
+        _or_raw   = bal(["1221"]); _op_raw   = bal(["2241"])
+        acct_rec = max(0.0, _ar_raw) + max(0.0, -_ad_raw)
+        prepay   = max(0.0, _pr_raw) + max(0.0, -_ap_raw)
+        oth_rec  = max(0.0, _or_raw) + max(0.0, -_op_raw)
         int_rec   = bal(["1132"])
         div_rec   = bal(["1131"])
-        oth_rec   = bal(["1221"])
 
         # ── 年初余额（同结构，使用 bal_ys） ──
         notes_rec_y = bal_ys(["1121"])
-        acct_rec_y  = bal_ys(["1122"])
-        _prepay_y   = bal_ys(["1123"])
-        _advrec_y   = bal_ys(["2203"])
-        prepay_y    = max(0.0, _prepay_y) + max(0.0, -_advrec_y)
+        # ── 重分类（应收↔预收、预付↔应付、其他应收↔其他应付）──
+        _ar_y    = bal_ys(["1122"]); _ad_y    = bal_ys(["2203"])
+        _pr_y    = bal_ys(["1123"]); _ap_y    = bal_ys(["2202"])
+        _or_y    = bal_ys(["1221"]); _op_y    = bal_ys(["2241"])
+        acct_rec_y = max(0.0, _ar_y) + max(0.0, -_ad_y)
+        prepay_y   = max(0.0, _pr_y) + max(0.0, -_ap_y)
+        oth_rec_y  = max(0.0, _or_y) + max(0.0, -_op_y)
         int_rec_y   = bal_ys(["1132"])
         div_rec_y   = bal_ys(["1131"])
-        oth_rec_y   = bal_ys(["1221"])
         cash_y      = bal_ys(["1001","1002","1012"])
         inventory_y = (bal_ys(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
                       - abs(bal_ys(["1471","1472"])))
@@ -254,10 +257,11 @@ class ReportPage(QWidget):
         noncur_asset_y = fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
 
         st_loan_y   = bal_ys(["2001"]); notes_pay_y = bal_ys(["2201"])
-        acct_pay_y  = bal_ys(["2202"]); adv_rec_y   = max(0.0, _advrec_y) + max(0.0, -_prepay_y)
+        acct_pay_y  = max(0.0, _ap_y) + max(0.0, -_pr_y)
+        adv_rec_y   = max(0.0, _ad_y) + max(0.0, -_ar_y)
         emp_pay_y   = bal_ys(["2211"]); tax_pay_y   = tax_pay_net_y
         int_pay_y   = bal_ys(["2231"]); div_pay_y   = bal_ys(["2232"])
-        oth_pay_y   = bal_ys(["2241"])
+        oth_pay_y   = max(0.0, _op_y) + max(0.0, -_or_y)
         # 其他流动资产（年初）= 待处理财产损溢 + 待摊费用 + 应交税费借方余额重分类
         oth_cur_asset_y = prepd_exp_y + bal_ys(["1461"]) + vat_to_asset_y
         # 其他流动负债（年初）= 待转销项税额
@@ -297,13 +301,13 @@ class ReportPage(QWidget):
         # ── 负债方 ──
         st_loan   = bal(["2001"])
         notes_pay = bal(["2201"])
-        acct_pay  = bal(["2202"])
-        adv_rec   = max(0.0, _advrec_raw) + max(0.0, -_prepay_raw)
+        acct_pay  = max(0.0, _ap_raw) + max(0.0, -_pr_raw)
+        adv_rec   = max(0.0, _ad_raw) + max(0.0, -_ar_raw)
         emp_pay   = bal(["2211"])
         tax_pay   = tax_pay_net   # 应交税费贷方净额（借方余额已重分类到其他流动资产）
         int_pay   = bal(["2231"])
         div_pay   = bal(["2232"])
-        oth_pay   = bal(["2241"])
+        oth_pay   = max(0.0, _op_raw) + max(0.0, -_or_raw)
         # 其他流动资产 = 待处理财产损溢(1901) + 待摊费用(1461) + 应交税费借方余额重分类
         oth_cur_asset = prepd_exp + bal(["1461"]) + vat_to_asset
         # 其他流动负债 = 待转销项税额（应交税费下贷方余额重分类）
