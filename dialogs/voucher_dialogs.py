@@ -725,8 +725,9 @@ class AuxPage(QWidget):
         hh = self.item_tbl.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(4, QHeaderView.Fixed)
         self.item_tbl.setColumnWidth(0,80); self.item_tbl.setColumnWidth(2,90)
-        self.item_tbl.setColumnWidth(3,110); self.item_tbl.setColumnWidth(4,160)
+        self.item_tbl.setColumnWidth(3,110); self.item_tbl.setColumnWidth(4,170)
         v1.addWidget(self.item_tbl); tl.addWidget(f1)
 
         # 科目绑定区
@@ -1014,20 +1015,22 @@ class AuxPage(QWidget):
         self._items = [dict(r) for r in rows]
         self.item_tbl.setRowCount(len(rows))
         for i, r in enumerate(self._items):
-            self.item_tbl.setRowHeight(i, 40)
+            self.item_tbl.setRowHeight(i, 44)
             for j, v in enumerate([r["code"] or "", r["name"], r["contact"] or "", r["phone"] or ""]):
                 it = QTableWidgetItem(v)
                 it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
                 self.item_tbl.setItem(i, j, it)
-            bw = QWidget(); bl = QHBoxLayout(bw)
-            bl.setContentsMargins(6, 4, 6, 4); bl.setSpacing(6)
+            bw = QWidget()
+            bw.setMinimumWidth(100)
+            bl = QHBoxLayout(bw)
+            bl.setContentsMargins(6, 0, 6, 0); bl.setSpacing(6)
             b_ed = self._make_icon_btn(
-                self._glyph_icon("edit"), "编辑对象", size=30)
+                self._glyph_icon("edit"), "编辑对象", size=26)
             b_ed.clicked.connect(lambda _, rr=r: self._edit_item(rr))
             b_dl = self._make_icon_btn(
-                self._glyph_icon("delete", "#ffffff"), "删除对象", danger=True, size=30)
+                self._glyph_icon("delete", "#ffffff"), "删除对象", danger=True, size=26)
             b_dl.clicked.connect(lambda _, rid=r["id"]: self._del_item(rid))
-            bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
+            bl.addStretch(); bl.addWidget(b_ed); bl.addWidget(b_dl); bl.addStretch()
             self.item_tbl.setCellWidget(i, 4, bw)
 
     def _add_item(self):
