@@ -199,6 +199,26 @@ def _migrate_db(conn):
             FOREIGN KEY(client_id) REFERENCES clients(id)
         )""")
         conn.commit()
+    # ── 性能索引（CREATE INDEX IF NOT EXISTS，对旧库安全幂等）──
+    c.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_vouchers_client_period
+            ON vouchers(client_id, period);
+        CREATE INDEX IF NOT EXISTS idx_vouchers_client_date
+            ON vouchers(client_id, date);
+        CREATE INDEX IF NOT EXISTS idx_entries_voucher
+            ON voucher_entries(voucher_id);
+        CREATE INDEX IF NOT EXISTS idx_entries_account
+            ON voucher_entries(account_code);
+        CREATE INDEX IF NOT EXISTS idx_entry_aux_entry
+            ON voucher_entry_aux(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_client_time
+            ON audit_log(client_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_bank_client_matched
+            ON bank_statements(client_id, is_matched);
+        CREATE INDEX IF NOT EXISTS idx_periods_client_period
+            ON periods(client_id, period);
+    """)
+    conn.commit()
 
 # 企业会计准则（2006）完整科目表
 STANDARD_ACCOUNTS = [
