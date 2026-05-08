@@ -10,7 +10,7 @@ on:
 
 env:
   APP_VERSION_MAJOR: "2"
-  APP_VERSION_MINOR_OFFSET: "56"  # 当更新 APP_VERSION_MAJOR 时，将此值设置为当前的 github.run_number，以使 MINOR 从 0 开始计数
+  APP_VERSION_MINOR_OFFSET: "56"
 
 jobs:
   build:
@@ -18,11 +18,9 @@ jobs:
 
     steps:
     - name: 检出代码
-      # 将 v4.1.1 改为 v4
       uses: actions/checkout@v4
 
     - name: 设置 Python 3.12
-      # 将 v5.0.0 改为 v5
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
@@ -32,6 +30,8 @@ jobs:
       shell: bash
       run: |
         MINOR=$(( ${{ github.run_number }} - ${{ env.APP_VERSION_MINOR_OFFSET }} ))
+        # ← 修复：防止 MINOR 为负数
+        if [ $MINOR -lt 0 ]; then MINOR=0; fi
         VERSION="PR.${{ env.APP_VERSION_MAJOR }}.${MINOR}"
         echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
         echo "APP_NAME=智一会计_${VERSION}" >> $GITHUB_OUTPUT
@@ -43,10 +43,33 @@ jobs:
         pip install PySide6 openpyxl pandas xlrd reportlab pyinstaller
 
     - name: 执行 PyInstaller 打包
-      run: pyinstaller --noconsole --onedir --name "${{ steps.version.outputs.APP_NAME }}" --icon main.ico --add-data "pages;pages" --add-data "dialogs;dialogs" --hidden-import=pages.client --hidden-import=pages.voucher --hidden-import=pages.account --hidden-import=pages.settle --hidden-import=pages.report --hidden-import=pages.audit --hidden-import=pages.system --hidden-import=dialogs.client_dialogs --hidden-import=dialogs.voucher_dialogs --hidden-import=dialogs.import_dialogs --hidden-import=dialogs.account_dialogs main.py
+      run: >
+        pyinstaller
+        --noconsole
+        --onedir
+        --name "${{ steps.version.outputs.APP_NAME }}"
+        --icon main.ico
+        --add-data "pages;pages"
+        --add-data "dialogs;dialogs"
+        --hidden-import=pages.client
+        --hidden-import=pages.voucher
+        --hidden-import=pages.account
+        --hidden-import=pages.opening
+        --hidden-import=pages.settle
+        --hidden-import=pages.report
+        --hidden-import=pages.audit
+        --hidden-import=pages.system
+        --hidden-import=dialogs.client_dialogs
+        --hidden-import=dialogs.voucher_dialogs
+        --hidden-import=dialogs.import_dialogs
+        --hidden-import=dialogs.account_dialogs
+        --hidden-import=xlrd
+        --hidden-import=xlrd.biffh
+        --hidden-import=openpyxl.styles
+        --hidden-import=openpyxl.utils
+        main.py
 
     - name: 上传程序目录
-      # 将 v4.3.0 改为 v4
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.version.outputs.APP_NAME }}
