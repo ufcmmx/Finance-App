@@ -37,7 +37,7 @@ class LoginDialog(QDialog):
         hl = QVBoxLayout(header)
         hl.setContentsMargins(32, 20, 32, 16)
         title = QLabel("智一会计")
-        title.setStyleSheet("color:#fff;font-size:22px;font-weight:bold;")
+        title.setStyleSheet("color:#ff8c00;font-size:22px;font-weight:bold;")
         sub = QLabel("本地专业版  —  请登录")
         sub.setStyleSheet("color:#8b93ae;font-size:12px;")
         hl.addWidget(title)
@@ -49,25 +49,32 @@ class LoginDialog(QDialog):
         body.setStyleSheet("background:#f0f2f5;")
         bl = QVBoxLayout(body)
         bl.setContentsMargins(40, 28, 40, 28)
-        bl.setSpacing(14)
+        bl.setSpacing(0)
+
+        def _add_field(label_text: str, widget: QLineEdit):
+            layout = QVBoxLayout()
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(4)
+            layout.addWidget(self._field_label(label_text))
+            layout.addWidget(widget)
+            bl.addLayout(layout)
+            bl.addSpacing(18)
 
         # 用户名
-        bl.addWidget(self._field_label("用户名"))
         self.f_user = QLineEdit()
         self.f_user.setPlaceholderText("请输入用户名")
-        self.f_user.setFixedHeight(38)
+        self.f_user.setFixedHeight(30)
         self.f_user.setStyleSheet(self._input_style())
-        bl.addWidget(self.f_user)
+        _add_field("用户名", self.f_user)
 
         # 密码
-        bl.addWidget(self._field_label("密码"))
         self.f_pass = QLineEdit()
         self.f_pass.setPlaceholderText("请输入密码")
         self.f_pass.setEchoMode(QLineEdit.Password)
-        self.f_pass.setFixedHeight(38)
+        self.f_pass.setFixedHeight(30)
         self.f_pass.setStyleSheet(self._input_style())
         self.f_pass.returnPressed.connect(self._do_login)
-        bl.addWidget(self.f_pass)
+        _add_field("密码", self.f_pass)
 
         # 错误提示（平时隐藏）
         self.err_lbl = QLabel("")
@@ -111,8 +118,8 @@ class LoginDialog(QDialog):
     def _input_style(self) -> str:
         return """
             QLineEdit {
-                background:#fff; border:1px solid #d9d9d9;
-                border-radius:5px; padding:0 12px; font-size:13px;
+                background:#fff; border:1px solid #bfc7d3;
+                border-radius:6px; padding:2px 10px; font-size:13px;
             }
             QLineEdit:focus { border:1.5px solid #3d6fdb; }
         """
