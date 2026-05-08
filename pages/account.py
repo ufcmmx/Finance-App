@@ -77,8 +77,8 @@ class HoverTipButton(QToolButton):
 class AccountPage(QWidget):
     """科目管理 — 查看/新增/编辑/删除二三级科目"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None
         L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
 

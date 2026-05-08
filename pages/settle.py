@@ -14,8 +14,8 @@ class SettlePage(QWidget):
     """期末结账"""
     carryforward_done = Signal()   # emitted after vouchers created
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None; self.client_name = ""; self.period = ""
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0,0,0,0)

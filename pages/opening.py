@@ -16,8 +16,8 @@ class OpeningBalancePage(QWidget):
       2. 每年第一个期间（XX-01）
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None
         self.client_name = ""
         self._preview_display = []

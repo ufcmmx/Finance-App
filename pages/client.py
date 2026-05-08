@@ -13,8 +13,8 @@ from session import AppSession
 class ClientPage(QWidget):
     client_opened = Signal(int, str, str)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("客户列表", bold=True, size=18)); hdr.addStretch()

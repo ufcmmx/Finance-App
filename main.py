@@ -100,14 +100,14 @@ class MainWindow(QMainWindow):
 
         # Content
         self.stack = QStackedWidget(); row.addWidget(self.stack)
-        self.pg_clients  = ClientPage()
-        self.pg_opening  = OpeningBalancePage()
-        self.pg_vouchers = VoucherPage()
-        self.pg_accounts = AccountPage()
-        self.pg_settle = SettlePage()
-        self.pg_reports = ReportPage()
-        self.pg_audit = AuditPage()
-        self.pg_system = SystemPage()
+        self.pg_clients  = ClientPage(self.stack)
+        self.pg_opening  = OpeningBalancePage(self.stack)
+        self.pg_vouchers = VoucherPage(self.stack)
+        self.pg_accounts = AccountPage(self.stack)
+        self.pg_settle = SettlePage(self.stack)
+        self.pg_reports = ReportPage(self.stack)
+        self.pg_audit = AuditPage(self.stack)
+        self.pg_system = SystemPage(self.stack)
         for pg in [self.pg_clients, self.pg_accounts, self.pg_opening,
                    self.pg_vouchers, self.pg_settle, self.pg_reports,
                    self.pg_audit, self.pg_system]:

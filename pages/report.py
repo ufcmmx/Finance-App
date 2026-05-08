@@ -23,8 +23,8 @@ class ReportPage(QWidget):
         except:
             pass
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None; self.period = ""
         L = QVBoxLayout(self); L.setContentsMargins(0,0,0,0); L.setSpacing(0)
         # Top tabs

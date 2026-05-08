@@ -12,8 +12,8 @@ from datetime import date
 class AuditPage(QWidget):
     """操作审计日志 — 记录所有关键操作，可导出为审计报告"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None
         L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
 

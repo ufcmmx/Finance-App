@@ -13,8 +13,8 @@ from session import AppSession
 class VoucherPage(QWidget):
     """凭证管理 — 新增/查凭证/科目余额表/明细账"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.client_id = None; self.client_name = ""; self.period = ""
         L = QVBoxLayout(self); L.setContentsMargins(0,0,0,0); L.setSpacing(0)
         # Top toolbar (智一风格横向 tab)
