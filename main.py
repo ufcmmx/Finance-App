@@ -98,16 +98,20 @@ class MainWindow(QMainWindow):
         sl.addWidget(user_bar)
         row.addWidget(sb)
 
-        # Content
+        # Content — 只建容器，页面在 show() 之后延迟创建，防止 Windows 闪窗
         self.stack = QStackedWidget(); row.addWidget(self.stack)
-        self.pg_clients  = ClientPage(self.stack)
-        self.pg_opening  = OpeningBalancePage(self.stack)
-        self.pg_vouchers = VoucherPage(self.stack)
-        self.pg_accounts = AccountPage(self.stack)
-        self.pg_settle = SettlePage(self.stack)
-        self.pg_reports = ReportPage(self.stack)
-        self.pg_audit = AuditPage(self.stack)
-        self.pg_system = SystemPage(self.stack)
+        QTimer.singleShot(0, self._init_pages)
+
+    def _init_pages(self):
+        """主窗口 show() 后才执行，此时所有页面已有父窗口，避免 Windows 闪窗"""
+        self.pg_clients  = ClientPage()
+        self.pg_opening  = OpeningBalancePage()
+        self.pg_vouchers = VoucherPage()
+        self.pg_accounts = AccountPage()
+        self.pg_settle   = SettlePage()
+        self.pg_reports  = ReportPage()
+        self.pg_audit    = AuditPage()
+        self.pg_system   = SystemPage()
         for pg in [self.pg_clients, self.pg_accounts, self.pg_opening,
                    self.pg_vouchers, self.pg_settle, self.pg_reports,
                    self.pg_audit, self.pg_system]:
@@ -122,6 +126,8 @@ class MainWindow(QMainWindow):
         self._nav("记账（凭证）")
 
     def _nav(self, name):
+        if not hasattr(self, 'pg_clients'):   # _init_pages 尚未完成，忽略
+            return
         mapping = {item[0]: item[1] for item in _NAV_ITEMS}
         perm_map = {item[0]: item[2] for item in _NAV_ITEMS}
         if name not in mapping:
