@@ -9,9 +9,8 @@ on:
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   APP_VERSION_MAJOR: "2"
-  APP_VERSION_MINOR_OFFSET: "0"
+  APP_VERSION_MINOR_OFFSET: "0"  # 当更新 APP_VERSION_MAJOR 时，将此值设置为当前的 github.run_number，以使 MINOR 从 0 开始计数
 
 jobs:
   build:
@@ -19,10 +18,10 @@ jobs:
 
     steps:
     - name: 检出代码
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4.1.1
 
     - name: 设置 Python 3.12
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v5.0.0
       with:
         python-version: '3.12'
 
@@ -45,7 +44,7 @@ jobs:
       run: pyinstaller --noconsole --onedir --name "${{ steps.version.outputs.APP_NAME }}" --icon main.ico --add-data "pages;pages" --add-data "dialogs;dialogs" --hidden-import=pages.client --hidden-import=pages.voucher --hidden-import=pages.account --hidden-import=pages.settle --hidden-import=pages.report --hidden-import=pages.audit --hidden-import=pages.system --hidden-import=dialogs.client_dialogs --hidden-import=dialogs.voucher_dialogs --hidden-import=dialogs.import_dialogs --hidden-import=dialogs.account_dialogs main.py
 
     - name: 上传程序目录
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.3.0
       with:
         name: ${{ steps.version.outputs.APP_NAME }}
         path: dist/${{ steps.version.outputs.APP_NAME }}/
