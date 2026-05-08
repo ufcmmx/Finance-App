@@ -1,17 +1,12 @@
 """main.py — 应用入口，仅包含 MainWindow 和 main()"""
 import sys, os
 
-# ── 启动前清理旧的字节码缓存，防止 .pyc 不一致导致静默崩溃 ──
-# ── 启动前清理旧的字节码缓存，防止 .pyc 不一致导致静默崩溃 ──
+# ── Windows 打包必须：防止 multiprocessing 产生子进程控制台窗口 ──
+if getattr(sys, 'frozen', False):
+    import multiprocessing
+    multiprocessing.freeze_support()
+
 _here = os.path.dirname(os.path.abspath(__file__))
-_pycache = os.path.join(_here, '__pycache__')
-if os.path.isdir(_pycache):
-    import shutil, glob
-    for _f in glob.glob(os.path.join(_pycache, 'main.*.pyc')):
-        try: os.remove(_f)
-        except: pass
-
-
 sys.path.insert(0, _here)
 from datetime import datetime
 
@@ -183,11 +178,14 @@ class MainWindow(QMainWindow):
 def main():
     import traceback
     _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "startup.log")
+    _is_frozen = getattr(sys, 'frozen', False)
     def _wlog(msg):
         try:
             with open(_log_path, "a", encoding="utf-8") as _f:
                 _f.write(msg + "\n")
-            print(msg, file=sys.stderr, flush=True)
+            # 打包后不写 stderr，避免 Windows 弹出控制台窗口
+            if not _is_frozen:
+                print(msg, file=sys.stderr, flush=True)
         except Exception:
             pass
     from datetime import datetime as _dt
