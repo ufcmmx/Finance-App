@@ -130,6 +130,16 @@ class VoucherDialog(QDialog):
         self.lbl_no = lbl("新 建", bold=True, color="#3d6fdb", size=14)
         self.date_edit = QDateEdit(QDate.currentDate())
         self.date_edit.setCalendarPopup(True); self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        # 如果有期间限制且是新建凭证，设置日期范围
+        if self.period and not self.voucher_id:
+            try:
+                year, month = map(int, self.period.split('-'))
+                min_date = QDate(year, month, 1)
+                max_date = QDate(year, month, min_date.daysInMonth())
+                self.date_edit.setDateRange(min_date, max_date)
+                self.date_edit.setDate(min_date)  # 默认设置为月初
+            except ValueError:
+                pass  # 如果期间格式错误，忽略限制
         self.preparer_lbl = lbl("未来", color="#888")
         self.attach_spin = NoScrollSpinBox(); self.attach_spin.setRange(0,999)
         self.attach_spin.setSuffix(" 张"); self.attach_spin.setFixedWidth(70)
