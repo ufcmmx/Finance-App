@@ -154,6 +154,23 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(client_id) REFERENCES clients(id)
     );
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'accountant'
+            CHECK(role IN ('superadmin','admin','accountant','readonly')),
+        is_active INTEGER DEFAULT 1,
+        last_login TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS user_client_access (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        UNIQUE(user_id, client_id)
+    );
     """)
     conn.commit()
     # Run migrations
@@ -198,6 +215,38 @@ def _migrate_db(conn):
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(client_id) REFERENCES clients(id)
         )""")
+        conn.commit()
+    # ── users 表（新增权限功能） ──
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not c.fetchone():
+        c.executescript("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'accountant'
+                    CHECK(role IN ('superadmin','admin','accountant','readonly')),
+                is_active INTEGER DEFAULT 1,
+                last_login TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE user_client_access (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+                UNIQUE(user_id, client_id)
+            );
+        """)
+        conn.commit()
+    # ── 确保有超级管理员账号（仅在 users 表为空时创建）──
+    c.execute("SELECT COUNT(*) FROM users")
+    if c.fetchone()[0] == 0:
+        import hashlib
+        default_hash = hashlib.sha256("admin123".encode()).hexdigest()
+        c.execute("""INSERT INTO users(username, password_hash, display_name, role)
+                     VALUES(?,?,?,?)""",
+                  ("admin", default_hash, "超级管理员", "superadmin"))
         conn.commit()
     # ── 性能索引（CREATE INDEX IF NOT EXISTS，对旧库安全幂等）──
     c.executescript("""
@@ -819,8 +868,17 @@ STANDARD_ACCOUNTS_SMALL = [
 ]
 
 
-def log_action(conn, client_id, action, target_type="", target_id="", detail="", operator="未来"):
-    """Write one audit log entry using an existing open connection."""
+def log_action(conn, client_id, action, target_type="", target_id="", detail="", operator=None):
+    """Write one audit log entry using an existing open connection.
+    operator 参数可选：不传则自动从 AppSession 取当前登录用户名。
+    """
+    if operator is None:
+        try:
+            from session import AppSession
+            user = AppSession.get()
+            operator = user["display_name"] if user else "未知"
+        except Exception:
+            operator = "未知"
     conn.execute(
         "INSERT INTO audit_log(client_id,operator,action,target_type,target_id,detail) VALUES(?,?,?,?,?,?)",
         (client_id, operator, action, target_type, str(target_id), detail)

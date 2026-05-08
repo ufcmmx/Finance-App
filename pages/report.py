@@ -48,8 +48,8 @@ class ReportPage(QWidget):
         self.period_lbl = lbl("", color="#3d6fdb", bold=True); tl2.addWidget(self.period_lbl)
         tl2.addSpacing(16)
         tl2.addWidget(lbl("报告期间:", color="#666"))
-        self.rep_start_period = QComboBox(); self.rep_start_period.setMinimumWidth(110)
-        self.rep_end_period   = QComboBox(); self.rep_end_period.setMinimumWidth(110)
+        self.rep_start_period = QComboBox(); self.rep_start_period.setMinimumWidth(140)
+        self.rep_end_period   = QComboBox(); self.rep_end_period.setMinimumWidth(140)
         self.rep_start_period.currentIndexChanged.connect(self._refresh_reports)
         self.rep_end_period.currentIndexChanged.connect(self._refresh_reports)
         tl2.addWidget(self.rep_start_period)
@@ -685,10 +685,8 @@ class ReportPage(QWidget):
         cprs_op = op("3002"); cprs_mv = mv("3002")
         oci_op  = 0;          oci_mv  = 0          # 其他综合收益（暂无专用科目）
         surp_op = op("3101"); surp_mv = mv("3101")
-        net_profit_mv = mv("3103")                  # 本年利润
-        profit_dist_mv = mv("3104")                 # 利润分配
         re_op   = op("3103") + op("3104")
-        re_mv   = net_profit_mv + profit_dist_mv
+        re_mv   = mv("3103") + mv("3104")          # 本年利润 + 利润分配
 
         def row_data(label, c1, c2, c3, c4, c5, bold=False, bg=None):
             total = c1+c2+c3+c4+c5
@@ -700,9 +698,9 @@ class ReportPage(QWidget):
             row_data("     前期差错更正",   0, 0, 0, 0, 0),
             row_data("二、本年年初余额",    cap_op,  cprs_op, oci_op,  surp_op, re_op,  bold=True,  bg="#f0f4ff"),
             row_data("三、本年增减变动",    cap_mv,  cprs_mv, oci_mv,  surp_mv, re_mv,  bold=True,  bg="#fafafa"),
-            row_data("  (一)综合收益总额",  0,       0,       oci_mv,  0,       net_profit_mv),
+            row_data("  (一)综合收益总额",  0,       0,       oci_mv,  0,       re_mv),
             row_data("  (二)所有者投入",    cap_mv,  cprs_mv, 0,       0,       0),
-            row_data("  (三)利润分配",      0,       0,       0,       surp_mv, profit_dist_mv),
+            row_data("  (三)利润分配",      0,       0,       0,       surp_mv, re_mv - re_mv),
             row_data("四、本年年末余额",
                      cap_op+cap_mv, cprs_op+cprs_mv, oci_op+oci_mv,
                      surp_op+surp_mv, re_op+re_mv,    bold=True, bg="#e6f0ff"),

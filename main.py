@@ -21,6 +21,8 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
 from db import init_db, get_db, log_action, STANDARD_ACCOUNTS_SMALL
 from utils import SS, lbl
+from session import AppSession, ROLE_LABELS
+from login_dialog import LoginDialog
 from dialogs import ImportAccountSetDialog
 from pages.client  import ClientPage
 from pages.opening import OpeningBalancePage
@@ -30,6 +32,18 @@ from pages.settle  import SettlePage
 from pages.report  import ReportPage
 from pages.audit   import AuditPage
 from pages.system  import SystemPage
+
+# 导航菜单：名称 → (stack索引, 所需权限)
+_NAV_ITEMS = [
+    ("客户管理",    0, "client.view"),
+    ("科目管理",    1, "account.manage"),
+    ("科目期初",    2, "opening.manage"),
+    ("记账（凭证）", 3, "voucher.view"),
+    ("期末结账",    4, "settle.manage"),
+    ("财务报表",    5, "report.view"),
+    ("审计日志",    6, "audit.view"),
+    ("系统管理",    7, "system.manage"),
+]
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -44,7 +58,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         row = QHBoxLayout(root); row.setSpacing(0); row.setContentsMargins(0,0,0,0)
 
-        # Sidebar
+        # ── Sidebar ──
         sb = QWidget(); sb.setObjectName("sidebar")
         sb.setFixedWidth(196)
         sl = QVBoxLayout(sb); sl.setContentsMargins(0,0,0,0); sl.setSpacing(0)
@@ -56,15 +70,37 @@ class MainWindow(QMainWindow):
         div = QFrame(); div.setFrameShape(QFrame.HLine)
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
         sl.addWidget(div)
+
+        # 导航按钮 — 按权限决定是否显示
         self._nav_btns = []
-        for name in ["客户管理","科目管理","科目期初","记账（凭证）","期末结账","财务报表","审计日志","系统管理"]:
+        for name, _, perm in _NAV_ITEMS:
             b = QPushButton(name); b.setObjectName("nav"); b.setProperty("active","false")
             b.clicked.connect(lambda _,n=name: self._nav(n))
+            b.setVisible(AppSession.has_perm(perm))
             sl.addWidget(b); self._nav_btns.append(b)
+
         sl.addStretch()
+
+        # 当前客户信息
         self._client_info = QLabel(""); self._client_info.setWordWrap(True)
-        self._client_info.setStyleSheet("color:#556;font-size:11px;padding:10px 16px;")
+        self._client_info.setStyleSheet("color:#556;font-size:11px;padding:6px 16px;")
         sl.addWidget(self._client_info)
+
+        # 底部：登录用户信息 + 退出
+        user_bar = QWidget()
+        user_bar.setStyleSheet("background:#151b30;")
+        ul = QVBoxLayout(user_bar); ul.setContentsMargins(14,8,14,10); ul.setSpacing(2)
+        self._user_lbl = QLabel(
+            f"{AppSession.display_name()}  [{AppSession.role_label()}]")
+        self._user_lbl.setStyleSheet("color:#8b93ae;font-size:11px;")
+        self._user_lbl.setWordWrap(True)
+        b_logout = QPushButton("退出登录")
+        b_logout.setStyleSheet("""QPushButton{background:transparent;color:#556;
+            border:none;font-size:11px;text-align:left;padding:2px 0;}
+            QPushButton:hover{color:#e05252;}""")
+        b_logout.clicked.connect(self._logout)
+        ul.addWidget(self._user_lbl); ul.addWidget(b_logout)
+        sl.addWidget(user_bar)
         row.addWidget(sb)
 
         # Content
@@ -91,8 +127,14 @@ class MainWindow(QMainWindow):
         self._nav("记账（凭证）")
 
     def _nav(self, name):
-        mapping = {"客户管理":0,"科目管理":1,"科目期初":2,"记账（凭证）":3,
-                   "期末结账":4,"财务报表":5,"审计日志":6,"系统管理":7}
+        mapping = {item[0]: item[1] for item in _NAV_ITEMS}
+        perm_map = {item[0]: item[2] for item in _NAV_ITEMS}
+        if name not in mapping:
+            return
+        # 二次权限校验（防绕过）
+        if not AppSession.has_perm(perm_map[name]):
+            QMessageBox.warning(self, "无权限", f"您没有访问【{name}】的权限")
+            return
         self.stack.setCurrentIndex(mapping[name])
         for b in self._nav_btns:
             b.setProperty("active","true" if b.text()==name else "false")
@@ -100,6 +142,10 @@ class MainWindow(QMainWindow):
         if name=="客户管理": self.pg_clients.load()
 
     def _open_client(self, client_id, name, code):
+        # 会计角色检查客户授权
+        if not AppSession.can_access_client(client_id):
+            QMessageBox.warning(self, "无权限", f"您没有访问客户【{name}】的权限")
+            return
         self._cur_client = client_id; self._cur_name = name
         now = datetime.now()
         self._cur_period = f"{now.year}-{now.month:02d}"
@@ -110,16 +156,32 @@ class MainWindow(QMainWindow):
         self.pg_settle.set_client(client_id, name, self._cur_period)
         self.pg_reports.set_client(client_id, name, self._cur_period)
         self.pg_audit.set_client(client_id)
-        # Log client open
         conn = get_db()
         log_action(conn, client_id, "打开账套", "client", client_id, f"客户: {name}")
         conn.commit(); conn.close()
         self._nav("记账（凭证）")
 
+    def _logout(self):
+        reply = QMessageBox.question(self, "退出登录", "确认退出登录？",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        AppSession.logout()
+        self.close()
+        # 重新显示登录窗口
+        from login_dialog import LoginDialog
+        dlg = LoginDialog()
+        if dlg.exec() == QDialog.Accepted:
+            w = MainWindow()
+            w.show()
+            # 把新窗口引用存到 app，防止被 GC
+            QApplication.instance()._main_window = w
+        else:
+            QApplication.instance().quit()
+
 
 def main():
-    import traceback, atexit
-    # Write log file next to the script for silent-crash debugging
+    import traceback
     _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "startup.log")
     def _wlog(msg):
         try:
@@ -137,11 +199,20 @@ def main():
         app = QApplication(sys.argv)
         _wlog("step 3: setStyleSheet")
         app.setStyleSheet(SS)
-        _wlog("step 4: MainWindow()")
+
+        # ── 登录 ──
+        _wlog("step 4: LoginDialog")
+        login_dlg = LoginDialog()
+        if login_dlg.exec() != QDialog.Accepted:
+            _wlog("用户取消登录，退出")
+            sys.exit(0)
+
+        _wlog("step 5: MainWindow()")
         w = MainWindow()
-        _wlog("step 5: w.show()")
+        app._main_window = w   # 防止被 GC
+        _wlog("step 6: w.show()")
         w.show()
-        _wlog("step 6: entering event loop")
+        _wlog("step 7: entering event loop")
         sys.exit(app.exec())
     except Exception:
         tb = traceback.format_exc()

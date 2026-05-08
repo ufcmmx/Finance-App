@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, cn_amount, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import VoucherDialog, AccountInitDialog, AuxPage
+from session import AppSession
 # openpyxl imported lazily inside each export function
 
 class VoucherPage(QWidget):
@@ -31,7 +32,7 @@ class VoucherPage(QWidget):
             tl.addWidget(b); self._tabs.append(b)
         tl.addStretch()
         self.client_lbl = lbl("", color="#3d6fdb", bold=True)
-        self.period_combo = QComboBox(); self.period_combo.setMinimumWidth(110)
+        self.period_combo = QComboBox(); self.period_combo.setMinimumWidth(140)
         self.period_combo.currentTextChanged.connect(self._on_period_change)
         tl.addWidget(self.client_lbl); tl.addSpacing(12); tl.addWidget(lbl("期间:"))
         tl.addWidget(self.period_combo)
@@ -69,10 +70,13 @@ class VoucherPage(QWidget):
         hdr.addStretch()
         b_new = QPushButton("＋ 新增凭证"); b_new.setObjectName("btn_primary")
         b_new.clicked.connect(self._new_voucher)
+        b_new.setVisible(AppSession.has_perm("voucher.create"))
         b_exp_doc = QPushButton("导出记账凭证(PDF)"); b_exp_doc.setObjectName("btn_outline")
         b_exp_doc.clicked.connect(self._export_voucher_pdf)
+        b_exp_doc.setVisible(AppSession.has_perm("report.export"))
         b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
         b_exp.clicked.connect(self._export_vouchers)
+        b_exp.setVisible(AppSession.has_perm("report.export"))
         hdr.addWidget(b_exp_doc); hdr.addWidget(b_exp); hdr.addWidget(b_new); L.addLayout(hdr)
 
         f = card(); vl = QVBoxLayout(f); vl.setContentsMargins(0,0,0,0)
@@ -141,25 +145,32 @@ class VoucherPage(QWidget):
                 f"color:{status_color};font-size:11px;"
                 f"border:1px solid {status_color};border-radius:3px;padding:2px 6px;")
             bl.addWidget(s_lbl)
-            if status == "待审核":
+            can_approve = AppSession.has_perm("voucher.approve")
+            can_edit    = AppSession.has_perm("voucher.edit")
+            can_delete  = AppSession.has_perm("voucher.delete")
+            if status == "待审核" and can_approve:
                 b_ok = QPushButton("✓ 审核通过"); b_ok.setObjectName("btn_green"); b_ok.setFixedSize(88,28)
                 b_ok.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已审核"))
                 b_no = QPushButton("✗ 拒绝"); b_no.setObjectName("btn_red"); b_no.setFixedSize(60,28)
                 b_no.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已拒绝"))
                 bl.addWidget(b_ok); bl.addWidget(b_no)
-            elif status == "已拒绝":
+            elif status == "已拒绝" and can_edit:
                 b_re = QPushButton("↩ 重新提交"); b_re.setObjectName("btn_outline"); b_re.setFixedSize(88,28)
                 b_re.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_re)
-            elif status == "已审核":
+            elif status == "已审核" and can_approve:
                 b_un = QPushButton("↩ 撤销审核"); b_un.setObjectName("btn_gray"); b_un.setFixedSize(88,28)
                 b_un.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_un)
-            b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,28)
-            b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,28)
-            b_edit.clicked.connect(lambda _,rid=r['id']:self._edit_voucher(rid))
-            b_del.clicked.connect(lambda _,rid=r['id']:self._del_voucher(rid))
-            bl.addWidget(b_edit); bl.addWidget(b_del); bl.addStretch()
+            if can_edit:
+                b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,28)
+                b_edit.clicked.connect(lambda _,rid=r['id']:self._edit_voucher(rid))
+                bl.addWidget(b_edit)
+            if can_delete:
+                b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,28)
+                b_del.clicked.connect(lambda _,rid=r['id']:self._del_voucher(rid))
+                bl.addWidget(b_del)
+            bl.addStretch()
             self.v_tbl.setCellWidget(i,6,bw)
 
     def _set_voucher_status(self, vid, new_status):
@@ -186,6 +197,8 @@ class VoucherPage(QWidget):
     def _new_voucher(self):
         if not self.client_id:
             QMessageBox.information(self,"提示","请先从客户列表选择一个客户进入账簿"); return
+        if not AppSession.has_perm("voucher.create"):
+            QMessageBox.warning(self, "无权限", "您没有新增凭证的权限"); return
         if self._is_period_closed():
             QMessageBox.warning(self,"期间已封账","该期间已结账封账，禁止新增凭证。\n如需修改请到【期末结账】页面执行反结账。"); return
         d = VoucherDialog(self, self.client_id, self.period)
@@ -194,6 +207,8 @@ class VoucherPage(QWidget):
             if getattr(d,'saved_and_new',False): self._new_voucher()
 
     def _edit_voucher(self, vid):
+        if not AppSession.has_perm("voucher.edit"):
+            QMessageBox.warning(self, "无权限", "您没有编辑凭证的权限"); return
         if self._is_period_closed():
             QMessageBox.warning(self,"期间已封账","该期间已结账封账，禁止修改凭证。\n如需修改请到【期末结账】页面执行反结账。"); return
         d = VoucherDialog(self, self.client_id, self.period, vid)
@@ -237,8 +252,8 @@ class VoucherPage(QWidget):
         # Filter row
         fr = QHBoxLayout(); fr.setSpacing(10)
         fr.addWidget(lbl("期间段:"))
-        self.bal_start_period = QComboBox(); self.bal_start_period.setMinimumWidth(100)
-        self.bal_end_period = QComboBox(); self.bal_end_period.setMinimumWidth(100)
+        self.bal_start_period = QComboBox(); self.bal_start_period.setMinimumWidth(140)
+        self.bal_end_period = QComboBox(); self.bal_end_period.setMinimumWidth(140)
         fr.addWidget(self.bal_start_period); fr.addWidget(lbl("至")); fr.addWidget(self.bal_end_period)
         b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary"); b_refresh.clicked.connect(self._load_balance)
         fr.addWidget(b_refresh); fr.addSpacing(20)
@@ -356,8 +371,8 @@ class VoucherPage(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("明细账", bold=True, size=15)); hdr.addStretch()
         hdr.addWidget(lbl("期间段:"))
-        self.ldg_start_period = QComboBox(); self.ldg_start_period.setMinimumWidth(100)
-        self.ldg_end_period = QComboBox(); self.ldg_end_period.setMinimumWidth(100)
+        self.ldg_start_period = QComboBox(); self.ldg_start_period.setMinimumWidth(140)
+        self.ldg_end_period = QComboBox(); self.ldg_end_period.setMinimumWidth(140)
         hdr.addWidget(self.ldg_start_period); hdr.addWidget(lbl("至")); hdr.addWidget(self.ldg_end_period)
         hdr.addSpacing(10); hdr.addWidget(lbl("科目:"))
         self.ldg_acct = QComboBox(); self.ldg_acct.setMinimumWidth(220)

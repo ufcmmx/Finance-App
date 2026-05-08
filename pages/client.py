@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import ClientDialog, ImportAccountSetDialog
+from session import AppSession
 # openpyxl imported lazily inside each export function
 
 class ClientPage(QWidget):
@@ -19,7 +20,9 @@ class ClientPage(QWidget):
         hdr.addWidget(lbl("客户列表", bold=True, size=18)); hdr.addStretch()
         b_imp = QPushButton("导入账套"); b_imp.setObjectName("btn_outline")
         b_imp.clicked.connect(self._import_account_set)
+        b_imp.setVisible(AppSession.has_perm("client.manage"))
         b = QPushButton("＋ 新建客户"); b.setObjectName("btn_primary"); b.clicked.connect(self._add)
+        b.setVisible(AppSession.has_perm("client.manage"))
         hdr.addWidget(b_imp); hdr.addWidget(b); L.addLayout(hdr)
         self.search = QLineEdit(); self.search.setPlaceholderText("搜索客户名称或助记码...")
         self.search.textChanged.connect(self.load)
@@ -42,12 +45,33 @@ class ClientPage(QWidget):
     def load(self):
         kw = self.search.text().strip()
         conn = get_db(); c = conn.cursor()
-        if kw:
-            c.execute("SELECT * FROM clients WHERE name LIKE ? OR short_code LIKE ? ORDER BY id",
-                      (f"%{kw}%",f"%{kw}%"))
+        user = AppSession.get()
+        role = user["role"] if user else ""
+
+        if role in ("superadmin", "admin"):
+            # 管理员以上看全部客户
+            if kw:
+                c.execute("SELECT * FROM clients WHERE name LIKE ? OR short_code LIKE ? ORDER BY id",
+                          (f"%{kw}%", f"%{kw}%"))
+            else:
+                c.execute("SELECT * FROM clients ORDER BY id")
         else:
-            c.execute("SELECT * FROM clients ORDER BY id")
+            # 会计/只读只看授权的客户
+            uid = user["id"] if user else -1
+            if kw:
+                c.execute("""SELECT cl.* FROM clients cl
+                             JOIN user_client_access uca ON uca.client_id=cl.id
+                             WHERE uca.user_id=?
+                             AND (cl.name LIKE ? OR cl.short_code LIKE ?)
+                             ORDER BY cl.id""",
+                          (uid, f"%{kw}%", f"%{kw}%"))
+            else:
+                c.execute("""SELECT cl.* FROM clients cl
+                             JOIN user_client_access uca ON uca.client_id=cl.id
+                             WHERE uca.user_id=? ORDER BY cl.id""", (uid,))
+
         rows = c.fetchall(); conn.close()
+        can_manage = AppSession.has_perm("client.manage")
         self.tbl.setRowCount(len(rows))
         for i,r in enumerate(rows):
             self.tbl.setRowHeight(i,50)
@@ -68,8 +92,10 @@ class ClientPage(QWidget):
             b1.setFixedSize(94, 30)
             b2 = QPushButton("编辑"); b2.setObjectName("btn_outline")
             b2.setFixedSize(68, 30)
+            b2.setVisible(can_manage)
             b3 = QPushButton("删除"); b3.setObjectName("btn_red")
             b3.setFixedSize(68, 30)
+            b3.setVisible(can_manage)
             b1.clicked.connect(lambda _,rr=r: self.client_opened.emit(rr['id'],rr['name'],rr['short_code'] or ''))
             b2.clicked.connect(lambda _,rr=r: self._edit(rr))
             b3.clicked.connect(lambda _,rr=r: self._del(rr))
