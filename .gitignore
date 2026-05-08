@@ -5,13 +5,18 @@ dist/
 
 # 忽略 Python 缓存
 __pycache__/
+.pycache/
+*.py[cod]
 
 # 忽略本地数据库文件（避免把你的测试数据也传到网上）
 *.db
 
 # 忽略虚拟环境（如果你有的话）
 .venv/
-venv/# 备份文件
+venv/
+
+# 备份文件
+backup/
 *.bak
 *.bak_*
 *_bak_*

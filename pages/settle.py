@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
+from session import AppSession
 
 # openpyxl imported lazily inside each export function
 
@@ -206,22 +207,26 @@ class SettlePage(QWidget):
     def _refresh_lock_state(self):
         """Update UI buttons and status label based on period close state."""
         closed = self._is_period_closed()
+        can_settle = AppSession.has_perm("settle.manage")
         if closed:
             self.status_lbl.setText("🔒 已结账封账")
             self.status_lbl.setStyleSheet("color:#ff4d4f;font-weight:bold;")
             self.do_btn.setEnabled(False)
             self.close_btn.setVisible(False)
-            self.reopen_btn.setVisible(True)
+            # 只有有权限的人才显示反结账
+            self.reopen_btn.setVisible(can_settle)
         else:
             self.status_lbl.setText("○ 未结账")
             self.status_lbl.setStyleSheet("color:#888;")
-            self.do_btn.setEnabled(True)
-            self.close_btn.setVisible(True)
+            self.do_btn.setEnabled(can_settle)
+            self.close_btn.setVisible(can_settle)
             self.reopen_btn.setVisible(False)
 
     def _close_period(self):
         """结账封账：检查无待审核凭证后锁定期间。"""
         if not self.client_id: return
+        if not AppSession.has_perm("settle.manage"):
+            QMessageBox.warning(self, "无权限", "您没有执行结账封账的权限"); return
         conn = get_db(); c = conn.cursor()
         # 检查待审核凭证
         c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND status='待审核'",
@@ -262,6 +267,8 @@ class SettlePage(QWidget):
     def _reopen_period(self):
         """反结账：解除期间锁定。"""
         if not self.client_id: return
+        if not AppSession.has_perm("settle.manage"):
+            QMessageBox.warning(self, "无权限", "您没有执行反结账的权限"); return
         conn = get_db(); c = conn.cursor()
         c.execute("""SELECT period FROM periods
                      WHERE client_id=? AND is_closed=1 AND period>=?
@@ -412,6 +419,8 @@ class SettlePage(QWidget):
 
     def _do_carryforward(self):
         if not self.client_id: return
+        if not AppSession.has_perm("settle.manage"):
+            QMessageBox.warning(self, "无权限", "您没有执行期末结转的权限"); return
         # 已结账期间不能结转
         if self._is_period_closed():
             QMessageBox.warning(self, "期间已封账", "该期间已结账封账，请先反结账后再操作。"); return
