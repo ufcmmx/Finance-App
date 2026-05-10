@@ -66,12 +66,12 @@ class MainWindow(QMainWindow):
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
         sl.addWidget(div)
 
-        # 导航按钮 — 按权限决定是否显示
+        # 导航按钮 — 登录前全部隐藏，登录后由 _refresh_for_login() 按权限显示
         self._nav_btns = []
         for name, _, perm in _NAV_ITEMS:
             b = QPushButton(name); b.setObjectName("nav"); b.setProperty("active","false")
             b.clicked.connect(lambda _,n=name: self._nav(n))
-            b.setVisible(AppSession.has_perm(perm))
+            b.setVisible(False)   # 登录前隐藏
             sl.addWidget(b); self._nav_btns.append(b)
 
         sl.addStretch()
@@ -85,8 +85,7 @@ class MainWindow(QMainWindow):
         user_bar = QWidget()
         user_bar.setStyleSheet("background:#151b30;")
         ul = QVBoxLayout(user_bar); ul.setContentsMargins(14,8,14,10); ul.setSpacing(2)
-        self._user_lbl = QLabel(
-            f"{AppSession.display_name()}  [{AppSession.role_label()}]")
+        self._user_lbl = QLabel("")
         self._user_lbl.setStyleSheet("color:#8b93ae;font-size:11px;")
         self._user_lbl.setWordWrap(True)
         b_logout = QPushButton("退出登录")
@@ -98,16 +97,14 @@ class MainWindow(QMainWindow):
         sl.addWidget(user_bar)
         row.addWidget(sb)
 
-        # Content — 只建容器，页面在 show() 之后延迟创建，防止 Windows 闪窗
+        # ── Content stack ──
         self.stack = QStackedWidget(); row.addWidget(self.stack)
-        QTimer.singleShot(0, self._init_pages)
 
-    def _init_pages(self):
-        """主窗口 show() 后才执行，此时所有页面已有父窗口，避免 Windows 闪窗"""
+        # 页面直接创建（主窗口 show() 之前已全部存在，Windows 一次性注册所有 HWND）
         self.pg_clients  = ClientPage()
+        self.pg_accounts = AccountPage()
         self.pg_opening  = OpeningBalancePage()
         self.pg_vouchers = VoucherPage()
-        self.pg_accounts = AccountPage()
         self.pg_settle   = SettlePage()
         self.pg_reports  = ReportPage()
         self.pg_audit    = AuditPage()
@@ -118,21 +115,29 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(pg)
         self.pg_clients.client_opened.connect(self._open_client)
         self.pg_settle.carryforward_done.connect(self._on_carryforward_done)
+
+    def _refresh_for_login(self):
+        """登录成功后调用：刷新导航栏权限、用户标签，跳到客户管理页"""
+        # 更新用户标签
+        self._user_lbl.setText(
+            f"{AppSession.display_name()}  [{AppSession.role_label()}]")
+        # 按权限显示/隐藏导航按钮
+        for btn, (_, _, perm) in zip(self._nav_btns, _NAV_ITEMS):
+            btn.setVisible(AppSession.has_perm(perm))
+        # 重置客户状态
+        self._cur_client = None; self._cur_name = ""; self._cur_period = ""
+        self._client_info.setText("")
         self._nav("客户管理")
 
     def _on_carryforward_done(self):
-        """After carryforward, switch to voucher page and refresh so user can see new vouchers."""
         self.pg_vouchers._switch_tab("查凭证")
         self._nav("记账（凭证）")
 
     def _nav(self, name):
-        if not hasattr(self, 'pg_clients'):   # _init_pages 尚未完成，忽略
-            return
         mapping = {item[0]: item[1] for item in _NAV_ITEMS}
         perm_map = {item[0]: item[2] for item in _NAV_ITEMS}
         if name not in mapping:
             return
-        # 二次权限校验（防绕过）
         if not AppSession.has_perm(perm_map[name]):
             QMessageBox.warning(self, "无权限", f"您没有访问【{name}】的权限")
             return
@@ -143,7 +148,6 @@ class MainWindow(QMainWindow):
         if name=="客户管理": self.pg_clients.load()
 
     def _open_client(self, client_id, name, code):
-        # 会计角色检查客户授权
         if not AppSession.can_access_client(client_id):
             QMessageBox.warning(self, "无权限", f"您没有访问客户【{name}】的权限")
             return
@@ -168,15 +172,15 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         AppSession.logout()
-        self.close()
-        # 重新显示登录窗口
-        from login_dialog import LoginDialog
-        dlg = LoginDialog()
+        # 隐藏所有导航按钮，清空客户信息
+        for btn in self._nav_btns:
+            btn.setVisible(False)
+        self._client_info.setText("")
+        self._user_lbl.setText("")
+        # 直接在现有主窗口上弹登录框，不关闭重建
+        dlg = LoginDialog(parent=self)
         if dlg.exec() == QDialog.Accepted:
-            w = MainWindow()
-            w.show()
-            # 把新窗口引用存到 app，防止被 GC
-            QApplication.instance()._main_window = w
+            self._refresh_for_login()
         else:
             QApplication.instance().quit()
 
@@ -189,7 +193,6 @@ def main():
         try:
             with open(_log_path, "a", encoding="utf-8") as _f:
                 _f.write(msg + "\n")
-            # 打包后不写 stderr，避免 Windows 弹出控制台窗口
             if not _is_frozen:
                 print(msg, file=sys.stderr, flush=True)
         except Exception:
@@ -204,19 +207,24 @@ def main():
         _wlog("step 3: setStyleSheet")
         app.setStyleSheet(SS)
 
-        # ── 登录 ──
-        _wlog("step 4: LoginDialog")
-        login_dlg = LoginDialog()
-        if login_dlg.exec() != QDialog.Accepted:
+        # ── 关键启动顺序：先建主窗口并 show()，Windows 一次性注册所有 HWND ──
+        _wlog("step 4: MainWindow()")
+        w = MainWindow()
+        app._main_window = w
+        _wlog("step 5: w.show()")
+        w.show()
+        app.processEvents()   # 确保所有 HWND 注册完毕再弹登录框
+
+        # ── 再弹登录框（此时主窗口已稳定）──
+        _wlog("step 6: LoginDialog")
+        dlg = LoginDialog(parent=w)
+        if dlg.exec() != QDialog.Accepted:
             _wlog("用户取消登录，退出")
             sys.exit(0)
 
-        _wlog("step 5: MainWindow()")
-        w = MainWindow()
-        app._main_window = w   # 防止被 GC
-        _wlog("step 6: w.show()")
-        w.show()
-        _wlog("step 7: entering event loop")
+        _wlog("step 7: _refresh_for_login")
+        w._refresh_for_login()
+        _wlog("step 8: entering event loop")
         sys.exit(app.exec())
     except Exception:
         tb = traceback.format_exc()

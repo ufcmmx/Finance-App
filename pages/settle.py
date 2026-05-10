@@ -16,7 +16,7 @@ class SettlePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.client_id = None; self.client_name = ""; self.period = ""
+        self.client_id = None; self.client_name = ""; self.period = ""; self._acct_std = "企业会计准则"
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0,0,0,0)
         outer.setSpacing(0)
@@ -124,6 +124,10 @@ class SettlePage(QWidget):
 
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.client_name = client_name; self.period = period
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT accounting_std FROM clients WHERE id=?", (client_id,))
+        row = c.fetchone(); conn.close()
+        self._acct_std = (row["accounting_std"] if row else None) or "企业会计准则"
         self.client_lbl.setText(f"【{client_name}】")
         self._refresh_period_options(period)
         self._refresh_period_view()
@@ -335,18 +339,24 @@ class SettlePage(QWidget):
     def _refresh_carry_amounts(self):
         if not self.client_id: return
         conn = get_db(); c = conn.cursor()
+        if self._acct_std == "小企业会计制度":
+            inc_lo, inc_hi = "5001", "5400"
+            exp_lo, exp_hi = "5400", "6000"
+        else:
+            inc_lo, inc_hi = "6001", "6400"
+            exp_lo, exp_hi = "6400", "7000"
         # Only count APPROVED vouchers
         c.execute("""SELECT SUM(e.credit)-SUM(e.debit) FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND (e.account_code >= '6001' AND e.account_code < '6400')""",
-                  (self.client_id, self.period))
+            AND e.account_code >= ? AND e.account_code < ?""",
+                  (self.client_id, self.period, inc_lo, inc_hi))
         income = c.fetchone()[0] or 0
         c.execute("""SELECT SUM(e.debit)-SUM(e.credit) FROM voucher_entries e
             JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND (e.account_code >= '6400' AND e.account_code < '7000')""",
-                  (self.client_id, self.period))
+            AND e.account_code >= ? AND e.account_code < ?""",
+                  (self.client_id, self.period, exp_lo, exp_hi))
         expense = c.fetchone()[0] or 0
         conn.close()
         self.card_income._amount_lbl.setText(f"金额：{income:,.2f}")
@@ -354,19 +364,27 @@ class SettlePage(QWidget):
         self._income_amt = income; self._expense_amt = expense
 
     def _load_activity(self):
-        """Show all 5xxx account activity this period so user can verify before carryforward."""
+        """Show all income/expense account activity this period so user can verify before carryforward."""
         if not self.client_id: return
         conn = get_db(); c = conn.cursor()
+        if self._acct_std == "小企业会计制度":
+            inc_lo, inc_hi = "5001", "5400"
+            exp_lo, exp_hi = "5400", "6000"
+            all_lo, all_hi = "5001", "6000"
+        else:
+            inc_lo, inc_hi = "6001", "6400"
+            exp_lo, exp_hi = "6400", "7000"
+            all_lo, all_hi = "6001", "7000"
         # All income+expense accounts with any activity, approved vouchers only
         c.execute("""SELECT e.account_code, e.account_name,
-            CASE WHEN (e.account_code >= '6001' AND e.account_code < '6400')
+            CASE WHEN (e.account_code >= ? AND e.account_code < ?)
                  THEN '收入' ELSE '费用' END as cat,
             SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period=? AND v.status='已审核'
-            AND (e.account_code >= '6001' AND e.account_code < '7000')
+            AND (e.account_code >= ? AND e.account_code < ?)
             GROUP BY e.account_code ORDER BY e.account_code""",
-                  (self.client_id, self.period))
+                  (inc_lo, inc_hi, self.client_id, self.period, all_lo, all_hi))
         rows = c.fetchall()
         # Also check unapproved counts
         c.execute("""SELECT COUNT(*) FROM vouchers
@@ -378,7 +396,7 @@ class SettlePage(QWidget):
         self.activity_tbl.setRowCount(len(rows))
         if not rows:
             self.activity_tbl.setRowCount(1)
-            msg = f"本期已审核凭证中无收入/费用科目（6001-6899）发生额。"
+            msg = f"本期已审核凭证中无收入/费用科目（{all_lo}-{all_hi}）发生额。"
             if pending:
                 msg += f"  ⚠ 有 {pending} 张凭证【待审核】，请先审核后再结转。"
             it = QTableWidgetItem(msg)
@@ -439,22 +457,27 @@ class SettlePage(QWidget):
                       (self.client_id, self.period))
             return f"记-{c.fetchone()[0]+1:03d}"
 
-        # Determine profit account once: use 4103 if exists (6xxx体系), else 3103
-        c.execute("SELECT code FROM accounts WHERE client_id=? AND code='4103'", (self.client_id,))
-        profit_code = "4103" if c.fetchone() else "3103"
-        profit_name = "本年利润"
+        # 按会计制度确定本年利润科目和收入/费用区间
+        if self._acct_std == "小企业会计制度":
+            profit_code, profit_name = "3103", "本年利润"
+            inc_lo, inc_hi = "5001", "5400"
+            exp_lo, exp_hi = "5400", "6000"
+        else:
+            profit_code, profit_name = "4103", "本年利润"
+            inc_lo, inc_hi = "6001", "6400"
+            exp_lo, exp_hi = "6400", "7000"
 
         generated = []
         # Income carry: debit income accounts, credit 本年利润
         if self.card_income._cb.isChecked() and abs(self._income_amt) > 0.005:
-            # Collect all income account balances for this period (5xxx and 6xxx)
+            # Collect all income account balances for this period
             c.execute("""SELECT e.account_code,e.account_name,
                 SUM(e.credit)-SUM(e.debit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
-                AND (e.account_code >= '6001' AND e.account_code < '6400')
+                AND e.account_code >= ? AND e.account_code < ?
                 GROUP BY e.account_code,e.account_name HAVING net>0.005""",
-                (self.client_id, self.period))
+                (self.client_id, self.period, inc_lo, inc_hi))
             income_rows = c.fetchall()
             if income_rows:
                 vno = next_vno()
@@ -476,9 +499,9 @@ class SettlePage(QWidget):
                 SUM(e.debit)-SUM(e.credit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
-                AND (e.account_code >= '6400' AND e.account_code < '7000')
+                AND e.account_code >= ? AND e.account_code < ?
                 GROUP BY e.account_code,e.account_name HAVING net>0.005""",
-                (self.client_id, self.period))
+                (self.client_id, self.period, exp_lo, exp_hi))
             expense_rows = c.fetchall()
             if expense_rows:
                 vno = next_vno()

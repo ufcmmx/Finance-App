@@ -25,7 +25,7 @@ class ReportPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.client_id = None; self.period = ""
+        self.client_id = None; self.period = ""; self._acct_std = "企业会计准则"
         L = QVBoxLayout(self); L.setContentsMargins(0,0,0,0); L.setSpacing(0)
         # Top tabs
         # ── 第一行：Tab 导航 ──
@@ -274,10 +274,16 @@ class ReportPage(QWidget):
         deferred_l_y= bal_ys(["2901"])
         noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y
         total_liab_y  = cur_liab_y + noncur_liab_y
-        cap_y     = bal_ys(["4001"]); cap_res_y = bal_ys(["4002"])
-        surp_res_y= bal_ys(["4101"])
-        profit_y  = bal_ys(["4103"]) + bal_ys(["4104"])
-        tsy_y     = bal_ys(["4201"])
+        if getattr(self, '_acct_std', '企业会计准则') == '小企业会计制度':
+            cap_y     = bal_ys(["3001"]); cap_res_y = bal_ys(["3002"])
+            surp_res_y= bal_ys(["3101"])
+            profit_y  = bal_ys(["3103"]) + bal_ys(["3104"])
+            tsy_y     = 0.0
+        else:
+            cap_y     = bal_ys(["4001"]); cap_res_y = bal_ys(["4002"])
+            surp_res_y= bal_ys(["4101"])
+            profit_y  = bal_ys(["4103"]) + bal_ys(["4104"])
+            tsy_y     = bal_ys(["4201"])
         total_equity_y = cap_y + cap_res_y + surp_res_y + profit_y - tsy_y
         total_le_y     = total_liab_y + total_equity_y
         # 存货 = 各存货科目合计 - 存货跌价准备 - 消耗性生物资产跌价准备
@@ -324,12 +330,18 @@ class ReportPage(QWidget):
         total_liab = cur_liab + noncur_liab
 
         # ── 所有者权益 ──
-        # 兼容3xxx（标准）和4xxx（部分软件）两套所有者权益科目体系
-        cap       = bal(["4001"])
-        cap_res   = bal(["4002"])
-        surp_res  = bal(["4101"])
-        profit    = bal(["4103"]) + bal(["4104"])
-        tsy_stock = bal(["4201"])
+        if getattr(self, '_acct_std', '企业会计准则') == '小企业会计制度':
+            cap       = bal(["3001"])
+            cap_res   = bal(["3002"])
+            surp_res  = bal(["3101"])
+            profit    = bal(["3103"]) + bal(["3104"])
+            tsy_stock = 0.0
+        else:
+            cap       = bal(["4001"])
+            cap_res   = bal(["4002"])
+            surp_res  = bal(["4101"])
+            profit    = bal(["4103"]) + bal(["4104"])
+            tsy_stock = bal(["4201"])
         total_equity = cap + cap_res + surp_res + profit - tsy_stock
         total_le     = total_liab + total_equity
 
@@ -674,19 +686,24 @@ class ReportPage(QWidget):
         conn.close()
 
         def op(code):
-            # Support both 3xxx and 4xxx equity accounts
-            alt = {"3001":"4001","3002":"4002","3101":"4101","3103":"4103","3104":"4104","3201":"4201"}
-            return opening.get(code, 0) or opening.get(alt.get(code,""), 0)
+            return opening.get(code, 0)
         def mv(code):
-            alt = {"3001":"4001","3002":"4002","3101":"4101","3103":"4103","3104":"4104","3201":"4201"}
-            return ytd.get(code, 0) or ytd.get(alt.get(code,""), 0)
+            return ytd.get(code, 0)
 
-        cap_op  = op("3001"); cap_mv  = mv("3001")
-        cprs_op = op("3002"); cprs_mv = mv("3002")
-        oci_op  = 0;          oci_mv  = 0          # 其他综合收益（暂无专用科目）
-        surp_op = op("3101"); surp_mv = mv("3101")
-        re_op   = op("3103") + op("3104")
-        re_mv   = mv("3103") + mv("3104")          # 本年利润 + 利润分配
+        use_4xxx = getattr(self, '_acct_std', '企业会计准则') == '企业会计准则'
+        if use_4xxx:
+            cap_op  = op("4001"); cap_mv  = mv("4001")
+            cprs_op = op("4002"); cprs_mv = mv("4002")
+            surp_op = op("4101"); surp_mv = mv("4101")
+            re_op   = op("4103") + op("4104")
+            re_mv   = mv("4103") + mv("4104")
+        else:
+            cap_op  = op("3001"); cap_mv  = mv("3001")
+            cprs_op = op("3002"); cprs_mv = mv("3002")
+            surp_op = op("3101"); surp_mv = mv("3101")
+            re_op   = op("3103") + op("3104")
+            re_mv   = mv("3103") + mv("3104")
+        oci_op = 0; oci_mv = 0   # 其他综合收益（暂无专用科目）
 
         def row_data(label, c1, c2, c3, c4, c5, bold=False, bg=None):
             total = c1+c2+c3+c4+c5
@@ -1164,6 +1181,20 @@ class ReportPage(QWidget):
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.client_name = client_name; self.period = period
         self.period_lbl.setText(f"【{client_name}】{period}")
+
+        # ── 查询会计制度，控制 Tab 显示 ──
+        conn0 = get_db(); c0 = conn0.cursor()
+        c0.execute("SELECT accounting_std FROM clients WHERE id=?", (client_id,))
+        std_row = c0.fetchone(); conn0.close()
+        self._acct_std = (std_row["accounting_std"] if std_row else None) or "企业会计准则"
+        is_small = (self._acct_std == "小企业会计制度")
+        # 小企业制度不编制"所有者权益变动表"和"现金流量表"
+        self._rtabs[2].setVisible(not is_small)   # 所有者权益变动表
+        self._rtabs[3].setVisible(not is_small)   # 现金流量表
+        # 若当前正显示这两个被隐藏的 Tab，跳回资产负债表
+        if is_small and self.stack.currentIndex() in (2, 3):
+            self._switch("资产负债表")
+            return
 
         # ── 查询该客户最近有已审核凭证的期间 ──
         conn = get_db(); c = conn.cursor()
