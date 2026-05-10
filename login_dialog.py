@@ -22,7 +22,7 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("智一会计 · 登录")
         self.setFixedSize(400, 340)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
         self._build()
 
     def _build(self):
@@ -98,6 +98,15 @@ class LoginDialog(QDialog):
         """)
         self.btn_login.clicked.connect(self._do_login)
         bl.addWidget(self.btn_login)
+
+        # 退出程序链接
+        b_quit = QPushButton("退出程序")
+        b_quit.setStyleSheet("""QPushButton{background:transparent;color:#aaa;
+            border:none;font-size:11px;text-decoration:underline;}
+            QPushButton:hover{color:#e05252;}""")
+        b_quit.setCursor(Qt.PointingHandCursor)
+        b_quit.clicked.connect(self.reject)
+        bl.addWidget(b_quit, alignment=Qt.AlignCenter)
 
         # 默认账号提示（首次使用）
         hint = QLabel("默认账号：admin  /  默认密码：admin123")
