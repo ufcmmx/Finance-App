@@ -119,6 +119,7 @@ class ReportPage(QWidget):
         if not self.client_id: return
         end_period = self.rep_end_period.currentData()
         if not end_period: return
+        is_small = getattr(self, '_acct_std', '企业会计准则') == '小企业会计制度'
         year = end_period[:4]
         year_start = f"{year}-01"   # 本年第一期
         conn = get_db(); c = conn.cursor()
@@ -274,7 +275,7 @@ class ReportPage(QWidget):
         deferred_l_y= bal_ys(["2901"])
         noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y
         total_liab_y  = cur_liab_y + noncur_liab_y
-        if getattr(self, '_acct_std', '企业会计准则') == '小企业会计制度':
+        if is_small:
             cap_y     = bal_ys(["3001"]); cap_res_y = bal_ys(["3002"])
             surp_res_y= bal_ys(["3101"])
             profit_y  = bal_ys(["3103"]) + bal_ys(["3104"])
@@ -330,7 +331,7 @@ class ReportPage(QWidget):
         total_liab = cur_liab + noncur_liab
 
         # ── 所有者权益 ──
-        if getattr(self, '_acct_std', '企业会计准则') == '小企业会计制度':
+        if is_small:
             cap       = bal(["3001"])
             cap_res   = bal(["3002"])
             surp_res  = bal(["3101"])
@@ -387,7 +388,7 @@ class ReportPage(QWidget):
             R("其他非流动资产","31",0,          "其中：优先股","63",0),
             R("非流动资产合计","32",noncur_asset,"永续债","64",0,          False,True, left_ys=noncur_asset_y),
             R("","","",                        "资本公积","65",cap_res,                                 right_ys=cap_res_y),
-            R("","","",                        "减：库存股","66",tsy_stock,                             right_ys=tsy_y),
+            R("","","",                        "" if is_small else "减：库存股","" if is_small else "66",None if is_small else tsy_stock, right_ys=None if is_small else tsy_y),
             R("","","",                        "其他综合收益","67",0),
             R("","","",                        "盈余公积","68",surp_res,                                right_ys=surp_res_y),
             R("","","",                        "未分配利润","69",profit,                                right_ys=profit_y),
