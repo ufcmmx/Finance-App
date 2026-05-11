@@ -66,21 +66,22 @@ class ReportPage(QWidget):
         L.addWidget(tb2)
         self.stack = QStackedWidget(); L.addWidget(self.stack)
 
-        # ── 浮动取数公式卡片 ──
-        self._tip = QFrame(None, Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # ── 浮动取数公式卡片（Qt.Popup：点击外部自动关闭）──
+        self._tip = QFrame(None)
+        self._tip.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
         self._tip.setStyleSheet("""
             QFrame { background:#1c2340; border-radius:8px; border:1.5px solid #3d6fdb; }
-            QLabel { background:transparent; color:#fff; }
+            QLabel { background:transparent; color:#e8eeff; }
         """)
-        _tl = QVBoxLayout(self._tip); _tl.setContentsMargins(14,10,14,12); _tl.setSpacing(5)
+        _tl = QVBoxLayout(self._tip); _tl.setContentsMargins(14,10,14,12); _tl.setSpacing(6)
         self._tip_name = QLabel(""); self._tip_name.setFont(QFont("", 10, QFont.Bold))
         self._tip_name.setWordWrap(True)
-        self._tip_fml  = QLabel(""); self._tip_fml.setWordWrap(True)
-        self._tip_fml.setStyleSheet("color:#a8c4f0; font-size:11px; line-height:160%;")
-        _tl.addWidget(self._tip_name); _tl.addWidget(self._tip_fml)
-        self._tip.setFixedWidth(340); self._tip.hide()
-        self._tip_timer = QTimer(self); self._tip_timer.setSingleShot(True)
-        self._tip_timer.timeout.connect(self._tip.hide)
+        _sep = QFrame(); _sep.setFrameShape(QFrame.HLine)
+        _sep.setStyleSheet("background:#3d6fdb; max-height:1px; border:none;")
+        self._tip_fml = QLabel(""); self._tip_fml.setWordWrap(True)
+        self._tip_fml.setStyleSheet("color:#a8c4f0; font-size:11px;")
+        _tl.addWidget(self._tip_name); _tl.addWidget(_sep); _tl.addWidget(self._tip_fml)
+        self._tip.setFixedWidth(320)
 
         self._build_balance(); self._build_income(); self._build_equity(); self._build_cf_stmt(); self._build_cashflow()
         self._switch("资产负债表")
@@ -116,26 +117,28 @@ class ReportPage(QWidget):
 
     # ── 公式 Tooltip ──────────────────────────────────────────────
     def _show_formula_tip(self, name, formula, table, item):
-        """在点击单元格附近显示取数公式浮动卡片（4 秒后自动消隐）。"""
-        rect  = table.visualItemRect(item)
-        gpos  = table.viewport().mapToGlobal(rect.bottomLeft())
+        """点击项目名称列 → 弹出取数公式卡片（点击其他位置自动关闭）。"""
         self._tip_name.setText(name)
-        self._tip_fml.setText(formula)
+        self._tip_fml.setText(formula if formula else "（暂无取数规则）")
+        self._tip.setFixedWidth(320)
         self._tip.adjustSize()
-        # 优先显示在单元格下方，若超出屏幕则显示在上方
+        rect = table.visualItemRect(item)
+        gpos = table.viewport().mapToGlobal(rect.bottomLeft())
         from PySide6.QtGui import QGuiApplication
-        screen_h = QGuiApplication.primaryScreen().availableGeometry().height()
-        tx = gpos.x() + 4
-        ty = gpos.y() + 6
-        if ty + self._tip.height() > screen_h - 20:
-            ty = gpos.y() - self._tip.height() - rect.height() - 6
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        tx = gpos.x()
+        ty = gpos.y() + 4
+        tip_h = self._tip.sizeHint().height() or 80
+        if tx + 320 > screen.right() - 4:
+            tx = screen.right() - 324
+        if ty + tip_h > screen.bottom() - 4:
+            ty = gpos.y() - tip_h - rect.height() - 4
         self._tip.move(tx, ty)
-        self._tip.show(); self._tip.raise_()
-        self._tip_timer.start(4000)
+        self._tip.show()
 
     def _on_bs_cell_clicked(self, row, col):
-        """资产负债表单元格点击 → 显示取数公式。"""
-        if col not in (2, 3, 6, 7):
+        """点击资产负债表项目名称列 → 显示取数公式。"""
+        if col not in (0, 4):
             return
         it = self.bs_tbl.item(row, col)
         if not it:
@@ -146,8 +149,8 @@ class ReportPage(QWidget):
         self._show_formula_tip(data[0], data[1], self.bs_tbl, it)
 
     def _on_inc_cell_clicked(self, row, col):
-        """利润表单元格点击 → 显示取数公式。"""
-        if col not in (2, 3):
+        """点击利润表项目名称列 → 显示取数公式。"""
+        if col != 0:
             return
         it = self.inc_tbl.item(row, col)
         if not it:
@@ -433,8 +436,12 @@ class ReportPage(QWidget):
               left_formula ="借方余额合计 | 1001 库存现金 + 1002 银行存款 + 1012 其他货币资金",
               right_formula="贷方余额 | 2001 短期借款"),
             R("以公允价值计量且其变动\n计入当期损益的金融资产","2",0,
-              "以公允价值计量且其变动\n计入当期损益的金融负债","35",0),
-            R("衍生金融资产","3",0,            "衍生金融负债","36",0),
+              "以公允价值计量且其变动\n计入当期损益的金融负债","35",0,
+              left_formula ="借方余额 | 1101 交易性金融资产",
+              right_formula="贷方余额 | 2101 交易性金融负债"),
+            R("衍生金融资产","3",0,            "衍生金融负债","36",0,
+              left_formula ="借方余额 | 1103 衍生工具（资产方向）",
+              right_formula="贷方余额 | 2103 衍生工具（负债方向）"),
             R("应收票据","4",notes_rec,        "应付票据","37",notes_pay,
               left_ys=notes_rec_y,   right_ys=notes_pay_y,
               left_formula ="借方余额 | 1121 应收票据",
@@ -465,11 +472,15 @@ class ReportPage(QWidget):
               right_formula="贷方余额 | 2232 应付股利"),
             R("持有待售资产","11",0,            "其他应付款","44",oth_pay,
               right_ys=oth_pay_y,
+              left_formula ="重分类项目：将于一年内处置的非流动资产转入",
               right_formula="2241 贷方余额 + 1221 借方余额重分类"),
-            R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0),
+            R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0,
+              left_formula ="重分类项目：将于一年内到期的长期资产转入",
+              right_formula="重分类项目：与持有待售资产相关的负债"),
             R("其他流动资产","13",oth_cur_asset, "一年内到期的非流动负债","46",0,
               left_ys=oth_cur_asset_y,
-              left_formula ="1901 待处理财产损溢 + 1461 待摊费用\n+ 2221 借方余额重分类（留底税/待抵扣/待认证）"),
+              left_formula ="1901 待处理财产损溢 + 1461 待摊费用\n+ 2221 借方余额重分类（留底税/待抵扣/待认证）",
+              right_formula="重分类项目：将于一年内到期的长期负债转入"),
             R("流动资产合计","14",cur_asset,   "其他流动负债","47",oth_cur_liab,
               False,True, left_ys=cur_asset_y, right_ys=cur_liab_y,
               left_formula ="以上各流动资产项目合计",
@@ -485,7 +496,8 @@ class ReportPage(QWidget):
               left_formula ="1501 持有至到期投资 − |1502 持有至到期投资减值准备|",
               right_formula="贷方余额 | 2501 长期借款"),
             R("长期应收款","17",0,                  "应付债券","50",bonds_pay,
-              right_formula="贷方余额 | 2502 应付债券"),
+              right_formula="贷方余额 | 2502 应付债券",
+              left_formula ="1231 长期应收款 − |1232 未实现融资收益|"),
             R("长期股权投资","18",lt_eq_invest,     "其中：优先股","51",0,
               left_ys=lt_eq_invest_y,
               left_formula="借方余额 | 1511 长期股权投资"),
@@ -501,28 +513,38 @@ class ReportPage(QWidget):
               left_formula="借方余额 | 1604 在建工程"),
             R("工程物资","22",0,               "预计负债","55",est_liab,
               right_ys=est_liab_y,
+              left_formula ="借方余额 | 1605 工程物资",
               right_formula="贷方余额 | 2801 预计负债"),
-            R("固定资产清理","23",0,            "递延收益","56",0),
+            R("固定资产清理","23",0,            "递延收益","56",0,
+              left_formula ="1606 固定资产清理净余额（借方为待处理损失，贷方为待转收益）",
+              right_formula="贷方余额 | 2401 递延收益"),
             R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l,
               right_ys=deferred_l_y,
+              left_formula ="1611 生产性生物资产 − |1612 生产性生物资产累计折旧|",
               right_formula="贷方余额 | 2901 递延所得税负债"),
-            R("油气资产","25",0,               "其他非流动负债","58",0),
+            R("油气资产","25",0,               "其他非流动负债","58",0,
+              left_formula ="1621 油气资产 − |1622 油气资产折耗| − |1623 油气资产减值准备|",
+              right_formula="其他长期负债科目贷方余额"),
             R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab,
               False,True, left_ys=intangible_y, right_ys=noncur_liab_y,
               left_formula ="1701 无形资产原值 − |1702 累计摊销| − |1703 无形资产减值准备|",
               right_formula="以上各非流动负债项目合计"),
             R("开发支出","27",0,               "负债合计","60",total_liab,
               False,True, right_ys=total_liab_y,
+              left_formula ="借方余额 | 1712 研发支出（资本化部分）",
               right_formula="流动负债合计 + 非流动负债合计"),
-            R("商誉","28",0,                   "所有者权益（或股东权益）：","","",True),
+            R("商誉","28",0,                   "所有者权益（或股东权益）：","","",True,
+              left_formula="借方余额 | 1711 商誉 − |商誉减值准备|"),
             R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap,
               left_ys=lt_prepaid_y,   right_ys=cap_y,
               left_formula ="借方余额 | 1801 长期待摊费用",
               right_formula=cap_fml),
             R("递延所得税资产","30",deferred_a, "其他权益工具","62",0,
               left_ys=deferred_a_y,
-              left_formula="借方余额 | 1811 递延所得税资产"),
-            R("其他非流动资产","31",0,          "其中：优先股","63",0),
+              left_formula ="借方余额 | 1811 递延所得税资产",
+              right_formula="贷方余额 | 4004 其他权益工具"),
+            R("其他非流动资产","31",0,          "其中：优先股","63",0,
+              left_formula="其他未单独列示的非流动资产科目借方余额"),
             R("非流动资产合计","32",noncur_asset,"永续债","64",0,
               False,True, left_ys=noncur_asset_y,
               left_formula="以上各非流动资产项目合计"),
@@ -533,7 +555,8 @@ class ReportPage(QWidget):
               None if is_small else tsy_stock,
               right_ys=None if is_small else tsy_y,
               right_formula="" if is_small else tsy_fml),
-            R("","","",                        "其他综合收益","67",0),
+            R("","","",                        "其他综合收益","67",0,
+              right_formula="贷方余额 | 4003 其他综合收益（小企业：3003）"),
             R("","","",                        "盈余公积","68",surp_res,
               right_ys=surp_res_y, right_formula=surp_fml),
             R("","","",                        "未分配利润","69",profit,
@@ -566,9 +589,10 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 if j==3 and isinstance(l_ys,(int,float)) and l_ys<0:
                     it.setForeground(QColor("#e05252"))
-                # 存公式供 Tooltip 读取（仅金额列且有公式）
-                if j in (2,3) and l_fml and isinstance(l_val,(int,float)):
+                # 名称列存公式，鼠标指针改为问号提示可点击
+                if j == 0 and l_fml and not is_hdr:
                     it.setData(Qt.UserRole, (l_name.replace("\n"," "), l_fml))
+                    it.setToolTip("点击查看取数公式")
                 self.bs_tbl.setItem(i,j,it)
             # Right
             for j,(text,align) in enumerate([
@@ -586,9 +610,10 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 if j==7 and isinstance(r_ys,(int,float)) and r_ys<0:
                     it.setForeground(QColor("#e05252"))
-                # 存公式供 Tooltip 读取（仅金额列且有公式）
-                if j in (6,7) and r_fml and isinstance(r_val,(int,float)):
+                # 名称列存公式，鼠标指针改为问号提示可点击
+                if j == 4 and r_fml and not is_hdr:
                     it.setData(Qt.UserRole, (r_name.replace("\n"," "), r_fml))
+                    it.setToolTip("点击查看取数公式")
                 self.bs_tbl.setItem(i,j,it)
 
     def _build_income(self):
@@ -834,9 +859,10 @@ class ReportPage(QWidget):
                 if j>=2 and isinstance(cur_v,(int,float)):
                     val = cur_v if j==2 else ytd_v
                     if val and val < 0: it.setForeground(QColor("#ff4d4f"))
-                # 存公式供 Tooltip 读取（仅金额列且有公式）
-                if j in (2,3) and formula and isinstance(cur_v,(int,float)):
+                # 名称列存公式
+                if j == 0 and formula:
                     it.setData(Qt.UserRole, (name.strip(), formula))
+                    it.setToolTip("点击查看取数公式")
                 self.inc_tbl.setItem(i,j,it)
 
 
