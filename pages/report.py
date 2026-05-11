@@ -65,6 +65,23 @@ class ReportPage(QWidget):
         tl2.addWidget(b_dl)
         L.addWidget(tb2)
         self.stack = QStackedWidget(); L.addWidget(self.stack)
+
+        # ── 浮动取数公式卡片 ──
+        self._tip = QFrame(None, Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self._tip.setStyleSheet("""
+            QFrame { background:#1c2340; border-radius:8px; border:1.5px solid #3d6fdb; }
+            QLabel { background:transparent; color:#fff; }
+        """)
+        _tl = QVBoxLayout(self._tip); _tl.setContentsMargins(14,10,14,12); _tl.setSpacing(5)
+        self._tip_name = QLabel(""); self._tip_name.setFont(QFont("", 10, QFont.Bold))
+        self._tip_name.setWordWrap(True)
+        self._tip_fml  = QLabel(""); self._tip_fml.setWordWrap(True)
+        self._tip_fml.setStyleSheet("color:#a8c4f0; font-size:11px; line-height:160%;")
+        _tl.addWidget(self._tip_name); _tl.addWidget(self._tip_fml)
+        self._tip.setFixedWidth(340); self._tip.hide()
+        self._tip_timer = QTimer(self); self._tip_timer.setSingleShot(True)
+        self._tip_timer.timeout.connect(self._tip.hide)
+
         self._build_balance(); self._build_income(); self._build_equity(); self._build_cf_stmt(); self._build_cashflow()
         self._switch("资产负债表")
 
@@ -97,6 +114,49 @@ class ReportPage(QWidget):
             elif name=="现金流量表": self._load_cf_stmt()
             elif name=="收支统计表": self._load_cashflow()
 
+    # ── 公式 Tooltip ──────────────────────────────────────────────
+    def _show_formula_tip(self, name, formula, table, item):
+        """在点击单元格附近显示取数公式浮动卡片（4 秒后自动消隐）。"""
+        rect  = table.visualItemRect(item)
+        gpos  = table.viewport().mapToGlobal(rect.bottomLeft())
+        self._tip_name.setText(name)
+        self._tip_fml.setText(formula)
+        self._tip.adjustSize()
+        # 优先显示在单元格下方，若超出屏幕则显示在上方
+        from PySide6.QtGui import QGuiApplication
+        screen_h = QGuiApplication.primaryScreen().availableGeometry().height()
+        tx = gpos.x() + 4
+        ty = gpos.y() + 6
+        if ty + self._tip.height() > screen_h - 20:
+            ty = gpos.y() - self._tip.height() - rect.height() - 6
+        self._tip.move(tx, ty)
+        self._tip.show(); self._tip.raise_()
+        self._tip_timer.start(4000)
+
+    def _on_bs_cell_clicked(self, row, col):
+        """资产负债表单元格点击 → 显示取数公式。"""
+        if col not in (2, 3, 6, 7):
+            return
+        it = self.bs_tbl.item(row, col)
+        if not it:
+            return
+        data = it.data(Qt.UserRole)
+        if not data:
+            return
+        self._show_formula_tip(data[0], data[1], self.bs_tbl, it)
+
+    def _on_inc_cell_clicked(self, row, col):
+        """利润表单元格点击 → 显示取数公式。"""
+        if col not in (2, 3):
+            return
+        it = self.inc_tbl.item(row, col)
+        if not it:
+            return
+        data = it.data(Qt.UserRole)
+        if not data:
+            return
+        self._show_formula_tip(data[0], data[1], self.inc_tbl, it)
+
     def _make_report_table(self, cols, col_widths=None):
         t = QTableWidget(); t.setColumnCount(len(cols))
         t.setHorizontalHeaderLabels(cols)
@@ -113,6 +173,7 @@ class ReportPage(QWidget):
         self.bs_tbl = self._make_report_table(
             ["资产项目","行次","期末金额","年初金额","负债和所有者权益","行次","期末金额","年初金额"],
             [-1,40,110,110,-1,40,110,110])
+        self.bs_tbl.cellClicked.connect(self._on_bs_cell_clicked)
         L.addWidget(self.bs_tbl); self.stack.addWidget(w)
 
     def _load_balance(self):
@@ -348,56 +409,146 @@ class ReportPage(QWidget):
 
         def R(label, rowno, left_val, right_label="", right_rowno="", right_val=None,
               is_header=False, is_total=False,
-              left_ys=None, right_ys=None):
+              left_ys=None, right_ys=None,
+              left_formula="", right_formula=""):
             return (label, rowno, left_val, right_label, right_rowno, right_val,
-                    is_header, is_total, left_ys, right_ys)
+                    is_header, is_total, left_ys, right_ys, left_formula, right_formula)
+
+        # ── 制度相关公式字符串 ──
+        _eq = "小企业会计制度" if is_small else "企业会计准则"
+        cap_fml    = ("贷方余额 | 3001 实收资本" if is_small
+                      else "贷方余额 | 4001 实收资本（或股本）")
+        cap_res_fml= ("贷方余额 | 3002 资本公积" if is_small
+                      else "贷方余额 | 4002 资本公积")
+        surp_fml   = ("贷方余额 | 3101 盈余公积" if is_small
+                      else "贷方余额 | 4101 盈余公积")
+        profit_fml = ("贷方余额 | 3103 本年利润 + 3104 利润分配" if is_small
+                      else "贷方余额 | 4103 本年利润 + 4104 利润分配")
+        tsy_fml    = "借方余额（取负）| 4201 库存股"
 
         rows = [
             R("流动资产：","","",  "流动负债：","","",          True),
-            R("货币资金","1",cash,            "短期借款","34",st_loan,         left_ys=cash_y,        right_ys=st_loan_y),
-            R("以公允价值计量且其变动\n计入当期损益的金融资产","2",0, "以公允价值计量且其变动\n计入当期损益的金融负债","35",0),
+            R("货币资金","1",cash,            "短期借款","34",st_loan,
+              left_ys=cash_y,        right_ys=st_loan_y,
+              left_formula ="借方余额合计 | 1001 库存现金 + 1002 银行存款 + 1012 其他货币资金",
+              right_formula="贷方余额 | 2001 短期借款"),
+            R("以公允价值计量且其变动\n计入当期损益的金融资产","2",0,
+              "以公允价值计量且其变动\n计入当期损益的金融负债","35",0),
             R("衍生金融资产","3",0,            "衍生金融负债","36",0),
-            R("应收票据","4",notes_rec,        "应付票据","37",notes_pay,       left_ys=notes_rec_y,   right_ys=notes_pay_y),
-            R("应收账款","5",acct_rec,         "应付账款","38",acct_pay,        left_ys=acct_rec_y,    right_ys=acct_pay_y),
-            R("预付款项","6",prepay,           "预收款项","39",adv_rec,         left_ys=prepay_y,      right_ys=adv_rec_y),
-            R("应收利息","7",int_rec,          "应付职工薪酬","40",emp_pay,     left_ys=int_rec_y,     right_ys=emp_pay_y),
-            R("应收股利","8",div_rec,          "应交税费","41",tax_pay,         left_ys=div_rec_y,     right_ys=tax_pay_y),
-            R("其他应收款","9",oth_rec,         "应付利息","42",int_pay,        left_ys=oth_rec_y,     right_ys=int_pay_y),
-            R("存货","10",inventory,           "应付股利","43",div_pay,         left_ys=inventory_y,   right_ys=div_pay_y),
-            R("持有待售资产","11",0,            "其他应付款","44",oth_pay,                              right_ys=oth_pay_y),
+            R("应收票据","4",notes_rec,        "应付票据","37",notes_pay,
+              left_ys=notes_rec_y,   right_ys=notes_pay_y,
+              left_formula ="借方余额 | 1121 应收票据",
+              right_formula="贷方余额 | 2201 应付票据"),
+            R("应收账款","5",acct_rec,         "应付账款","38",acct_pay,
+              left_ys=acct_rec_y,    right_ys=acct_pay_y,
+              left_formula ="1122 借方余额 + 2203 贷方余额重分类（预收款贷方计入预收款项）",
+              right_formula="2202 贷方余额 + 1123 借方余额重分类（预付款借方计入预付款项）"),
+            R("预付款项","6",prepay,           "预收款项","39",adv_rec,
+              left_ys=prepay_y,      right_ys=adv_rec_y,
+              left_formula ="1123 借方余额 + 2202 贷方余额重分类（应付账款贷方计入应付账款）",
+              right_formula="2203 贷方余额 + 1122 借方余额重分类（应收账款借方计入应收账款）"),
+            R("应收利息","7",int_rec,          "应付职工薪酬","40",emp_pay,
+              left_ys=int_rec_y,     right_ys=emp_pay_y,
+              left_formula ="借方余额 | 1132 应收利息",
+              right_formula="贷方余额 | 2211 应付职工薪酬"),
+            R("应收股利","8",div_rec,          "应交税费","41",tax_pay,
+              left_ys=div_rec_y,     right_ys=tax_pay_y,
+              left_formula ="借方余额 | 1131 应收股利",
+              right_formula="2221 贷方净余额（借方留底税额重分类至其他流动资产）"),
+            R("其他应收款","9",oth_rec,         "应付利息","42",int_pay,
+              left_ys=oth_rec_y,     right_ys=int_pay_y,
+              left_formula ="1221 借方余额 + 2241 贷方余额重分类",
+              right_formula="贷方余额 | 2231 应付利息"),
+            R("存货","10",inventory,           "应付股利","43",div_pay,
+              left_ys=inventory_y,   right_ys=div_pay_y,
+              left_formula ="1401~1421 合计 − |1471 存货跌价准备| − |1472 消耗性生物资产跌价准备|",
+              right_formula="贷方余额 | 2232 应付股利"),
+            R("持有待售资产","11",0,            "其他应付款","44",oth_pay,
+              right_ys=oth_pay_y,
+              right_formula="2241 贷方余额 + 1221 借方余额重分类"),
             R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0),
-            R("其他流动资产","13",oth_cur_asset, "一年内到期的非流动负债","46",0, left_ys=oth_cur_asset_y),
-            R("流动资产合计","14",cur_asset,   "其他流动负债","47",oth_cur_liab, False,True, left_ys=cur_asset_y, right_ys=cur_liab_y),
-            R("非流动资产：","","",            "流动负债合计","48",cur_liab,True,True,                  right_ys=cur_liab_y),
-            R("可供出售金融资产","15",avail_sale,   "非流动负债：","","",   False,False, left_ys=avail_sale_y),
-            R("持有至到期投资","16",held_to_mat,    "长期借款","49",lt_loan, left_ys=held_to_mat_y,  right_ys=lt_loan_y),
-            R("长期应收款","17",0,                  "应付债券","50",bonds_pay),
-            R("长期股权投资","18",lt_eq_invest,     "其中：优先股","51",0,  left_ys=lt_eq_invest_y),
-            R("投资性房地产","19",invest_prop,       "永续债","52",0,        left_ys=invest_prop_y),
-            R("固定资产","20",fa,              "长期应付款","53",lt_payable,    left_ys=fa_y,           right_ys=lt_payable_y),
-            R("在建工程","21",wip,             "专项应付款","54",0,             left_ys=wip_y),
-            R("工程物资","22",0,               "预计负债","55",est_liab,                               right_ys=est_liab_y),
+            R("其他流动资产","13",oth_cur_asset, "一年内到期的非流动负债","46",0,
+              left_ys=oth_cur_asset_y,
+              left_formula ="1901 待处理财产损溢 + 1461 待摊费用\n+ 2221 借方余额重分类（留底税/待抵扣/待认证）"),
+            R("流动资产合计","14",cur_asset,   "其他流动负债","47",oth_cur_liab,
+              False,True, left_ys=cur_asset_y, right_ys=cur_liab_y,
+              left_formula ="以上各流动资产项目合计",
+              right_formula="2221「待转销项税额」明细贷方余额"),
+            R("非流动资产：","","",            "流动负债合计","48",cur_liab,
+              True,True, right_ys=cur_liab_y,
+              right_formula="以上各流动负债项目合计"),
+            R("可供出售金融资产","15",avail_sale,   "非流动负债：","","",
+              False,False, left_ys=avail_sale_y,
+              left_formula="借方余额 | 1503 可供出售金融资产"),
+            R("持有至到期投资","16",held_to_mat,    "长期借款","49",lt_loan,
+              left_ys=held_to_mat_y,  right_ys=lt_loan_y,
+              left_formula ="1501 持有至到期投资 − |1502 持有至到期投资减值准备|",
+              right_formula="贷方余额 | 2501 长期借款"),
+            R("长期应收款","17",0,                  "应付债券","50",bonds_pay,
+              right_formula="贷方余额 | 2502 应付债券"),
+            R("长期股权投资","18",lt_eq_invest,     "其中：优先股","51",0,
+              left_ys=lt_eq_invest_y,
+              left_formula="借方余额 | 1511 长期股权投资"),
+            R("投资性房地产","19",invest_prop,       "永续债","52",0,
+              left_ys=invest_prop_y,
+              left_formula="借方余额 | 1521 投资性房地产"),
+            R("固定资产","20",fa,              "长期应付款","53",lt_payable,
+              left_ys=fa_y,           right_ys=lt_payable_y,
+              left_formula ="1601 固定资产原值 − |1602 累计折旧| − |1603 固定资产减值准备|",
+              right_formula="贷方余额 | 2701 长期应付款"),
+            R("在建工程","21",wip,             "专项应付款","54",0,
+              left_ys=wip_y,
+              left_formula="借方余额 | 1604 在建工程"),
+            R("工程物资","22",0,               "预计负债","55",est_liab,
+              right_ys=est_liab_y,
+              right_formula="贷方余额 | 2801 预计负债"),
             R("固定资产清理","23",0,            "递延收益","56",0),
-            R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l,                       right_ys=deferred_l_y),
+            R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l,
+              right_ys=deferred_l_y,
+              right_formula="贷方余额 | 2901 递延所得税负债"),
             R("油气资产","25",0,               "其他非流动负债","58",0),
-            R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab, False,True, left_ys=intangible_y, right_ys=noncur_liab_y),
-            R("开发支出","27",0,               "负债合计","60",total_liab,    False,True,               right_ys=total_liab_y),
+            R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab,
+              False,True, left_ys=intangible_y, right_ys=noncur_liab_y,
+              left_formula ="1701 无形资产原值 − |1702 累计摊销| − |1703 无形资产减值准备|",
+              right_formula="以上各非流动负债项目合计"),
+            R("开发支出","27",0,               "负债合计","60",total_liab,
+              False,True, right_ys=total_liab_y,
+              right_formula="流动负债合计 + 非流动负债合计"),
             R("商誉","28",0,                   "所有者权益（或股东权益）：","","",True),
-            R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap,  left_ys=lt_prepaid_y,   right_ys=cap_y),
-            R("递延所得税资产","30",deferred_a, "其他权益工具","62",0,          left_ys=deferred_a_y),
+            R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap,
+              left_ys=lt_prepaid_y,   right_ys=cap_y,
+              left_formula ="借方余额 | 1801 长期待摊费用",
+              right_formula=cap_fml),
+            R("递延所得税资产","30",deferred_a, "其他权益工具","62",0,
+              left_ys=deferred_a_y,
+              left_formula="借方余额 | 1811 递延所得税资产"),
             R("其他非流动资产","31",0,          "其中：优先股","63",0),
-            R("非流动资产合计","32",noncur_asset,"永续债","64",0,          False,True, left_ys=noncur_asset_y),
-            R("","","",                        "资本公积","65",cap_res,                                 right_ys=cap_res_y),
-            R("","","",                        "" if is_small else "减：库存股","" if is_small else "66",None if is_small else tsy_stock, right_ys=None if is_small else tsy_y),
+            R("非流动资产合计","32",noncur_asset,"永续债","64",0,
+              False,True, left_ys=noncur_asset_y,
+              left_formula="以上各非流动资产项目合计"),
+            R("","","",                        "资本公积","65",cap_res,
+              right_ys=cap_res_y, right_formula=cap_res_fml),
+            R("","","",                        "" if is_small else "减：库存股",
+              "" if is_small else "66",
+              None if is_small else tsy_stock,
+              right_ys=None if is_small else tsy_y,
+              right_formula="" if is_small else tsy_fml),
             R("","","",                        "其他综合收益","67",0),
-            R("","","",                        "盈余公积","68",surp_res,                                right_ys=surp_res_y),
-            R("","","",                        "未分配利润","69",profit,                                right_ys=profit_y),
-            R("","","",                        "所有者权益合计","70",total_equity, False,True,          right_ys=total_equity_y),
-            R("资产总计","33",total_asset,     "负债和所有者权益总计","71",total_le,False,True, left_ys=total_asset_y, right_ys=total_le_y),
+            R("","","",                        "盈余公积","68",surp_res,
+              right_ys=surp_res_y, right_formula=surp_fml),
+            R("","","",                        "未分配利润","69",profit,
+              right_ys=profit_y, right_formula=profit_fml),
+            R("","","",                        "所有者权益合计","70",total_equity,
+              False,True, right_ys=total_equity_y,
+              right_formula="实收资本 + 资本公积 + 盈余公积 + 未分配利润 − 库存股"),
+            R("资产总计","33",total_asset,     "负债和所有者权益总计","71",total_le,
+              False,True, left_ys=total_asset_y, right_ys=total_le_y,
+              left_formula ="流动资产合计 + 非流动资产合计",
+              right_formula="负债合计 + 所有者权益合计"),
         ]
 
         self.bs_tbl.setRowCount(len(rows))
-        for i,(l_name,l_row,l_val,r_name,r_row,r_val,is_hdr,is_tot,l_ys,r_ys) in enumerate(rows):
+        for i,(l_name,l_row,l_val,r_name,r_row,r_val,is_hdr,is_tot,l_ys,r_ys,l_fml,r_fml) in enumerate(rows):
             self.bs_tbl.setRowHeight(i, 32)
             # Left
             for j,(text,align) in enumerate([
@@ -415,6 +566,9 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 if j==3 and isinstance(l_ys,(int,float)) and l_ys<0:
                     it.setForeground(QColor("#e05252"))
+                # 存公式供 Tooltip 读取（仅金额列且有公式）
+                if j in (2,3) and l_fml and isinstance(l_val,(int,float)):
+                    it.setData(Qt.UserRole, (l_name.replace("\n"," "), l_fml))
                 self.bs_tbl.setItem(i,j,it)
             # Right
             for j,(text,align) in enumerate([
@@ -432,12 +586,16 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 if j==7 and isinstance(r_ys,(int,float)) and r_ys<0:
                     it.setForeground(QColor("#e05252"))
+                # 存公式供 Tooltip 读取（仅金额列且有公式）
+                if j in (6,7) and r_fml and isinstance(r_val,(int,float)):
+                    it.setData(Qt.UserRole, (r_name.replace("\n"," "), r_fml))
                 self.bs_tbl.setItem(i,j,it)
 
     def _build_income(self):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14)
         self.inc_tbl = self._make_report_table(
             ["项目","行次","本期金额","本年累计金额"],[-1,40,160,160])
+        self.inc_tbl.cellClicked.connect(self._on_inc_cell_clicked)
         L.addWidget(self.inc_tbl); self.stack.addWidget(w)
 
     def _load_income(self):
@@ -579,44 +737,81 @@ class ReportPage(QWidget):
             total_y   = op_y + nop_y + nopx_y
             net_y     = total_y - tax_y
 
+        # ── 取数公式字符串（按制度区分）──
+        if use_6xxx:
+            _f_rev    = "贷方净额 | 6001 主营业务收入 + 6051 其他业务收入"
+            _f_cost   = "借方净额（取负）| 6401 主营业务成本 + 6402 其他业务成本"
+            _f_tax    = "借方净额（取负）| 6403 税金及附加"
+            _f_sell   = "借方净额（取负）| 6601 销售费用"
+            _f_mgmt   = "借方净额（取负）| 6602 管理费用"
+            _f_rnd    = "借方净额（取负）| 6604 研发费用"
+            _f_fin    = "借方净额（取负）| 6603 财务费用"
+            _f_imp    = "借方净额（取负）| 6701 资产减值损失"
+            _f_oinc   = "贷方净额 | 6117 其他收益"
+            _f_inv    = "贷方净额 | 6111 投资收益"
+            _f_fv     = "贷方净额 | 6101 公允价值变动损益"
+            _f_adisp  = "贷方净额 | 6115 资产处置损益"
+            _f_noi    = "贷方净额 | 6301 营业外收入"
+            _f_noe    = "借方净额（取负）| 6711 营业外支出"
+            _f_te     = "借方净额（取负）| 6801 所得税费用"
+        else:
+            _f_rev    = "贷方净额 | 5001 主营业务收入 + 5051 其他业务收入"
+            _f_cost   = "借方净额（取负）| 5401 主营业务成本 + 5402 其他业务成本"
+            _f_tax    = "借方净额（取负）| 5403 税金及附加"
+            _f_sell   = "借方净额（取负）| 5501 销售费用"
+            _f_mgmt   = "借方净额（取负）| 5502 管理费用"
+            _f_rnd    = ""
+            _f_fin    = "借方净额（取负）| 5503 财务费用"
+            _f_imp    = ""
+            _f_oinc   = ""
+            _f_inv    = "贷方净额 | 5111 投资收益"
+            _f_fv     = ""
+            _f_adisp  = ""
+            _f_noi    = "贷方净额 | 5301 营业外收入"
+            _f_noe    = "借方净额（取负）| 5601 营业外支出"
+            _f_te     = "借方净额（取负）| 5701 所得税费用"
+        _f_op  = "营业收入 + 其他收益 + 投资收益 ± 公允价值变动 ± 资产处置\n− 营业成本 − 税金 − 三费 − 资产减值"
+        _f_tp  = "营业利润 + 营业外收入 − 营业外支出"
+        _f_np  = "利润总额 − 所得税费用"
+
         rows_data = [
-            ("一、营业收入",                                   "1",  rev,          rev_y,      True),
-            ("减：营业成本",                                   "2",  cost_n,       cost_y,     False),
-            ("    税金及附加",                                 "3",  tax,          tax_y_al,   False),
-            ("    销售费用",                                   "4",  sell,         sell_y,     False),
-            ("    管理费用",                                   "5",  mgmt,         mgmt_y,     False),
-            ("    研发费用",                                   "6",  rnd,          rnd_y,      False),
-            ("    财务费用",                                   "7",  fin_exp,      fin_exp_y,  False),
-            ("    其中：利息费用",                             "8",  0,            0,          False),
-            ("          利息收入",                             "9",  0,            0,          False),
-            ("    资产减值损失",                               "10", impair,       impair_y,   False),
-            ("加：其他收益",                                   "11", oth_inc,      oth_inc_y,  False),
-            ("    投资收益（损失以\"-\"号填列）",              "12", inv_g,        inv_y,      False),
-            ("    其中：对联营企业和合营企业的投资收益",        "13", 0,            0,          False),
-            ("    公允价值变动收益（损失以\"-\"号填列）",      "14", fv_g,         fv_y,       False),
-            ("    资产处置收益（损失以\"-\"号填列）",          "15", asset_d,      asset_d_y,  False),
-            ("二、营业利润（亏损以\"-\"号填列）",              "16", op_profit,    op_y,       True),
-            ("加：营业外收入",                                 "17", nop_inc,      nop_y,      False),
-            ("减：营业外支出",                                 "18", nop_exp,      nopx_y,     False),
-            ("三、利润总额（亏损总额以\"-\"号填列）",          "19", total_profit, total_y,    True),
-            ("减：所得税费用",                                 "20", tax_exp,      tax_y,      False),
-            ("四、净利润（净亏损以\"-\"号填列）",              "21", net_profit,   net_y,      True),
-            ("（一）持续经营净利润（净亏损以\"-\"号填列）",    "22", net_profit,   net_y,      False),
-            ("（二）终止经营净利润（净亏损以\"-\"号填列）",    "23", 0,            0,          False),
-            ("五、其他综合收益的税后净额",                     "24", 0,            0,          True),
-            ("（一）以后不能重分类进损益的其他综合收益",       "25", 0,            0,          False),
-            ("    1.重新计量设定受益计划净负债或净资产的变动", "26", 0,            0,          False),
-            ("    2.权益法下在被投资单位不能重分类进损益的\n其他综合收益中享有的份额", "27", 0, 0, False),
-            ("（二）以后将重分类进损益的其他综合收益",         "28", 0,            0,          False),
-            ("    1.权益法下在被投资单位以后将重分类进损益的\n其他综合收益中享有的份额", "29", 0, 0, False),
-            ("    2.可供出售金融资产公允价值变动损益",         "30", 0,            0,          False),
-            ("    3.持有至到期投资重分类为可供出售金融资产损益","31", 0,            0,          False),
-            ("    4.现金流量套期损益的有效部分",               "32", 0,            0,          False),
-            ("    5.外币财务报表折算差额",                     "33", 0,            0,          False),
-            ("六、综合收益总额",                               "34", net_profit,   net_y,      True),
-            ("七、每股收益",                                   "35", "",           "",         True),
-            ("（一）基本每股收益",                             "36", 0,            0,          False),
-            ("（二）稀释每股收益",                             "37", 0,            0,          False),
+            ("一、营业收入",                                   "1",  rev,          rev_y,      True,  _f_rev),
+            ("减：营业成本",                                   "2",  cost_n,       cost_y,     False, _f_cost),
+            ("    税金及附加",                                 "3",  tax,          tax_y_al,   False, _f_tax),
+            ("    销售费用",                                   "4",  sell,         sell_y,     False, _f_sell),
+            ("    管理费用",                                   "5",  mgmt,         mgmt_y,     False, _f_mgmt),
+            ("    研发费用",                                   "6",  rnd,          rnd_y,      False, _f_rnd),
+            ("    财务费用",                                   "7",  fin_exp,      fin_exp_y,  False, _f_fin),
+            ("    其中：利息费用",                             "8",  0,            0,          False, ""),
+            ("          利息收入",                             "9",  0,            0,          False, ""),
+            ("    资产减值损失",                               "10", impair,       impair_y,   False, _f_imp),
+            ("加：其他收益",                                   "11", oth_inc,      oth_inc_y,  False, _f_oinc),
+            ("    投资收益（损失以\"-\"号填列）",              "12", inv_g,        inv_y,      False, _f_inv),
+            ("    其中：对联营企业和合营企业的投资收益",        "13", 0,            0,          False, ""),
+            ("    公允价值变动收益（损失以\"-\"号填列）",      "14", fv_g,         fv_y,       False, _f_fv),
+            ("    资产处置收益（损失以\"-\"号填列）",          "15", asset_d,      asset_d_y,  False, _f_adisp),
+            ("二、营业利润（亏损以\"-\"号填列）",              "16", op_profit,    op_y,       True,  _f_op),
+            ("加：营业外收入",                                 "17", nop_inc,      nop_y,      False, _f_noi),
+            ("减：营业外支出",                                 "18", nop_exp,      nopx_y,     False, _f_noe),
+            ("三、利润总额（亏损总额以\"-\"号填列）",          "19", total_profit, total_y,    True,  _f_tp),
+            ("减：所得税费用",                                 "20", tax_exp,      tax_y,      False, _f_te),
+            ("四、净利润（净亏损以\"-\"号填列）",              "21", net_profit,   net_y,      True,  _f_np),
+            ("（一）持续经营净利润（净亏损以\"-\"号填列）",    "22", net_profit,   net_y,      False, _f_np),
+            ("（二）终止经营净利润（净亏损以\"-\"号填列）",    "23", 0,            0,          False, ""),
+            ("五、其他综合收益的税后净额",                     "24", 0,            0,          True,  ""),
+            ("（一）以后不能重分类进损益的其他综合收益",       "25", 0,            0,          False, ""),
+            ("    1.重新计量设定受益计划净负债或净资产的变动", "26", 0,            0,          False, ""),
+            ("    2.权益法下在被投资单位不能重分类进损益的\n其他综合收益中享有的份额", "27", 0, 0, False, ""),
+            ("（二）以后将重分类进损益的其他综合收益",         "28", 0,            0,          False, ""),
+            ("    1.权益法下在被投资单位以后将重分类进损益的\n其他综合收益中享有的份额", "29", 0, 0, False, ""),
+            ("    2.可供出售金融资产公允价值变动损益",         "30", 0,            0,          False, ""),
+            ("    3.持有至到期投资重分类为可供出售金融资产损益","31", 0,            0,          False, ""),
+            ("    4.现金流量套期损益的有效部分",               "32", 0,            0,          False, ""),
+            ("    5.外币财务报表折算差额",                     "33", 0,            0,          False, ""),
+            ("六、综合收益总额",                               "34", net_profit,   net_y,      True,  _f_np),
+            ("七、每股收益",                                   "35", "",           "",         True,  ""),
+            ("（一）基本每股收益",                             "36", 0,            0,          False, ""),
+            ("（二）稀释每股收益",                             "37", 0,            0,          False, ""),
         ]
 
         self.inc_tbl.setRowCount(len(rows_data))
@@ -625,6 +820,7 @@ class ReportPage(QWidget):
             name = row_item[0]; rowno = row_item[1]
             cur_v = row_item[2]; ytd_v = row_item[3]
             is_key = row_item[4] if len(row_item)>4 else False
+            formula = row_item[5] if len(row_item)>5 else ""
             self.inc_tbl.setRowHeight(i, 34)
             bg = QColor("#f0f4ff") if is_key else None
             for j,v in enumerate([name, str(rowno) if rowno else "",
@@ -638,6 +834,9 @@ class ReportPage(QWidget):
                 if j>=2 and isinstance(cur_v,(int,float)):
                     val = cur_v if j==2 else ytd_v
                     if val and val < 0: it.setForeground(QColor("#ff4d4f"))
+                # 存公式供 Tooltip 读取（仅金额列且有公式）
+                if j in (2,3) and formula and isinstance(cur_v,(int,float)):
+                    it.setData(Qt.UserRole, (name.strip(), formula))
                 self.inc_tbl.setItem(i,j,it)
 
 

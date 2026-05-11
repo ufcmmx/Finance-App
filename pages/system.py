@@ -353,6 +353,10 @@ class SystemPage(QWidget):
         if name == "用户管理":
             self._load_users()
 
+    def refresh_after_login(self):
+        """登录后调用，重新刷新 SystemPage 的状态"""
+        self._switch("用户管理")
+
     # ── Tab 1：用户管理 ──
     def _build_user_mgmt(self):
         w = QWidget()

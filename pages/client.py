@@ -18,12 +18,12 @@ class ClientPage(QWidget):
         L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(14)
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("客户列表", bold=True, size=18)); hdr.addStretch()
-        b_imp = QPushButton("导入账套"); b_imp.setObjectName("btn_outline")
-        b_imp.clicked.connect(self._import_account_set)
-        b_imp.setVisible(AppSession.has_perm("client.manage"))
-        b = QPushButton("＋ 新建客户"); b.setObjectName("btn_primary"); b.clicked.connect(self._add)
-        b.setVisible(AppSession.has_perm("client.manage"))
-        hdr.addWidget(b_imp); hdr.addWidget(b); L.addLayout(hdr)
+        self.b_imp = QPushButton("导入账套"); self.b_imp.setObjectName("btn_outline")
+        self.b_imp.clicked.connect(self._import_account_set)
+        self.b_imp.setVisible(AppSession.has_perm("client.manage"))
+        self.b_add = QPushButton("＋ 新建客户"); self.b_add.setObjectName("btn_primary"); self.b_add.clicked.connect(self._add)
+        self.b_add.setVisible(AppSession.has_perm("client.manage"))
+        hdr.addWidget(self.b_imp); hdr.addWidget(self.b_add); L.addLayout(hdr)
         self.search = QLineEdit(); self.search.setPlaceholderText("搜索客户名称或助记码...")
         self.search.textChanged.connect(self.load)
         L.addWidget(self.search)
@@ -48,6 +48,11 @@ class ClientPage(QWidget):
         user = AppSession.get()
         role = user["role"] if user else ""
 
+        # 更新顶部按钮的可见性
+        can_manage = AppSession.has_perm("client.manage")
+        self.b_imp.setVisible(can_manage)
+        self.b_add.setVisible(can_manage)
+
         if role in ("superadmin", "admin"):
             # 管理员以上看全部客户
             if kw:
@@ -71,7 +76,6 @@ class ClientPage(QWidget):
                              WHERE uca.user_id=? ORDER BY cl.id""", (uid,))
 
         rows = c.fetchall(); conn.close()
-        can_manage = AppSession.has_perm("client.manage")
         self.tbl.setRowCount(len(rows))
         for i,r in enumerate(rows):
             self.tbl.setRowHeight(i,50)

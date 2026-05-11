@@ -127,6 +127,9 @@ class MainWindow(QMainWindow):
         # 重置客户状态
         self._cur_client = None; self._cur_name = ""; self._cur_period = ""
         self._client_info.setText("")
+        # 刷新客户管理页按钮和系统管理页状态
+        self.pg_clients.load()
+        self.pg_system.refresh_after_login()
         self._nav("客户管理")
 
     def _on_carryforward_done(self):
