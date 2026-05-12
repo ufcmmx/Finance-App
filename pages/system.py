@@ -1,5 +1,5 @@
 """pages/system.py — 系统管理页（用户管理、客户授权）"""
-import hashlib
+from pw_utils import hash_pw, verify_pw
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
@@ -9,8 +9,7 @@ from session import AppSession, ROLE_LABELS
 from utils import lbl, card, sep
 
 
-def _hash_pw(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+
 
 
 # ── 新增/编辑用户对话框 ────────────────────────────────────────────────────
@@ -115,7 +114,7 @@ class UserDialog(QDialog):
                 if pw1:
                     c.execute("""UPDATE users SET display_name=?, role=?,
                                  is_active=?, password_hash=? WHERE id=?""",
-                              (display, role, active, _hash_pw(pw1), self.user["id"]))
+                              (display, role, active, hash_pw(pw1), self.user["id"]))
                 else:
                     c.execute("""UPDATE users SET display_name=?, role=?,
                                  is_active=? WHERE id=?""",
@@ -125,7 +124,7 @@ class UserDialog(QDialog):
             else:
                 c.execute("""INSERT INTO users(username, password_hash, display_name, role, is_active)
                              VALUES(?,?,?,?,?)""",
-                          (username, _hash_pw(pw1), display, role, active))
+                          (username, hash_pw(pw1), display, role, active))
                 log_action(conn, None, "新增用户", "user", c.lastrowid,
                            f"用户:{username} 角色:{role}")
             conn.commit()
@@ -290,12 +289,13 @@ class ChangePasswordDialog(QDialog):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT password_hash FROM users WHERE id=?", (uid,))
         row = c.fetchone()
-        if not row or row["password_hash"] != _hash_pw(old):
+        valid, _ = verify_pw(old, row["password_hash"]) if row else (False, False)
+        if not row or not valid:
             conn.close()
             QMessageBox.warning(self, "错误", "当前密码不正确"); return
 
         c.execute("UPDATE users SET password_hash=? WHERE id=?",
-                  (_hash_pw(new1), uid))
+                  (hash_pw(new1), uid))
         log_action(conn, None, "修改密码", "user", uid, "用户自行修改密码")
         conn.commit(); conn.close()
         QMessageBox.information(self, "成功", "密码已修改，下次登录生效")

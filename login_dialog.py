@@ -1,5 +1,4 @@
 """login_dialog.py — 登录窗口"""
-import hashlib
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QMessageBox, QFrame
@@ -9,10 +8,7 @@ from PySide6.QtGui import QFont, QKeyEvent
 
 from db import get_db
 from session import AppSession
-
-
-def _hash_pw(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+from pw_utils import hash_pw, verify_pw
 
 
 class LoginDialog(QDialog):
@@ -150,9 +146,15 @@ class LoginDialog(QDialog):
                 self._show_error("该账号已被停用，请联系管理员")
                 return
 
-            if user["password_hash"] != _hash_pw(password):
+            valid, needs_rehash = verify_pw(password, user["password_hash"])
+            if not valid:
                 self._show_error("密码错误")
                 return
+
+            # 旧版 SHA-256 哈希透明迁移为 Argon2
+            if needs_rehash:
+                c.execute("UPDATE users SET password_hash=? WHERE id=?",
+                          (hash_pw(password), user["id"]))
 
             # 更新最后登录时间
             c.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?",
