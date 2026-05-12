@@ -871,7 +871,9 @@ STANDARD_ACCOUNTS_SMALL = [
 def log_action(conn, client_id, action, target_type="", target_id="", detail="", operator=None):
     """Write one audit log entry using an existing open connection.
     operator 参数可选：不传则自动从 AppSession 取当前登录用户名。
+    注意：显式传入本地时间，绕过 SQLite CURRENT_TIMESTAMP 默认返回 UTC 的问题。
     """
+    from datetime import datetime
     if operator is None:
         try:
             from session import AppSession
@@ -879,9 +881,10 @@ def log_action(conn, client_id, action, target_type="", target_id="", detail="",
             operator = user["display_name"] if user else "未知"
         except Exception:
             operator = "未知"
+    local_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO audit_log(client_id,operator,action,target_type,target_id,detail) VALUES(?,?,?,?,?,?)",
-        (client_id, operator, action, target_type, str(target_id), detail)
+        "INSERT INTO audit_log(client_id,operator,action,target_type,target_id,detail,created_at) VALUES(?,?,?,?,?,?,?)",
+        (client_id, operator, action, target_type, str(target_id), detail, local_now)
     )
 
 VOUCHER_TEMPLATES = [

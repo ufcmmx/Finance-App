@@ -92,7 +92,31 @@ class SettlePage(QWidget):
         self.check_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.check_list.verticalHeader().setVisible(False); self.check_list.setShowGrid(False)
         self.check_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        L.addWidget(self.check_list); L.addStretch()
+        L.addWidget(self.check_list)
+
+        # ── 全部账期状态总览 ──
+        L.addWidget(sep())
+        L.addWidget(lbl("全部账期状态总览", bold=True, size=14))
+        hint2 = QLabel("  🔓 橙色行表示该账期曾经结账，但已被反结账，请注意核查。")
+        hint2.setStyleSheet("color:#ad6800;background:#fffbe6;border-radius:5px;"
+                            "padding:6px 10px;font-size:12px;")
+        L.addWidget(hint2)
+        self.overview_tbl = QTableWidget()
+        self.overview_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.overview_tbl.setShowGrid(False)
+        self.overview_tbl.verticalHeader().setVisible(False)
+        self.overview_tbl.setColumnCount(6)
+        self.overview_tbl.setHorizontalHeaderLabels(
+            ["账期", "凭证数", "已审核", "封账状态", "最后操作时间", "操作人"])
+        self.overview_tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.overview_tbl.setColumnWidth(0, 100)
+        self.overview_tbl.setColumnWidth(1, 70)
+        self.overview_tbl.setColumnWidth(2, 70)
+        self.overview_tbl.setColumnWidth(4, 150)
+        self.overview_tbl.setColumnWidth(5, 100)
+        self.overview_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        L.addWidget(self.overview_tbl)
+        L.addStretch()
 
     def _step_box(self, num, text, state):
         w = QFrame()
@@ -189,6 +213,87 @@ class SettlePage(QWidget):
         self._refresh_carry_amounts()
         self._load_activity()
         self._run_checks()
+        self._refresh_period_overview()
+
+    def _refresh_period_overview(self):
+        """全部账期状态总览：列出该客户所有账期及封账状态。
+        - 已结账：绿色
+        - 曾结账已反结账：橙色高亮（提醒用户注意）
+        - 未结账：正常色
+        """
+        if not self.client_id:
+            return
+        conn = get_db(); c = conn.cursor()
+        # 合并凭证表和periods表中的所有账期
+        c.execute("""
+            SELECT all_p.period,
+                   p.is_closed,
+                   (SELECT COUNT(*) FROM vouchers
+                    WHERE client_id=:cid AND period=all_p.period) AS total,
+                   (SELECT COUNT(*) FROM vouchers
+                    WHERE client_id=:cid AND period=all_p.period
+                    AND status='已审核') AS approved,
+                   (SELECT created_at FROM audit_log
+                    WHERE client_id=:cid AND target_type='period'
+                    AND target_id=all_p.period
+                    ORDER BY id DESC LIMIT 1) AS last_time,
+                   (SELECT operator FROM audit_log
+                    WHERE client_id=:cid AND target_type='period'
+                    AND target_id=all_p.period
+                    ORDER BY id DESC LIMIT 1) AS last_op
+            FROM (
+                SELECT period FROM vouchers WHERE client_id=:cid
+                UNION
+                SELECT period FROM periods WHERE client_id=:cid
+            ) all_p
+            LEFT JOIN periods p ON p.client_id=:cid AND p.period=all_p.period
+            ORDER BY all_p.period DESC
+        """, {"cid": self.client_id})
+        rows = c.fetchall(); conn.close()
+
+        tbl = self.overview_tbl
+        tbl.setRowCount(len(rows))
+        for r, row in enumerate(rows):
+            period    = row["period"]
+            is_closed = row["is_closed"]   # 1=已结账, 0=已反结账, None=从未结过
+            total     = row["total"] or 0
+            approved  = row["approved"] or 0
+            last_time = row["last_time"] or ""
+            last_op   = row["last_op"] or ""
+
+            # 判断状态
+            if is_closed == 1:
+                status_text = "✅ 已结账"
+                row_color   = None                      # 默认色
+                status_color = "#389e0d"
+            elif is_closed == 0:
+                status_text = "🔓 已反结账"
+                row_color   = QColor("#fff7e6")         # 橙色背景
+                status_color = "#d46b08"
+            else:
+                status_text = "○ 未结账"
+                row_color   = None
+                status_color = "#888888"
+
+            items = [
+                (period, Qt.AlignCenter),
+                (str(total), Qt.AlignCenter),
+                (str(approved), Qt.AlignCenter),
+                (status_text, Qt.AlignCenter),
+                (last_time[:16] if last_time else "", Qt.AlignCenter),
+                (last_op, Qt.AlignCenter),
+            ]
+            for col, (text, align) in enumerate(items):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(align | Qt.AlignVCenter)
+                if col == 3:
+                    item.setForeground(QColor(status_color))
+                    f = item.font(); f.setBold(True); item.setFont(f)
+                if row_color:
+                    item.setBackground(QBrush(row_color))
+                tbl.setItem(r, col, item)
+
+        self._fit_table_height(tbl)
 
     def _fit_table_height(self, table, extra=8):
         height = table.horizontalHeader().height()
@@ -266,6 +371,7 @@ class SettlePage(QWidget):
         conn.commit(); conn.close()
         self._refresh_lock_state()
         self._run_checks()
+        self._refresh_period_overview()
         QMessageBox.information(self, "结账成功", f"期间【{self.period}】已结账封账。")
 
     def _reopen_period(self):
@@ -334,6 +440,7 @@ class SettlePage(QWidget):
         conn.commit(); conn.close()
         self._refresh_lock_state()
         self._run_checks()
+        self._refresh_period_overview()
         QMessageBox.information(self, "反结账成功", success_msg)
 
     def _refresh_carry_amounts(self):

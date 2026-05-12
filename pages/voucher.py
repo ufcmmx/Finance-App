@@ -189,8 +189,14 @@ class VoucherPage(QWidget):
             if diff > 0.005:
                 conn.close()
                 QMessageBox.warning(self,"借贷不平",f"该凭证借贷差额 {diff:.2f}，不能审核通过。\n请先编辑修正后再审核。"); return
+        old_status = v["status"]
         conn.execute("UPDATE vouchers SET status=? WHERE id=?", (new_status, vid))
-        log_action(conn, self.client_id, f"凭证审核:{new_status}", "voucher", vid, f"状态变更为{new_status}")
+        if old_status == "已审核" and new_status == "待审核":
+            log_action(conn, self.client_id, "撤销审核", "voucher", vid,
+                       f"凭证号:{v['voucher_no']} 由已审核撤销为待审核")
+        else:
+            log_action(conn, self.client_id, f"凭证审核:{new_status}", "voucher", vid,
+                       f"凭证号:{v['voucher_no']} 状态变更为{new_status}")
         conn.commit(); conn.close()
         self._load_vouchers()
 
@@ -214,6 +220,19 @@ class VoucherPage(QWidget):
         d = VoucherDialog(self, self.client_id, self.period, vid)
         if d.exec(): self._load_vouchers()
 
+    def _renumber_period_vouchers(self, conn, period):
+        """删除凭证后按 id 升序对期间内凭证重新连续编号，并写审计日志。
+        调用方负责 conn.commit()。"""
+        c = conn.cursor()
+        c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? ORDER BY id",
+                  (self.client_id, period))
+        ids = [row["id"] for row in c.fetchall()]
+        for new_no, vid in enumerate(ids, 1):
+            c.execute("UPDATE vouchers SET voucher_no=? WHERE id=?",
+                      (f"记-{new_no:03d}", vid))
+        log_action(conn, self.client_id, "凭证重排序号", "period", period,
+                   f"期间 {period} 删除凭证后重排序号，共 {len(ids)} 张凭证")
+
     def _del_voucher(self, vid):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT voucher_no, status, period FROM vouchers WHERE id=?", (vid,))
@@ -228,18 +247,15 @@ class VoucherPage(QWidget):
                 f"凭证【{v['voucher_no']}】状态为【已审核】，删除将影响账务数据。\n\n确认要永久删除该凭证吗？",
                 QMessageBox.Yes | QMessageBox.No)
             if reply != QMessageBox.Yes: return
-            # 记审计日志
-            conn = get_db()
-            log_action(conn, self.client_id, "删除已审核凭证", "voucher", vid,
-                       f"凭证号:{v['voucher_no']} 期间:{v['period']}")
-            conn.execute("DELETE FROM vouchers WHERE id=?", (vid,))
-            conn.commit(); conn.close()
         else:
-            if QMessageBox.question(self,"确认","删除该凭证？",
-                    QMessageBox.Yes|QMessageBox.No) != QMessageBox.Yes: return
-            conn = get_db()
-            conn.execute("DELETE FROM vouchers WHERE id=?", (vid,))
-            conn.commit(); conn.close()
+            if QMessageBox.question(self, "确认", "删除该凭证？",
+                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes: return
+        conn = get_db()
+        log_action(conn, self.client_id, "删除凭证", "voucher", vid,
+                   f"凭证号:{v['voucher_no']} 期间:{v['period']} 原状态:{v['status']}")
+        conn.execute("DELETE FROM vouchers WHERE id=?", (vid,))
+        self._renumber_period_vouchers(conn, v["period"])
+        conn.commit(); conn.close()
         self._load_vouchers()
 
     # ─ Balance table (科目余额表) ─

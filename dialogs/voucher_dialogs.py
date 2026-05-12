@@ -566,6 +566,7 @@ class VoucherDialog(QDialog):
         conn = get_db(); c = conn.cursor()
         dt = self.date_edit.date().toString("yyyy-MM-dd")
         reverted_to_pending = False
+        orig_td = 0.0
 
         if self.voucher_id:
             c.execute("SELECT voucher_no, status FROM vouchers WHERE id=?", (self.voucher_id,))
@@ -579,6 +580,10 @@ class VoucherDialog(QDialog):
             if voucher["status"] == "已审核":
                 new_status = "待审核"
                 reverted_to_pending = True
+            # 保存修改前借方合计，用于审计对比
+            c.execute("SELECT COALESCE(SUM(debit),0) as s FROM voucher_entries WHERE voucher_id=?",
+                      (self.voucher_id,))
+            orig_td = c.fetchone()["s"]
             c.execute("UPDATE vouchers SET date=?,attachment_count=?,status=? WHERE id=?",
                       (dt, self.attach_spin.value(), new_status, self.voucher_id))
             c.execute("DELETE FROM voucher_entries WHERE voucher_id=?", (self.voucher_id,))
@@ -599,12 +604,18 @@ class VoucherDialog(QDialog):
             for dim_id, item_id, item_name in aux_sel:
                 c.execute("INSERT INTO voucher_entry_aux(entry_id,dimension_id,aux_item_id,aux_item_name) VALUES(?,?,?,?)",
                           (entry_id, dim_id, item_id, item_name))
-        action = "编辑凭证" if self.voucher_id else "新增凭证"
-        detail = f"凭证号:{vno} 借方合计:{td:.2f}"
-        if reverted_to_pending:
-            detail += " 修改后自动回退为待审核"
-        log_action(conn, self.client_id,
-                   action, "voucher", vid, detail)
+
+        if self.voucher_id:
+            if reverted_to_pending:
+                # 单独写一条撤销审核日志，与编辑日志各自独立，均可追溯
+                log_action(conn, self.client_id, "撤销审核", "voucher", vid,
+                           f"凭证号:{vno} 因编辑操作自动撤销审核，修改前借方:{orig_td:.2f}")
+            log_action(conn, self.client_id, "编辑凭证", "voucher", vid,
+                       f"凭证号:{vno} 修改前借方:{orig_td:.2f} 修改后借方:{td:.2f}")
+        else:
+            log_action(conn, self.client_id, "新增凭证", "voucher", vid,
+                       f"凭证号:{vno} 借方合计:{td:.2f}")
+
         conn.commit(); conn.close()
         self.saved_and_new = and_new
         if reverted_to_pending:
