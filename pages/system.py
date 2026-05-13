@@ -356,9 +356,12 @@ class SystemPage(QWidget):
                 b.setVisible(is_superadmin)
         if name == "用户管理":
             self._load_users()
+        elif name == "修改密码":
+            self._refresh_change_pw()
 
     def refresh_after_login(self):
         """登录后调用，重新刷新 SystemPage 的状态"""
+        self._refresh_change_pw()
         self._switch("用户管理")
 
     # ── Tab 1：用户管理 ──
@@ -505,12 +508,12 @@ class SystemPage(QWidget):
         il = QHBoxLayout(info_frame)
         il.setContentsMargins(20, 16, 20, 16)
         il.setSpacing(20)
-        user = AppSession.get() or {}
         il.addWidget(lbl("当前用户：", color="#888"))
-        il.addWidget(lbl(user.get("display_name", ""), bold=True))
+        self.lbl_cur_user = lbl("", bold=True)
+        il.addWidget(self.lbl_cur_user)
         il.addWidget(lbl("角色：", color="#888"))
-        role_label = ROLE_LABELS.get(user.get("role", ""), "")
-        il.addWidget(lbl(role_label, color="#3d6fdb", bold=True))
+        self.lbl_cur_role = lbl("", color="#3d6fdb", bold=True)
+        il.addWidget(self.lbl_cur_role)
         il.addStretch()
         L.addWidget(info_frame)
 
@@ -521,6 +524,13 @@ class SystemPage(QWidget):
         L.addWidget(b_pw)
         L.addStretch()
         self.stack.addWidget(w)
+
+    def _refresh_change_pw(self):
+        """切换到「修改密码」Tab 时，从 AppSession 动态读取当前用户信息并更新标签。"""
+        user = AppSession.get() or {}
+        self.lbl_cur_user.setText(user.get("display_name", ""))
+        self.lbl_cur_role.setText(ROLE_LABELS.get(user.get("role", ""), ""))
+
     # ── Tab 3：数据备份（仅超级管理员）──────────────────────────────────────
     def _build_backup(self):
         w = QWidget()
