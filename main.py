@@ -174,6 +174,13 @@ class MainWindow(QMainWindow):
                                      QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
+        user = AppSession.get()
+        if user:
+            conn = get_db()
+            log_action(conn, 0, "退出登录", "user", user["id"],
+                       f"用户 {user['username']} 退出登录",
+                       operator=user["username"])
+            conn.commit(); conn.close()
         AppSession.logout()
         # 隐藏所有导航按钮，清空客户信息
         for btn in self._nav_btns:

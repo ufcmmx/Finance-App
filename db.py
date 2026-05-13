@@ -878,7 +878,7 @@ def log_action(conn, client_id, action, target_type="", target_id="", detail="",
         try:
             from session import AppSession
             user = AppSession.get()
-            operator = user["display_name"] if user else "未知"
+            operator = user["username"] if user else "未知"
         except Exception:
             operator = "未知"
     local_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

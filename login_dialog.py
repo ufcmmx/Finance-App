@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QKeyEvent
 
-from db import get_db
+from db import get_db, log_action
 from session import AppSession
 from pw_utils import hash_pw, verify_pw
 
@@ -139,15 +139,24 @@ class LoginDialog(QDialog):
             user = c.fetchone()
 
             if not user:
+                log_action(conn, 0, "登录失败", "user", 0,
+                           f"用户名不存在: {username}", operator=username)
+                conn.commit(); conn.close()
                 self._show_error("用户名不存在")
                 return
 
             if not user["is_active"]:
+                log_action(conn, 0, "登录失败", "user", user["id"],
+                           f"账号已停用: {username}", operator=username)
+                conn.commit(); conn.close()
                 self._show_error("该账号已被停用，请联系管理员")
                 return
 
             valid, needs_rehash = verify_pw(password, user["password_hash"])
             if not valid:
+                log_action(conn, 0, "登录失败", "user", user["id"],
+                           f"密码错误: {username}", operator=username)
+                conn.commit(); conn.close()
                 self._show_error("密码错误")
                 return
 
@@ -159,8 +168,9 @@ class LoginDialog(QDialog):
             # 更新最后登录时间
             c.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?",
                       (user["id"],))
-            conn.commit()
-            conn.close()
+            log_action(conn, 0, "登录成功", "user", user["id"],
+                       f"用户 {username} 登录成功", operator=username)
+            conn.commit(); conn.close()
 
             # 写入全局会话
             AppSession.login({

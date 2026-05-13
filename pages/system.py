@@ -1,13 +1,17 @@
 """pages/system.py — 系统管理页（用户管理、客户授权）"""
+import os
 from pw_utils import hash_pw, verify_pw
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 
-from db import get_db, log_action
+from db import get_db, DB_PATH, log_action
+from pw_utils import hash_pw, verify_pw
+from backup_utils import encrypt_backup, decrypt_backup
 from session import AppSession, ROLE_LABELS
 from utils import lbl, card, sep
 
+from datetime import datetime
 
 
 
@@ -320,7 +324,7 @@ class SystemPage(QWidget):
         tl.setContentsMargins(16, 0, 16, 0)
         tl.setSpacing(0)
         self._tabs = []
-        for name in ["用户管理", "修改密码"]:
+        for name in ["用户管理", "修改密码", "数据备份"]:
             b = QPushButton(name)
             b.setStyleSheet("""QPushButton{background:transparent;color:#888;border:none;
                 padding:12px 16px;border-bottom:2px solid transparent;}
@@ -334,22 +338,22 @@ class SystemPage(QWidget):
         self.stack = QStackedWidget()
         self._build_user_mgmt()
         self._build_change_pw()
+        self._build_backup()
         L.addWidget(self.stack)
         self._switch("用户管理")
 
     def _switch(self, name):
-        mapping = {"用户管理": 0, "修改密码": 1}
-        # 非 superadmin 隐藏用户管理 tab
-        if name == "用户管理" and not AppSession.has_perm("system.manage"):
+        mapping = {"用户管理": 0, "修改密码": 1, "数据备份": 2}
+        is_superadmin = AppSession.has_perm("system.manage")
+        if name in ("用户管理", "数据备份") and not is_superadmin:
             name = "修改密码"
         self.stack.setCurrentIndex(mapping[name])
         for b in self._tabs:
             is_active = b.text() == name
             b.setProperty("active", "true" if is_active else "false")
             b.style().unpolish(b); b.style().polish(b)
-            # 隐藏没有权限的 tab
-            if b.text() == "用户管理":
-                b.setVisible(AppSession.has_perm("system.manage"))
+            if b.text() in ("用户管理", "数据备份"):
+                b.setVisible(is_superadmin)
         if name == "用户管理":
             self._load_users()
 
@@ -517,3 +521,171 @@ class SystemPage(QWidget):
         L.addWidget(b_pw)
         L.addStretch()
         self.stack.addWidget(w)
+    # ── Tab 3：数据备份（仅超级管理员）──────────────────────────────────────
+    def _build_backup(self):
+        w = QWidget()
+        L = QVBoxLayout(w)
+        L.setContentsMargins(24, 16, 24, 16)
+        L.setSpacing(16)
+        L.addWidget(lbl("数据备份与恢复", bold=True, size=15))
+
+        note = QLabel(
+            "备份文件包含所有账套、凭证、用户数据，使用 AES-256-GCM 加密保护。\n"
+            "备份密码独立于登录密码，请妥善保管，遗失后备份文件将无法恢复。"
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "color:#555;font-size:12px;background:#f6f8fc;"
+            "border-radius:6px;padding:10px 14px;"
+        )
+        L.addWidget(note)
+
+        # 最近备份时间
+        self.last_backup_lbl = QLabel("最近备份：查询中…")
+        self.last_backup_lbl.setStyleSheet("color:#888;font-size:12px;")
+        L.addWidget(self.last_backup_lbl)
+
+        # 立即备份区
+        bf = QFrame()
+        bf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        bl = QVBoxLayout(bf)
+        bl.setContentsMargins(20, 16, 20, 16)
+        bl.setSpacing(8)
+        bl.addWidget(lbl("立即备份", bold=True))
+        bl.addWidget(QLabel("将当前数据库加密备份到指定位置，建议定期备份并存储到外部设备或云盘。"))
+        b_bk = QPushButton("选择位置并备份…")
+        b_bk.setObjectName("btn_primary")
+        b_bk.setFixedWidth(160)
+        b_bk.clicked.connect(self._do_backup)
+        bl.addWidget(b_bk)
+        L.addWidget(bf)
+
+        # 恢复区
+        rf = QFrame()
+        rf.setStyleSheet("QFrame{background:#fff;border:1px solid #f5c6cb;border-radius:8px;}")
+        rl = QVBoxLayout(rf)
+        rl.setContentsMargins(20, 16, 20, 16)
+        rl.setSpacing(8)
+        rl.addWidget(lbl("从备份恢复", bold=True, color="#c0392b"))
+        w2 = QLabel("⚠ 恢复操作将完全覆盖当前数据库，所有未备份的数据将丢失，操作不可撤销。")
+        w2.setWordWrap(True)
+        w2.setStyleSheet("color:#c0392b;font-size:12px;")
+        rl.addWidget(w2)
+        b_rs = QPushButton("选择备份文件并恢复…")
+        b_rs.setObjectName("btn_red")
+        b_rs.setFixedWidth(180)
+        b_rs.clicked.connect(self._do_restore)
+        rl.addWidget(b_rs)
+        L.addWidget(rf)
+        L.addStretch()
+        self.stack.addWidget(w)
+        self._refresh_last_backup()
+
+    def _refresh_last_backup(self):
+        """查询最近一次备份时间并更新标签。"""
+        try:
+            conn = get_db(); c = conn.cursor()
+            c.execute("""SELECT created_at, operator FROM audit_log
+                         WHERE client_id=0 AND action='数据备份'
+                         ORDER BY id DESC LIMIT 1""")
+            row = c.fetchone(); conn.close()
+            if row:
+                self.last_backup_lbl.setText(
+                    f"最近备份：{row['created_at'][:16]}  操作人：{row['operator']}")
+                self.last_backup_lbl.setStyleSheet("color:#389e0d;font-size:12px;")
+            else:
+                self.last_backup_lbl.setText("最近备份：尚未进行过备份")
+                self.last_backup_lbl.setStyleSheet("color:#cf1322;font-size:12px;")
+        except Exception:
+            self.last_backup_lbl.setText("最近备份：查询失败")
+
+    def _do_backup(self):
+        pw1, ok1 = QInputDialog.getText(
+            self, "设置备份密码", "请输入备份密码（至少6位）：", QLineEdit.Password)
+        if not ok1 or not pw1:
+            return
+        if len(pw1) < 6:
+            QMessageBox.warning(self, "密码太短", "备份密码至少需要 6 位。")
+            return
+        pw2, ok2 = QInputDialog.getText(
+            self, "确认备份密码", "请再次输入备份密码：", QLineEdit.Password)
+        if not ok2 or pw1 != pw2:
+            QMessageBox.warning(self, "密码不一致", "两次输入的密码不一致，请重新操作。")
+            return
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "选择备份保存位置", f"智一会计备份_{ts}.zyac",
+            "智一会计备份文件 (*.zyac)")
+        if not dest:
+            return
+        try:
+            encrypt_backup(DB_PATH, dest, pw1)
+            conn = get_db()
+            log_action(conn, 0, "数据备份", "system", 0,
+                       f"备份文件：{dest}")
+            conn.commit(); conn.close()
+            self._refresh_last_backup()
+            QMessageBox.information(
+                self, "备份成功",
+                f"备份已保存至：\n{dest}\n\n"
+                "⚠ 请务必将备份密码记录在安全的地方，\n"
+                "忘记密码将导致备份文件永久无法恢复。"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "备份失败", f"备份过程中发生错误：\n{e}")
+
+    def _do_restore(self):
+        reply = QMessageBox.warning(
+            self, "⚠ 确认恢复",
+            "恢复操作将完全覆盖当前数据库！\n\n"
+            "所有未备份的数据（凭证、用户、账套）将永久丢失。\n\n"
+            "确认要继续吗？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        src, _ = QFileDialog.getOpenFileName(
+            self, "选择备份文件", "", "智一会计备份文件 (*.zyac)")
+        if not src:
+            return
+        pw, ok = QInputDialog.getText(
+            self, "输入备份密码", "请输入该备份文件的密码：", QLineEdit.Password)
+        if not ok or not pw:
+            return
+        reply2 = QMessageBox.critical(
+            self, "最终确认",
+            "即将覆盖当前数据库，此操作不可撤销。\n\n确认执行恢复？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply2 != QMessageBox.Yes:
+            return
+        tmp_path = DB_PATH + ".restore_tmp"
+        try:
+            decrypt_backup(src, tmp_path, pw)
+            # 恢复成功，先写日志到当前库，再替换
+            conn = get_db()
+            log_action(conn, 0, "数据恢复", "system", 0,
+                       f"从备份恢复：{src}")
+            conn.commit(); conn.close()
+            if os.path.exists(DB_PATH):
+                os.replace(DB_PATH, DB_PATH + ".pre_restore_bak")
+            os.replace(tmp_path, DB_PATH)
+            QMessageBox.information(
+                self, "恢复成功",
+                "数据库已恢复成功。\n\n"
+                "请关闭并重新启动软件以使恢复生效。\n"
+                "（原数据库已保存为 accounting.db.pre_restore_bak）"
+            )
+        except ValueError as e:
+            # 密码错误或文件损坏
+            conn = get_db()
+            user = AppSession.get()
+            log_action(conn, 0, "恢复备份失败", "system", 0,
+                       f"密码错误或文件损坏，文件：{src}",
+                       operator=user["username"] if user else "未知")
+            conn.commit(); conn.close()
+            QMessageBox.critical(self, "恢复失败", str(e))
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception as e:
+            QMessageBox.critical(self, "恢复失败", f"恢复过程中发生错误：\n{e}")
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
