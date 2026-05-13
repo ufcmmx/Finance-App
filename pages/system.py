@@ -13,6 +13,39 @@ from utils import lbl, card, sep
 
 from datetime import datetime
 
+# ── keyring 备份密码管理 ───────────────────────────────────────────────────
+_KR_SERVICE = "智一会计"
+_KR_ACCOUNT = "backup_password"
+
+
+def _kr_get() -> str | None:
+    """从系统凭据管理器读取备份密码，失败返回 None。"""
+    try:
+        import keyring
+        return keyring.get_password(_KR_SERVICE, _KR_ACCOUNT)
+    except Exception:
+        return None
+
+
+def _kr_set(pw: str) -> bool:
+    """将备份密码存入系统凭据管理器，成功返回 True。"""
+    try:
+        import keyring
+        keyring.set_password(_KR_SERVICE, _KR_ACCOUNT, pw)
+        return True
+    except Exception:
+        return False
+
+
+def _kr_available() -> bool:
+    """检测 keyring 是否可用（pyinstaller 打包后偶尔缺失）。"""
+    try:
+        import keyring
+        keyring.get_password(_KR_SERVICE, "__probe__")
+        return True
+    except Exception:
+        return False
+
 
 
 
@@ -541,7 +574,7 @@ class SystemPage(QWidget):
 
         note = QLabel(
             "备份文件包含所有账套、凭证、用户数据，使用 AES-256-GCM 加密保护。\n"
-            "备份密码独立于登录密码，请妥善保管，遗失后备份文件将无法恢复。"
+            "备份密码独立于登录密码，由系统凭据管理器安全保管，无需每次手动输入。"
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -555,7 +588,34 @@ class SystemPage(QWidget):
         self.last_backup_lbl.setStyleSheet("color:#888;font-size:12px;")
         L.addWidget(self.last_backup_lbl)
 
-        # 立即备份区
+        # ── 备份密码管理区 ──
+        pf = QFrame()
+        pf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        pl = QVBoxLayout(pf)
+        pl.setContentsMargins(20, 16, 20, 16)
+        pl.setSpacing(10)
+        ph = QHBoxLayout()
+        ph.addWidget(lbl("备份密码", bold=True))
+        ph.addStretch()
+        self.lbl_pw_status = QLabel()
+        ph.addWidget(self.lbl_pw_status)
+        pl.addLayout(ph)
+        pw_note = QLabel(
+            "密码存储于操作系统凭据管理器（Windows Credential Manager / macOS Keychain），\n"
+            "与当前系统账户绑定，其他用户无法读取。\n"
+            "⚠ 修改密码只影响此后生成的新备份，已有备份文件仍需使用创建时的密码恢复。"
+        )
+        pw_note.setWordWrap(True)
+        pw_note.setStyleSheet("color:#888;font-size:12px;")
+        pl.addWidget(pw_note)
+        b_set_pw = QPushButton("设置 / 修改备份密码…")
+        b_set_pw.setObjectName("btn_outline")
+        b_set_pw.setFixedWidth(180)
+        b_set_pw.clicked.connect(self._set_backup_password)
+        pl.addWidget(b_set_pw)
+        L.addWidget(pf)
+
+        # ── 立即备份区 ──
         bf = QFrame()
         bf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
         bl = QVBoxLayout(bf)
@@ -570,7 +630,7 @@ class SystemPage(QWidget):
         bl.addWidget(b_bk)
         L.addWidget(bf)
 
-        # 恢复区
+        # ── 恢复区 ──
         rf = QFrame()
         rf.setStyleSheet("QFrame{background:#fff;border:1px solid #f5c6cb;border-radius:8px;}")
         rl = QVBoxLayout(rf)
@@ -581,6 +641,13 @@ class SystemPage(QWidget):
         w2.setWordWrap(True)
         w2.setStyleSheet("color:#c0392b;font-size:12px;")
         rl.addWidget(w2)
+        restore_note = QLabel(
+            "同一台电脑上的备份将自动使用已保存的密码恢复；\n"
+            "换电脑恢复时，程序将提示手动输入备份创建时所用的密码。"
+        )
+        restore_note.setWordWrap(True)
+        restore_note.setStyleSheet("color:#888;font-size:12px;")
+        rl.addWidget(restore_note)
         b_rs = QPushButton("选择备份文件并恢复…")
         b_rs.setObjectName("btn_red")
         b_rs.setFixedWidth(180)
@@ -590,6 +657,7 @@ class SystemPage(QWidget):
         L.addStretch()
         self.stack.addWidget(w)
         self._refresh_last_backup()
+        self._refresh_pw_status()
 
     def _refresh_last_backup(self):
         """查询最近一次备份时间并更新标签。"""
@@ -609,19 +677,89 @@ class SystemPage(QWidget):
         except Exception:
             self.last_backup_lbl.setText("最近备份：查询失败")
 
-    def _do_backup(self):
+    def _refresh_pw_status(self):
+        """更新备份密码状态标签。"""
+        if not _kr_available():
+            self.lbl_pw_status.setText("⚠ 凭据管理器不可用")
+            self.lbl_pw_status.setStyleSheet("color:#fa8c16;font-size:12px;")
+        elif _kr_get():
+            self.lbl_pw_status.setText("● 已设置")
+            self.lbl_pw_status.setStyleSheet("color:#389e0d;font-size:12px;font-weight:bold;")
+        else:
+            self.lbl_pw_status.setText("● 未设置")
+            self.lbl_pw_status.setStyleSheet("color:#cf1322;font-size:12px;font-weight:bold;")
+
+    def _set_backup_password(self):
+        """设置或修改备份密码，存入系统凭据管理器。"""
+        if not _kr_available():
+            QMessageBox.warning(
+                self, "不可用",
+                "当前环境无法访问系统凭据管理器。\n"
+                "请确认已安装 keyring 库，或手动输入密码进行备份。")
+            return
+
+        existing = _kr_get()
+        title = "修改备份密码" if existing else "设置备份密码"
+
+        # 修改时需先验证旧密码
+        if existing:
+            old, ok = QInputDialog.getText(
+                self, title, "请输入当前备份密码以验证身份：", QLineEdit.Password)
+            if not ok:
+                return
+            if old != existing:
+                QMessageBox.warning(self, "验证失败", "当前备份密码不正确。")
+                return
+
         pw1, ok1 = QInputDialog.getText(
-            self, "设置备份密码", "请输入备份密码（至少6位）：", QLineEdit.Password)
+            self, title, "请输入新备份密码（至少8位）：", QLineEdit.Password)
         if not ok1 or not pw1:
             return
-        if len(pw1) < 6:
-            QMessageBox.warning(self, "密码太短", "备份密码至少需要 6 位。")
+        if len(pw1) < 8:
+            QMessageBox.warning(self, "密码太短", "备份密码至少需要 8 位。")
             return
         pw2, ok2 = QInputDialog.getText(
-            self, "确认备份密码", "请再次输入备份密码：", QLineEdit.Password)
+            self, title, "请再次输入新备份密码：", QLineEdit.Password)
         if not ok2 or pw1 != pw2:
             QMessageBox.warning(self, "密码不一致", "两次输入的密码不一致，请重新操作。")
             return
+
+        if _kr_set(pw1):
+            conn = get_db()
+            action = "修改备份密码" if existing else "设置备份密码"
+            log_action(conn, 0, action, "system", 0, "备份密码已更新至系统凭据管理器")
+            conn.commit(); conn.close()
+            self._refresh_pw_status()
+            msg = (
+                "备份密码已修改并保存至系统凭据管理器。\n\n"
+                "⚠ 已有备份文件仍需使用原密码恢复，请妥善保管历史密码记录。"
+                if existing else
+                "备份密码已设置并保存至系统凭据管理器。\n"
+                "今后备份时将自动使用此密码，无需每次手动输入。"
+            )
+            QMessageBox.information(self, "成功", msg)
+        else:
+            QMessageBox.critical(self, "保存失败",
+                                 "密码无法存入系统凭据管理器，请检查系统权限。")
+
+    def _do_backup(self):
+        """执行备份：优先使用 keyring 中的密码，未设置则引导先设置。"""
+        pw = _kr_get()
+        if not pw:
+            # 首次使用，引导设置密码
+            ret = QMessageBox.information(
+                self, "尚未设置备份密码",
+                "首次备份需要先设置备份密码。\n\n"
+                "密码将安全保存在系统凭据管理器中，今后备份无需重复输入。\n\n"
+                "点击「确定」立即设置。",
+                QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
+            if ret != QMessageBox.Ok:
+                return
+            self._set_backup_password()
+            pw = _kr_get()
+            if not pw:
+                return  # 用户取消了设置
+
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         dest, _ = QFileDialog.getSaveFileName(
             self, "选择备份保存位置", f"智一会计备份_{ts}.zyac",
@@ -629,22 +767,17 @@ class SystemPage(QWidget):
         if not dest:
             return
         try:
-            encrypt_backup(DB_PATH, dest, pw1)
+            encrypt_backup(DB_PATH, dest, pw)
             conn = get_db()
-            log_action(conn, 0, "数据备份", "system", 0,
-                       f"备份文件：{dest}")
+            log_action(conn, 0, "数据备份", "system", 0, f"备份文件：{dest}")
             conn.commit(); conn.close()
             self._refresh_last_backup()
-            QMessageBox.information(
-                self, "备份成功",
-                f"备份已保存至：\n{dest}\n\n"
-                "⚠ 请务必将备份密码记录在安全的地方，\n"
-                "忘记密码将导致备份文件永久无法恢复。"
-            )
+            QMessageBox.information(self, "备份成功", f"备份已保存至：\n{dest}")
         except Exception as e:
             QMessageBox.critical(self, "备份失败", f"备份过程中发生错误：\n{e}")
 
     def _do_restore(self):
+        """执行恢复：先用 keyring 密码尝试，失败则提示手动输入（换机场景）。"""
         reply = QMessageBox.warning(
             self, "⚠ 确认恢复",
             "恢复操作将完全覆盖当前数据库！\n\n"
@@ -653,27 +786,72 @@ class SystemPage(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
+
         src, _ = QFileDialog.getOpenFileName(
             self, "选择备份文件", "", "智一会计备份文件 (*.zyac)")
         if not src:
             return
-        pw, ok = QInputDialog.getText(
-            self, "输入备份密码", "请输入该备份文件的密码：", QLineEdit.Password)
-        if not ok or not pw:
-            return
+
         reply2 = QMessageBox.critical(
             self, "最终确认",
             "即将覆盖当前数据库，此操作不可撤销。\n\n确认执行恢复？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply2 != QMessageBox.Yes:
             return
+
+        # 优先用 keyring 密码，失败再让用户手动输入
+        saved_pw = _kr_get()
+        candidates = [saved_pw] if saved_pw else []
+
         tmp_path = DB_PATH + ".restore_tmp"
+
+        def _try_restore(pw: str) -> bool:
+            """尝试用指定密码解密，成功返回 True，密码错误返回 False，其他异常上抛。"""
+            try:
+                decrypt_backup(src, tmp_path, pw)
+                return True
+            except ValueError:
+                return False
+
+        pw_used = None
+        for pw in candidates:
+            if _try_restore(pw):
+                pw_used = pw
+                break
+
+        if pw_used is None:
+            # keyring 密码不可用或不存在，提示手动输入（换机恢复场景）
+            hint = (
+                "未能用已保存的密码解密该备份文件。\n"
+                "这通常发生在换了电脑或密码已被修改的情况下。\n\n"
+                "请手动输入该备份文件创建时所用的密码："
+                if saved_pw else
+                "当前设备尚未保存备份密码，请手动输入该备份文件的密码："
+            )
+            pw_manual, ok = QInputDialog.getText(self, "输入备份密码", hint, QLineEdit.Password)
+            if not ok or not pw_manual:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                return
+            if not _try_restore(pw_manual):
+                # 手动输入也错了 → 记录日志并提示
+                conn = get_db()
+                user = AppSession.get()
+                log_action(conn, 0, "恢复备份失败", "system", 0,
+                           f"密码错误或文件损坏，文件：{src}",
+                           operator=user["username"] if user else "未知")
+                conn.commit(); conn.close()
+                QMessageBox.critical(self, "恢复失败",
+                                     "密码错误或备份文件已损坏，恢复已取消。")
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                return
+            pw_used = pw_manual
+
+        # 解密成功，替换数据库
         try:
-            decrypt_backup(src, tmp_path, pw)
-            # 恢复成功，先写日志到当前库，再替换
             conn = get_db()
-            log_action(conn, 0, "数据恢复", "system", 0,
-                       f"从备份恢复：{src}")
+            log_action(conn, 0, "数据恢复", "system", 0, f"从备份恢复：{src}")
             conn.commit(); conn.close()
             if os.path.exists(DB_PATH):
                 os.replace(DB_PATH, DB_PATH + ".pre_restore_bak")
@@ -684,17 +862,6 @@ class SystemPage(QWidget):
                 "请关闭并重新启动软件以使恢复生效。\n"
                 "（原数据库已保存为 accounting.db.pre_restore_bak）"
             )
-        except ValueError as e:
-            # 密码错误或文件损坏
-            conn = get_db()
-            user = AppSession.get()
-            log_action(conn, 0, "恢复备份失败", "system", 0,
-                       f"密码错误或文件损坏，文件：{src}",
-                       operator=user["username"] if user else "未知")
-            conn.commit(); conn.close()
-            QMessageBox.critical(self, "恢复失败", str(e))
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
         except Exception as e:
             QMessageBox.critical(self, "恢复失败", f"恢复过程中发生错误：\n{e}")
             if os.path.exists(tmp_path):

@@ -69,6 +69,7 @@ jobs:
         --hidden-import=openpyxl.utils
         --collect-all argon2
         --collect-all cryptography
+        --collect-all keyring
         main.py
 
     - name: 上传程序目录
