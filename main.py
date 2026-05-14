@@ -27,6 +27,7 @@ from pages.settle  import SettlePage
 from pages.report  import ReportPage
 from pages.audit   import AuditPage
 from pages.system  import SystemPage
+import auto_backup
 
 # 导航菜单：名称 → (stack索引, 所需权限)
 _NAV_ITEMS = [
@@ -131,6 +132,8 @@ class MainWindow(QMainWindow):
         self.pg_clients.load()
         self.pg_system.refresh_after_login()
         self._nav("客户管理")
+        # 登录后检查是否有未完成的月末自动备份（补跑机制）
+        auto_backup.check_and_run(self)
 
     def _on_carryforward_done(self):
         self.pg_vouchers._switch_tab("查凭证")

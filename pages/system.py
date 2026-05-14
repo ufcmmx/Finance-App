@@ -5,7 +5,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 
-from db import get_db, DB_PATH, log_action
+from db import get_db, DB_PATH, log_action, get_setting, set_setting
 from pw_utils import hash_pw, verify_pw
 from backup_utils import encrypt_backup, decrypt_backup
 from session import AppSession, ROLE_LABELS
@@ -13,38 +13,7 @@ from utils import lbl, card, sep
 
 from datetime import datetime
 
-# ── keyring 备份密码管理 ───────────────────────────────────────────────────
-_KR_SERVICE = "智一会计"
-_KR_ACCOUNT = "backup_password"
-
-
-def _kr_get() -> str | None:
-    """从系统凭据管理器读取备份密码，失败返回 None。"""
-    try:
-        import keyring
-        return keyring.get_password(_KR_SERVICE, _KR_ACCOUNT)
-    except Exception:
-        return None
-
-
-def _kr_set(pw: str) -> bool:
-    """将备份密码存入系统凭据管理器，成功返回 True。"""
-    try:
-        import keyring
-        keyring.set_password(_KR_SERVICE, _KR_ACCOUNT, pw)
-        return True
-    except Exception:
-        return False
-
-
-def _kr_available() -> bool:
-    """检测 keyring 是否可用（pyinstaller 打包后偶尔缺失）。"""
-    try:
-        import keyring
-        keyring.get_password(_KR_SERVICE, "__probe__")
-        return True
-    except Exception:
-        return False
+from kr_utils import kr_get, kr_set, kr_available
 
 
 
@@ -391,6 +360,10 @@ class SystemPage(QWidget):
             self._load_users()
         elif name == "修改密码":
             self._refresh_change_pw()
+        elif name == "数据备份":
+            self._refresh_last_backup()
+            self._refresh_pw_status()
+            self._refresh_auto_backup_ui()
 
     def refresh_after_login(self):
         """登录后调用，重新刷新 SystemPage 的状态"""
@@ -566,98 +539,199 @@ class SystemPage(QWidget):
 
     # ── Tab 3：数据备份（仅超级管理员）──────────────────────────────────────
     def _build_backup(self):
+        # 外层套 QScrollArea，内容过多时可滚动
+        outer = QWidget()
+        outer_l = QVBoxLayout(outer)
+        outer_l.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         w = QWidget()
         L = QVBoxLayout(w)
-        L.setContentsMargins(24, 16, 24, 16)
+        L.setContentsMargins(24, 16, 24, 24)
         L.setSpacing(16)
-        L.addWidget(lbl("数据备份与恢复", bold=True, size=15))
 
-        note = QLabel(
+        # ── 页标题 ──
+        title_lbl = QLabel("数据备份与恢复")
+        title_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#1a1a2e;")
+        L.addWidget(title_lbl)
+
+        intro = QLabel(
             "备份文件包含所有账套、凭证、用户数据，使用 AES-256-GCM 加密保护。\n"
             "备份密码独立于登录密码，由系统凭据管理器安全保管，无需每次手动输入。"
         )
-        note.setWordWrap(True)
-        note.setStyleSheet(
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
             "color:#555;font-size:12px;background:#f6f8fc;"
-            "border-radius:6px;padding:10px 14px;"
-        )
-        L.addWidget(note)
+            "border-radius:6px;padding:10px 14px;")
+        L.addWidget(intro)
 
-        # 最近备份时间
         self.last_backup_lbl = QLabel("最近备份：查询中…")
         self.last_backup_lbl.setStyleSheet("color:#888;font-size:12px;")
         L.addWidget(self.last_backup_lbl)
 
-        # ── 备份密码管理区 ──
+        # ── 备份密码管理 ──────────────────────────────────
         pf = QFrame()
         pf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
         pl = QVBoxLayout(pf)
-        pl.setContentsMargins(20, 16, 20, 16)
+        pl.setContentsMargins(20, 16, 20, 18)
         pl.setSpacing(10)
+
         ph = QHBoxLayout()
-        ph.addWidget(lbl("备份密码", bold=True))
+        pw_title = QLabel("备份密码")
+        pw_title.setStyleSheet("font-size:13px;font-weight:bold;color:#1a1a2e;")
+        ph.addWidget(pw_title)
         ph.addStretch()
         self.lbl_pw_status = QLabel()
         ph.addWidget(self.lbl_pw_status)
         pl.addLayout(ph)
+
         pw_note = QLabel(
-            "密码存储于操作系统凭据管理器（Windows Credential Manager / macOS Keychain），\n"
+            "密码存储于操作系统凭据管理器\n"
+            "（Windows Credential Manager / macOS Keychain），\n"
             "与当前系统账户绑定，其他用户无法读取。\n"
-            "⚠ 修改密码只影响此后生成的新备份，已有备份文件仍需使用创建时的密码恢复。"
+            "⚠ 修改密码只影响此后生成的新备份，\n"
+            "   已有备份文件仍需使用创建时的密码恢复。"
         )
         pw_note.setWordWrap(True)
         pw_note.setStyleSheet("color:#888;font-size:12px;")
         pl.addWidget(pw_note)
+
         b_set_pw = QPushButton("设置 / 修改备份密码…")
-        b_set_pw.setObjectName("btn_outline")
         b_set_pw.setFixedWidth(180)
+        b_set_pw.setStyleSheet(
+            "QPushButton{background:#fff;color:#3d6fdb;border:1px solid #3d6fdb;"
+            "border-radius:4px;padding:6px 12px;font-size:13px;}"
+            "QPushButton:hover{background:#e6f0ff;}")
         b_set_pw.clicked.connect(self._set_backup_password)
         pl.addWidget(b_set_pw)
         L.addWidget(pf)
 
-        # ── 立即备份区 ──
+        # ── 月末自动备份 ──────────────────────────────────
+        af = QFrame()
+        af.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        al = QVBoxLayout(af)
+        al.setContentsMargins(20, 16, 20, 18)
+        al.setSpacing(10)
+
+        ah = QHBoxLayout()
+        auto_title = QLabel("月末自动备份")
+        auto_title.setStyleSheet("font-size:13px;font-weight:bold;color:#1a1a2e;")
+        ah.addWidget(auto_title)
+        ah.addStretch()
+        self.chk_auto = QCheckBox("启用")
+        self.chk_auto.setStyleSheet("font-size:13px;color:#333;")
+        self.chk_auto.setChecked(get_setting("auto_backup_enabled", "0") == "1")
+        ah.addWidget(self.chk_auto)
+        al.addLayout(ah)
+
+        auto_note = QLabel(
+            "每月最后一天自动备份一次。若当天未登录软件，\n"
+            "下次登录时自动补跑（最多追溯 6 个月，每次补跑一个月份）。"
+        )
+        auto_note.setWordWrap(True)
+        auto_note.setStyleSheet("color:#888;font-size:12px;")
+        al.addWidget(auto_note)
+
+        dir_row = QHBoxLayout()
+        dir_lbl = QLabel("保存目录：")
+        dir_lbl.setStyleSheet("color:#333;font-size:12px;")
+        dir_lbl.setFixedWidth(72)
+        dir_row.addWidget(dir_lbl)
+        self.edit_auto_path = QLineEdit()
+        self.edit_auto_path.setPlaceholderText("留空则使用程序目录下的 backups/ 子目录")
+        self.edit_auto_path.setText(get_setting("auto_backup_path", ""))
+        self.edit_auto_path.setStyleSheet(
+            "border:1px solid #d9d9d9;border-radius:4px;"
+            "padding:4px 8px;font-size:12px;background:#fff;color:#333;")
+        dir_row.addWidget(self.edit_auto_path)
+        b_browse = QPushButton("浏览…")
+        b_browse.setFixedWidth(60)
+        b_browse.setStyleSheet(
+            "QPushButton{background:#fff;color:#3d6fdb;border:1px solid #3d6fdb;"
+            "border-radius:4px;padding:4px 8px;font-size:12px;}"
+            "QPushButton:hover{background:#e6f0ff;}")
+        b_browse.clicked.connect(self._browse_auto_path)
+        dir_row.addWidget(b_browse)
+        al.addLayout(dir_row)
+
+        self.lbl_last_auto = QLabel("最近自动备份：查询中…")
+        self.lbl_last_auto.setStyleSheet("color:#888;font-size:12px;")
+        al.addWidget(self.lbl_last_auto)
+
+        b_save_auto = QPushButton("保存自动备份设置")
+        b_save_auto.setFixedWidth(150)
+        b_save_auto.setStyleSheet(
+            "QPushButton{background:#3d6fdb;color:#fff;border:none;"
+            "border-radius:4px;padding:6px 14px;font-size:13px;font-weight:bold;}"
+            "QPushButton:hover{background:#2d5bc4;}")
+        b_save_auto.clicked.connect(self._save_auto_backup_settings)
+        al.addWidget(b_save_auto)
+        L.addWidget(af)
+
+        # ── 立即备份 ──────────────────────────────────────
         bf = QFrame()
         bf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
-        bl = QVBoxLayout(bf)
-        bl.setContentsMargins(20, 16, 20, 16)
-        bl.setSpacing(8)
-        bl.addWidget(lbl("立即备份", bold=True))
-        bl.addWidget(QLabel("将当前数据库加密备份到指定位置，建议定期备份并存储到外部设备或云盘。"))
+        bfl = QVBoxLayout(bf)
+        bfl.setContentsMargins(20, 16, 20, 18)
+        bfl.setSpacing(8)
+        bk_title = QLabel("立即备份")
+        bk_title.setStyleSheet("font-size:13px;font-weight:bold;color:#1a1a2e;")
+        bfl.addWidget(bk_title)
+        bk_note = QLabel("将当前数据库加密备份到指定位置，建议定期备份并存储到外部设备或云盘。")
+        bk_note.setWordWrap(True)
+        bk_note.setStyleSheet("color:#555;font-size:12px;")
+        bfl.addWidget(bk_note)
         b_bk = QPushButton("选择位置并备份…")
-        b_bk.setObjectName("btn_primary")
         b_bk.setFixedWidth(160)
+        b_bk.setStyleSheet(
+            "QPushButton{background:#3d6fdb;color:#fff;border:none;"
+            "border-radius:4px;padding:6px 14px;font-size:13px;font-weight:bold;}"
+            "QPushButton:hover{background:#2d5bc4;}")
         b_bk.clicked.connect(self._do_backup)
-        bl.addWidget(b_bk)
+        bfl.addWidget(b_bk)
         L.addWidget(bf)
 
-        # ── 恢复区 ──
+        # ── 从备份恢复 ────────────────────────────────────
         rf = QFrame()
         rf.setStyleSheet("QFrame{background:#fff;border:1px solid #f5c6cb;border-radius:8px;}")
-        rl = QVBoxLayout(rf)
-        rl.setContentsMargins(20, 16, 20, 16)
-        rl.setSpacing(8)
-        rl.addWidget(lbl("从备份恢复", bold=True, color="#c0392b"))
+        rfl = QVBoxLayout(rf)
+        rfl.setContentsMargins(20, 16, 20, 18)
+        rfl.setSpacing(8)
+        rs_title = QLabel("从备份恢复")
+        rs_title.setStyleSheet("font-size:13px;font-weight:bold;color:#c0392b;")
+        rfl.addWidget(rs_title)
         w2 = QLabel("⚠ 恢复操作将完全覆盖当前数据库，所有未备份的数据将丢失，操作不可撤销。")
         w2.setWordWrap(True)
         w2.setStyleSheet("color:#c0392b;font-size:12px;")
-        rl.addWidget(w2)
+        rfl.addWidget(w2)
         restore_note = QLabel(
             "同一台电脑上的备份将自动使用已保存的密码恢复；\n"
             "换电脑恢复时，程序将提示手动输入备份创建时所用的密码。"
         )
         restore_note.setWordWrap(True)
         restore_note.setStyleSheet("color:#888;font-size:12px;")
-        rl.addWidget(restore_note)
+        rfl.addWidget(restore_note)
         b_rs = QPushButton("选择备份文件并恢复…")
-        b_rs.setObjectName("btn_red")
-        b_rs.setFixedWidth(180)
+        b_rs.setFixedWidth(190)
+        b_rs.setStyleSheet(
+            "QPushButton{background:#ff4d4f;color:#fff;border:none;"
+            "border-radius:4px;padding:6px 14px;font-size:13px;font-weight:bold;}"
+            "QPushButton:hover{background:#cf1322;}")
         b_rs.clicked.connect(self._do_restore)
-        rl.addWidget(b_rs)
+        rfl.addWidget(b_rs)
         L.addWidget(rf)
+
         L.addStretch()
-        self.stack.addWidget(w)
+        scroll.setWidget(w)
+        outer_l.addWidget(scroll)
+        self.stack.addWidget(outer)
         self._refresh_last_backup()
         self._refresh_pw_status()
+        self._refresh_auto_backup_ui()
 
     def _refresh_last_backup(self):
         """查询最近一次备份时间并更新标签。"""
@@ -679,26 +753,66 @@ class SystemPage(QWidget):
 
     def _refresh_pw_status(self):
         """更新备份密码状态标签。"""
-        if not _kr_available():
+        if not kr_available():
             self.lbl_pw_status.setText("⚠ 凭据管理器不可用")
             self.lbl_pw_status.setStyleSheet("color:#fa8c16;font-size:12px;")
-        elif _kr_get():
+        elif kr_get():
             self.lbl_pw_status.setText("● 已设置")
             self.lbl_pw_status.setStyleSheet("color:#389e0d;font-size:12px;font-weight:bold;")
         else:
             self.lbl_pw_status.setText("● 未设置")
             self.lbl_pw_status.setStyleSheet("color:#cf1322;font-size:12px;font-weight:bold;")
 
+    def _refresh_auto_backup_ui(self):
+        """刷新自动备份区：复选框状态、目录、最近自动备份时间。"""
+        self.chk_auto.setChecked(get_setting("auto_backup_enabled", "0") == "1")
+        self.edit_auto_path.setText(get_setting("auto_backup_path", ""))
+        try:
+            conn = get_db(); c = conn.cursor()
+            c.execute("""SELECT created_at, operator, target_id FROM audit_log
+                         WHERE client_id=0 AND action='自动备份'
+                         ORDER BY id DESC LIMIT 1""")
+            row = c.fetchone(); conn.close()
+            if row:
+                self.lbl_last_auto.setText(
+                    f"最近自动备份：{row['created_at'][:16]}  "
+                    f"月份：{row['target_id']}  操作人：{row['operator']}")
+                self.lbl_last_auto.setStyleSheet("color:#389e0d;font-size:12px;")
+            else:
+                self.lbl_last_auto.setText("最近自动备份：尚未执行过")
+                self.lbl_last_auto.setStyleSheet("color:#888;font-size:12px;")
+        except Exception:
+            pass
+
+    def _browse_auto_path(self):
+        """弹出目录选择器，将选中路径填入自动备份目录框。"""
+        d = QFileDialog.getExistingDirectory(self, "选择自动备份保存目录",
+                                             self.edit_auto_path.text() or "")
+        if d:
+            self.edit_auto_path.setText(d)
+
+    def _save_auto_backup_settings(self):
+        """保存自动备份开关和目录到 settings 表。"""
+        enabled = "1" if self.chk_auto.isChecked() else "0"
+        path    = self.edit_auto_path.text().strip()
+        set_setting("auto_backup_enabled", enabled)
+        set_setting("auto_backup_path",    path)
+        conn = get_db()
+        log_action(conn, 0, "修改自动备份设置", "system", 0,
+                   f"启用:{enabled} 目录:{path or '(默认)'}")
+        conn.commit(); conn.close()
+        QMessageBox.information(self, "已保存", "自动备份设置已保存。")
+
     def _set_backup_password(self):
         """设置或修改备份密码，存入系统凭据管理器。"""
-        if not _kr_available():
+        if not kr_available():
             QMessageBox.warning(
                 self, "不可用",
                 "当前环境无法访问系统凭据管理器。\n"
                 "请确认已安装 keyring 库，或手动输入密码进行备份。")
             return
 
-        existing = _kr_get()
+        existing = kr_get()
         title = "修改备份密码" if existing else "设置备份密码"
 
         # 修改时需先验证旧密码
@@ -724,7 +838,7 @@ class SystemPage(QWidget):
             QMessageBox.warning(self, "密码不一致", "两次输入的密码不一致，请重新操作。")
             return
 
-        if _kr_set(pw1):
+        if kr_set(pw1):
             conn = get_db()
             action = "修改备份密码" if existing else "设置备份密码"
             log_action(conn, 0, action, "system", 0, "备份密码已更新至系统凭据管理器")
@@ -744,7 +858,7 @@ class SystemPage(QWidget):
 
     def _do_backup(self):
         """执行备份：优先使用 keyring 中的密码，未设置则引导先设置。"""
-        pw = _kr_get()
+        pw = kr_get()
         if not pw:
             # 首次使用，引导设置密码
             ret = QMessageBox.information(
@@ -756,7 +870,7 @@ class SystemPage(QWidget):
             if ret != QMessageBox.Ok:
                 return
             self._set_backup_password()
-            pw = _kr_get()
+            pw = kr_get()
             if not pw:
                 return  # 用户取消了设置
 
@@ -800,7 +914,7 @@ class SystemPage(QWidget):
             return
 
         # 优先用 keyring 密码，失败再让用户手动输入
-        saved_pw = _kr_get()
+        saved_pw = kr_get()
         candidates = [saved_pw] if saved_pw else []
 
         tmp_path = DB_PATH + ".restore_tmp"

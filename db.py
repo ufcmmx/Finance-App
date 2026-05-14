@@ -171,6 +171,10 @@ def init_db():
         client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
         UNIQUE(user_id, client_id)
     );
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    );
     """)
     conn.commit()
     # Run migrations
@@ -247,6 +251,11 @@ def _migrate_db(conn):
         c.execute("""INSERT INTO users(username, password_hash, display_name, role)
                      VALUES(?,?,?,?)""",
                   ("admin", default_hash, "超级管理员", "superadmin"))
+        conn.commit()
+    # ── settings 表（新增自动备份等配置，对旧库安全幂等）──
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
+    if not c.fetchone():
+        c.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
         conn.commit()
     # ── 性能索引（CREATE INDEX IF NOT EXISTS，对旧库安全幂等）──
     c.executescript("""
@@ -995,6 +1004,30 @@ VOUCHER_TEMPLATES = [
         ("计提利息","2231","应付利息",0,0),
     ]),
 ]
+
+def get_setting(key: str, default: str = "") -> str:
+    """读取 settings 表中的配置值，键不存在时返回 default。"""
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = c.fetchone(); conn.close()
+        return row["value"] if row else default
+    except Exception:
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    """写入 settings 表，已存在则覆盖（UPSERT）。"""
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value))
+        conn.commit(); conn.close()
+    except Exception:
+        pass
+
 
 def seed_client_accounts(client_id, conn=None, accounting_std="企业会计准则"):
     """Insert standard accounts for a new client based on accounting standard.
