@@ -18,8 +18,14 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("智一盈小账 · WiseLedger")
         self.setFixedSize(400, 340)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint)
+        self.setWindowFlags(
+            Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
         self._build()
+
+    def closeEvent(self, event):
+        """点击右上角 X → 拒绝对话框，触发主程序退出逻辑"""
+        self.reject()
+        event.accept()
 
     def _build(self):
         root = QVBoxLayout(self)

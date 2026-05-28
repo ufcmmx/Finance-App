@@ -213,15 +213,12 @@ def main():
     from datetime import datetime as _dt
     _wlog(f"\n=== 启动 {_dt.now()} ===")
     try:
-        _wlog("step 1: init_db")
-        init_db()
-        _wlog("step 2: QApplication")
+        _wlog("step 1: QApplication")
         app = QApplication(sys.argv)
-        _wlog("step 3: setStyleSheet")
 
         # ── 强制使用 Fusion 风格 + 固定浅色调色板，不随系统深色模式改变 ──
         app.setStyle("Fusion")
-        from PySide6.QtGui import QPalette, QColor
+        from PySide6.QtGui import QPalette, QColor, QPainter, QPixmap, QFont as QF
         _pal = QPalette()
         _pal.setColor(QPalette.Window,          QColor("#f0f2f5"))
         _pal.setColor(QPalette.WindowText,      QColor("#1e2130"))
@@ -236,13 +233,48 @@ def main():
         _pal.setColor(QPalette.ToolTipText,     QColor("#1e2130"))
         _pal.setColor(QPalette.PlaceholderText, QColor("#aab0c0"))
         app.setPalette(_pal)
-
         app.setStyleSheet(SS)
 
-        # ── 设置应用图标（任务栏 / 窗口标题栏）──
-        _ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "WiseLedger.ico")
+        # ── 设置应用图标 ──
+        _here2 = os.path.dirname(os.path.abspath(__file__))
+        _ico = os.path.join(_here2, "WiseLedger.ico")
         if os.path.exists(_ico):
             app.setWindowIcon(QIcon(_ico))
+
+        # ── 启动画面：先让用户看到界面，再执行耗时初始化 ──
+        _wlog("step 2: splash")
+        from PySide6.QtWidgets import QSplashScreen
+        _splash_pm = QPixmap(420, 220)
+        _splash_pm.fill(QColor("#1c2340"))
+        _sp = QPainter(_splash_pm)
+        # 图标
+        if os.path.exists(_ico):
+            _icon_pm = QPixmap(_ico).scaled(
+                72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            _sp.drawPixmap(28, 74, _icon_pm)
+        # 中文名
+        _f1 = QF("Microsoft YaHei", 20, QF.Bold)
+        _sp.setFont(_f1); _sp.setPen(QColor("#ffffff"))
+        _sp.drawText(116, 100, "智一盈小账")
+        # 英文名
+        _f2 = QF("Arial", 13, QF.Bold)
+        _sp.setFont(_f2); _sp.setPen(QColor("#ff8c00"))
+        _sp.drawText(116, 124, "WiseLedger")
+        # 加载提示
+        _f3 = QF("Microsoft YaHei", 10)
+        _sp.setFont(_f3); _sp.setPen(QColor("#4a5578"))
+        _sp.drawText(28, 192, "正在初始化，请稍候…")
+        # 底部装饰线
+        _sp.fillRect(0, 210, 420, 10, QColor("#3d6fdb"))
+        _sp.end()
+        splash = QSplashScreen(_splash_pm)
+        splash.setWindowFlags(Qt.SplashScreen | Qt.WindowStaysOnTopHint)
+        splash.show()
+        app.processEvents()
+
+        # ── 耗时初始化（此时用户已看到启动画面）──
+        _wlog("step 3: init_db")
+        init_db()
 
         # ── 关键启动顺序：先建主窗口并 show()，Windows 一次性注册所有 HWND ──
         _wlog("step 4: MainWindow()")
@@ -250,7 +282,8 @@ def main():
         app._main_window = w
         _wlog("step 5: w.show()")
         w.show()
-        app.processEvents()   # 确保所有 HWND 注册完毕再弹登录框
+        app.processEvents()   # 确保所有 HWND 注册完毕
+        splash.finish(w)      # 主窗口就绪后关闭启动画面
 
         # ── 再弹登录框（此时主窗口已稳定）──
         _wlog("step 6: LoginDialog")
