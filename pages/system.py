@@ -876,8 +876,8 @@ class SystemPage(QWidget):
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         dest, _ = QFileDialog.getSaveFileName(
-            self, "选择备份保存位置", f"智一会计备份_{ts}.zyac",
-            "智一会计备份文件 (*.zyac)")
+            self, "选择备份保存位置", f"WiseLedger备份_{ts}.zyac",
+            "WiseLedger备份文件 (*.zyac)")
         if not dest:
             return
         try:
@@ -902,7 +902,7 @@ class SystemPage(QWidget):
             return
 
         src, _ = QFileDialog.getOpenFileName(
-            self, "选择备份文件", "", "智一会计备份文件 (*.zyac)")
+            self, "选择备份文件", "", "WiseLedger备份文件 (*.zyac)")
         if not src:
             return
 

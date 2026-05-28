@@ -52,7 +52,7 @@ def decrypt_backup(backup_path: str, dest_path: str, password: str) -> None:
     with open(backup_path, "rb") as f:
         raw = f.read()
     if len(raw) < 32 or raw[:4] != MAGIC:
-        raise ValueError("不是有效的智一会计备份文件（文件头不匹配）")
+        raise ValueError("不是有效的 WiseLedger 备份文件（文件头不匹配）")
     salt      = raw[4:20]
     nonce     = raw[20:32]
     ciphertext = raw[32:]

@@ -542,6 +542,50 @@ class ImportAccountSetDialog(QDialog):
         return ok, err
 
     # ── 记账凭证 ──
+    def _resolve_code(self, c, code, aname, known_codes):
+        """将凭证中的科目编码解析为账套中已知（或刚创建）的科目编码。
+
+        处理两种常见差异：
+        1. 辅助核算后缀：如 "6001.001_008" → 基础科目 "6001.001"
+           （余额表只导入了基础科目，辅助对象已单独建立）
+        2. 深层子科目不存在：如 "6401.001.004"
+           若父科目 "6401.001" 存在则自动创建该子科目，返回原编码。
+
+        返回最终使用的科目编码；若无法解析则返回 None（真正未知科目）。
+        """
+        if not code:
+            return None
+        # 已知，直接返回
+        if code in known_codes:
+            return code
+        # ── 情况1：辅助核算后缀，如 6001.001_008 ──
+        if '_' in code:
+            base = code.rsplit('_', 1)[0]
+            if base in known_codes:
+                return base   # 用基础科目编码，辅助核算对象已在科目表中
+        # ── 情况2：深层子科目，如 6401.001.004 ──
+        if '.' in code:
+            parent_code = code.rsplit('.', 1)[0]
+            # 递归确认父科目可用（父科目也可能需要先解析）
+            actual_parent = self._resolve_code(c, parent_code, '', known_codes)
+            if actual_parent:
+                c.execute("SELECT type,direction FROM accounts WHERE client_id=? AND code=?",
+                          (self._client_id, actual_parent))
+                pr = c.fetchone()
+                if pr:
+                    from utils import infer_account_type_direction
+                    atype, direction = infer_account_type_direction(code, aname)
+                    level = code.count('.') + 1
+                    c.execute("""INSERT OR IGNORE INTO accounts
+                        (client_id,code,name,full_name,type,direction,
+                         parent_code,level,opening_debit,opening_credit)
+                        VALUES(?,?,?,?,?,?,?,?,0,0)""",
+                        (self._client_id, code, aname, aname,
+                         pr['type'], pr['direction'], actual_parent, level))
+                    known_codes.add(code)
+                    return code
+        return None   # 真正未知科目
+
     def _imp_voucher(self, conn, c, path=None):
         import re
         if path is None:
@@ -575,24 +619,28 @@ class ImportAccountSetDialog(QDialog):
                 if c.fetchone(): skip += 1; return
                 td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
                 if abs(td - tc) > 0.01: err += 1; return
-                # ── 检查未知科目 ──
-                for _, code, aname, _, _ in ents:
-                    if code and code not in known_codes:
+                # ── 解析科目编码（处理辅助核算后缀 / 自动创建子科目） ──
+                resolved_ents = []
+                for summ, code, aname, d, cr in ents:
+                    actual = self._resolve_code(c, code, aname, known_codes)
+                    if actual is None:
                         if code not in unknown_codes:
                             unknown_codes[code] = aname
                         self._log(f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
                                   f"凭证已导入但不计入余额表/报表")
+                        actual = code   # 原样写入，不影响凭证导入
+                    resolved_ents.append((summ, actual, aname, d, cr))
                 c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
                           " VALUES(?,?,?,?,?)",
                           (self._client_id, default_period, vno, date, "已审核"))
                 vid = c.lastrowid
-                for ln, ent in enumerate(ents, 1):
+                for ln, ent in enumerate(resolved_ents, 1):
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"
                               "account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
                               (vid, ln) + ent)
                 ok += 1
                 if ok <= 5 or ok % 20 == 0:
-                    self._log(f"  ✓ {vno}  {len(ents)} 行  借={td:.2f}")
+                    self._log(f"  ✓ {vno}  {len(resolved_ents)} 行  借={td:.2f}")
 
             for ri in range(len(df)):
                 row = df.iloc[ri]
@@ -647,18 +695,22 @@ class ImportAccountSetDialog(QDialog):
                 ents = v["entries"]
                 td = sum(e[3] for e in ents); tc = sum(e[4] for e in ents)
                 if abs(td - tc) > 0.01: err += 1; continue
-                # ── 检查未知科目 ──
-                for _, code, aname, _, _ in ents:
-                    if code and code not in known_codes:
+                # ── 解析科目编码（处理辅助核算后缀 / 自动创建子科目） ──
+                resolved_ents = []
+                for summ, code, aname, d, cr in ents:
+                    actual = self._resolve_code(c, code, aname, known_codes)
+                    if actual is None:
                         if code not in unknown_codes:
                             unknown_codes[code] = aname
                         self._log(f"  ⚠ {vno} 科目 [{code} {aname}] 不在科目表中，"
                                   f"凭证已导入但不计入余额表/报表")
+                        actual = code
+                    resolved_ents.append((summ, actual, aname, d, cr))
                 c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
                           " VALUES(?,?,?,?,?)",
                           (self._client_id, period, vno, v["date"], "已审核"))
                 vid = c.lastrowid
-                for ln, ent in enumerate(ents, 1):
+                for ln, ent in enumerate(resolved_ents, 1):
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"
                               "account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
                               (vid, ln) + ent)

@@ -1,4 +1,4 @@
-name: 构建 Windows 智一会计
+name: 构建 Windows WiseLedger
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         if [ $MINOR -lt 0 ]; then MINOR=0; fi
         VERSION="PR.${{ env.APP_VERSION_MAJOR }}.${MINOR}"
         echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-        echo "APP_NAME=智一会计_${VERSION}" >> $GITHUB_OUTPUT
+        echo "APP_NAME=WiseLedger_${VERSION}" >> $GITHUB_OUTPUT
         echo "Build version: ${VERSION}"
 
     - name: 安装依赖
@@ -47,8 +47,9 @@ jobs:
         pyinstaller
         --noconsole
         --onedir
-        --name "${{ steps.version.outputs.APP_NAME }}"
-        --icon main.ico
+        --name "WiseLedger"
+        --icon WiseLedger.ico
+        --add-data "WiseLedger.ico;."
         --add-data "pages;pages"
         --add-data "dialogs;dialogs"
         --hidden-import=pages.client
@@ -72,9 +73,15 @@ jobs:
         --collect-all keyring
         main.py
 
+    - name: 准备发布目录
+      shell: bash
+      run: |
+        mkdir release
+        mv "dist/WiseLedger" "release/智一盈小账"
+
     - name: 上传程序目录
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.version.outputs.APP_NAME }}
-        path: dist/${{ steps.version.outputs.APP_NAME }}/
+        path: release/
         retention-days: 30

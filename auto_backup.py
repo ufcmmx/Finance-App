@@ -109,7 +109,7 @@ def check_and_run(parent=None) -> None:
 
     # ── 执行备份 ──
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = os.path.join(backup_dir, f"智一会计自动备份_{ym}_{ts}.zyac")
+    dest = os.path.join(backup_dir, f"WiseLedger自动备份_{ym}_{ts}.zyac")
 
     try:
         encrypt_backup(DB_PATH, dest, pw)

@@ -16,7 +16,7 @@ class LoginDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("智一会计 · 登录")
+        self.setWindowTitle("智一盈小账 · WiseLedger")
         self.setFixedSize(400, 340)
         self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint)
         self._build()
@@ -32,9 +32,9 @@ class LoginDialog(QDialog):
         header.setFixedHeight(100)
         hl = QVBoxLayout(header)
         hl.setContentsMargins(32, 20, 32, 16)
-        title = QLabel("智一会计")
-        title.setStyleSheet("color:#ff8c00;font-size:22px;font-weight:bold;")
-        sub = QLabel("本地专业版  —  请登录")
+        title = QLabel("智一盈小账 · WiseLedger")
+        title.setStyleSheet("color:#ff8c00;font-size:18px;font-weight:bold;")
+        sub = QLabel("请登录以继续")
         sub.setStyleSheet("color:#8b93ae;font-size:12px;")
         hl.addWidget(title)
         hl.addWidget(sub)

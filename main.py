@@ -12,7 +12,7 @@ from datetime import datetime
 
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
-from PySide6.QtGui import QColor, QFont, QBrush, QPalette
+from PySide6.QtGui import QColor, QFont, QBrush, QPalette, QIcon
 
 from db import init_db, get_db, log_action, STANDARD_ACCOUNTS_SMALL
 from utils import SS, lbl
@@ -44,7 +44,7 @@ _NAV_ITEMS = [
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("智一会计 · 本地版")
+        self.setWindowTitle("智一盈小账 · WiseLedger")
         self.setMinimumSize(1150, 720)
         self._cur_client = None; self._cur_name = ""; self._cur_period = ""
         self._build()
@@ -58,10 +58,10 @@ class MainWindow(QMainWindow):
         sb = QWidget(); sb.setObjectName("sidebar")
         sb.setFixedWidth(196)
         sl = QVBoxLayout(sb); sl.setContentsMargins(0,0,0,0); sl.setSpacing(0)
-        logo = QLabel("智一会计"); logo.setObjectName("logo")
-        logo.setStyleSheet("color:#fff;font-size:18px;font-weight:bold;padding:22px 20px 4px 20px;")
-        sub = QLabel("本地专业版"); sub.setObjectName("subt")
-        sub.setStyleSheet("color:#445;font-size:11px;padding:0 20px 14px 20px;")
+        logo = QLabel("智一盈小账"); logo.setObjectName("logo")
+        logo.setStyleSheet("color:#fff;font-size:16px;font-weight:bold;padding:22px 20px 2px 20px;")
+        sub = QLabel("WiseLedger"); sub.setObjectName("subt")
+        sub.setStyleSheet("color:#ff8c00;font-size:11px;font-weight:bold;padding:0 20px 14px 20px;")
         sl.addWidget(logo); sl.addWidget(sub)
         div = QFrame(); div.setFrameShape(QFrame.HLine)
         div.setStyleSheet("background:#2a3255;max-height:1px;margin:0 16px 8px 16px;")
@@ -218,7 +218,31 @@ def main():
         _wlog("step 2: QApplication")
         app = QApplication(sys.argv)
         _wlog("step 3: setStyleSheet")
+
+        # ── 强制使用 Fusion 风格 + 固定浅色调色板，不随系统深色模式改变 ──
+        app.setStyle("Fusion")
+        from PySide6.QtGui import QPalette, QColor
+        _pal = QPalette()
+        _pal.setColor(QPalette.Window,          QColor("#f0f2f5"))
+        _pal.setColor(QPalette.WindowText,      QColor("#1e2130"))
+        _pal.setColor(QPalette.Base,            QColor("#ffffff"))
+        _pal.setColor(QPalette.AlternateBase,   QColor("#f8f9fc"))
+        _pal.setColor(QPalette.Text,            QColor("#1e2130"))
+        _pal.setColor(QPalette.Button,          QColor("#f0f2f5"))
+        _pal.setColor(QPalette.ButtonText,      QColor("#1e2130"))
+        _pal.setColor(QPalette.Highlight,       QColor("#3d6fdb"))
+        _pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        _pal.setColor(QPalette.ToolTipBase,     QColor("#ffffff"))
+        _pal.setColor(QPalette.ToolTipText,     QColor("#1e2130"))
+        _pal.setColor(QPalette.PlaceholderText, QColor("#aab0c0"))
+        app.setPalette(_pal)
+
         app.setStyleSheet(SS)
+
+        # ── 设置应用图标（任务栏 / 窗口标题栏）──
+        _ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "WiseLedger.ico")
+        if os.path.exists(_ico):
+            app.setWindowIcon(QIcon(_ico))
 
         # ── 关键启动顺序：先建主窗口并 show()，Windows 一次性注册所有 HWND ──
         _wlog("step 4: MainWindow()")
