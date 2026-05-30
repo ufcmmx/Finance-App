@@ -18,14 +18,20 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("智一盈小账 · WiseLedger")
         self.setFixedSize(400, 340)
+        # Windows 上必须包含 WindowSystemMenuHint，关闭按钮才能响应点击
         self.setWindowFlags(
-            Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+            Qt.Dialog
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowCloseButtonHint)
         self._build()
 
     def closeEvent(self, event):
         """点击右上角 X → 拒绝对话框，触发主程序退出逻辑"""
-        self.reject()
-        event.accept()
+        # 不单独调用 self.reject()：Qt 的 QDialog.closeEvent 默认已正确处理
+        # exec() 的退出（设置 Rejected 结果并退出内部事件循环）。
+        # 直接交由父类处理，避免 done()→hide() 与 closeEvent 的双重关闭冲突。
+        super().closeEvent(event)
 
     def _build(self):
         root = QVBoxLayout(self)

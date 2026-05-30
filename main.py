@@ -19,14 +19,8 @@ from utils import SS, lbl
 from session import AppSession, ROLE_LABELS
 from login_dialog import LoginDialog
 from dialogs import ImportAccountSetDialog
-from pages.client  import ClientPage
-from pages.opening import OpeningBalancePage
-from pages.voucher import VoucherPage
-from pages.account import AccountPage
-from pages.settle  import SettlePage
-from pages.report  import ReportPage
-from pages.audit   import AuditPage
-from pages.system  import SystemPage
+# ── 注意：pages 模块故意不在此处导入 ──
+# 它们会在 MainWindow._build() 中延迟导入，确保 splash 先显示再加载重量级依赖
 import auto_backup
 
 # 导航菜单：名称 → (stack索引, 所需权限)
@@ -100,6 +94,16 @@ class MainWindow(QMainWindow):
 
         # ── Content stack ──
         self.stack = QStackedWidget(); row.addWidget(self.stack)
+
+        # ── 在 _build() 内部延迟导入 pages，确保调用时 splash 已可见 ──
+        from pages.client  import ClientPage
+        from pages.opening import OpeningBalancePage
+        from pages.voucher import VoucherPage
+        from pages.account import AccountPage
+        from pages.settle  import SettlePage
+        from pages.report  import ReportPage
+        from pages.audit   import AuditPage
+        from pages.system  import SystemPage
 
         # 页面直接创建（主窗口 show() 之前已全部存在，Windows 一次性注册所有 HWND）
         self.pg_clients  = ClientPage()
