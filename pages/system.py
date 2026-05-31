@@ -404,8 +404,10 @@ class SystemPage(QWidget):
             ["用户名", "显示名称", "角色", "状态", "最后登录", "操作"])
         hh = self.user_tbl.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
-        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setStretchLastSection(False)
+        self.user_tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.user_tbl.setColumnWidth(0, 110)
+        self.user_tbl.setColumnWidth(1, 160)   # 显示名称，可拖拽调整
         self.user_tbl.setColumnWidth(2, 100)
         self.user_tbl.setColumnWidth(3, 70)
         self.user_tbl.setColumnWidth(4, 140)

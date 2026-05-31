@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import AccountInitDialog
+from session import AppSession
 
 
 class OpeningBalancePage(QWidget):
@@ -89,6 +90,9 @@ class OpeningBalancePage(QWidget):
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id
         self.client_name = client_name
+        # 只读/会计角色可查看期初但不可编辑
+        can_manage = AppSession.has_perm("opening.manage")
+        self.edit_btn.setVisible(can_manage)
         self._refresh_periods()
         # Try to select the passed period if allowed, else first allowed
         found = False

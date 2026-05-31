@@ -77,6 +77,7 @@ class SettlePage(QWidget):
         self.activity_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.activity_tbl.setColumnCount(6)
         self.activity_tbl.setHorizontalHeaderLabels(["科目编号","科目名称","类型","本期借方","本期贷方","发生额"])
+        self.activity_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.activity_tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.activity_tbl.setColumnWidth(0,90); self.activity_tbl.setColumnWidth(2,70)
         self.activity_tbl.setColumnWidth(3,110); self.activity_tbl.setColumnWidth(4,110)
@@ -89,6 +90,7 @@ class SettlePage(QWidget):
         L.addWidget(lbl("结账检测", bold=True, size=14))
         self.check_list = QTableWidget(); self.check_list.setColumnCount(3)
         self.check_list.setHorizontalHeaderLabels(["序号","检测项目","状态"])
+        self.check_list.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.check_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.check_list.verticalHeader().setVisible(False); self.check_list.setShowGrid(False)
         self.check_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -108,6 +110,7 @@ class SettlePage(QWidget):
         self.overview_tbl.setColumnCount(6)
         self.overview_tbl.setHorizontalHeaderLabels(
             ["账期", "凭证数", "已审核", "封账状态", "最后操作时间", "操作人"])
+        self.overview_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.overview_tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.overview_tbl.setColumnWidth(0, 100)
         self.overview_tbl.setColumnWidth(1, 70)
@@ -359,6 +362,22 @@ class SettlePage(QWidget):
             QMessageBox.warning(self, "无法结账",
                 f"以下凭证借贷不平衡，请先修正：{nos}")
             return
+        # 检查期末结转是否已完成
+        c.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND period=? AND note IN ('结转收入','结转费用')",
+                  (self.client_id, self.period))
+        carried = c.fetchone()[0]
+        income_amt  = abs(getattr(self, "_income_amt",  0))
+        expense_amt = abs(getattr(self, "_expense_amt", 0))
+        has_uncarried = carried == 0 and (income_amt > 0.005 or expense_amt > 0.005)
+        if has_uncarried:
+            ret = QMessageBox.warning(
+                self, "未完成期末结转",
+                f"当期收入/费用科目余额尚未结转（收入 {income_amt:,.2f}，费用 {expense_amt:,.2f}）。\n\n"
+                "未结转将导致利润表数据不正确。\n\n是否仍然继续封账？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ret != QMessageBox.Yes:
+                conn.close(); return
+
         if QMessageBox.question(self, "确认结账封账",
                 f"确认对期间【{self.period}】进行结账封账？\n\n封账后该期间凭证将无法新增或修改，如需修改请先反结账。",
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:

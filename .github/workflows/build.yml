@@ -50,6 +50,7 @@ jobs:
         --name "WiseLedger"
         --icon WiseLedger.ico
         --add-data "WiseLedger.ico;."
+        --add-data "arrow_dn.svg;."
         --add-data "pages;pages"
         --add-data "dialogs;dialogs"
         --hidden-import=pages.client

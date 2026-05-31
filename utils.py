@@ -40,15 +40,32 @@ QLineEdit,QDateEdit,QComboBox,QDoubleSpinBox,QSpinBox,QTextEdit {
     background:#fff; border:1px solid #d9d9d9; border-radius:5px;
     padding:6px 10px; }
 QSpinBox,QDoubleSpinBox { qproperty-buttonSymbols: NoButtons; }
-QLineEdit:focus,QDateEdit:focus,QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }
-QComboBox::drop-down { border:none; width:22px; }
+QLineEdit:focus,QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }
+/* QComboBox — 统一下拉箭头 */
+QComboBox { padding-right:26px; }
+QComboBox:focus { border:1.5px solid #3d6fdb; }
+QComboBox::drop-down { border:none; width:26px;
+    subcontrol-origin:padding; subcontrol-position:center right; }
+QComboBox::down-arrow { image:url(__ARROW_DN__); width:10px; height:6px; }
+QComboBox QAbstractItemView { border:1px solid #d9d9d9; border-radius:5px;
+    background:#fff; selection-background-color:#e6f0ff; }
+/* QDateEdit 日期选择器 — 与 QComboBox 箭头完全一致 */
+QDateEdit { padding-right:26px; }
+QDateEdit:focus { border:1.5px solid #3d6fdb; }
+QDateEdit::drop-down { border:none; width:26px;
+    subcontrol-origin:padding; subcontrol-position:center right; }
+QDateEdit::down-arrow { image:url(__ARROW_DN__); width:10px; height:6px; }
 /* Tables */
 QTableWidget { background:#fff; border:none; gridline-color:#f0f2f5;
     selection-background-color:#e6f0ff; selection-color:#1e2130; }
 QTableWidget::item { padding:8px 10px; }
-QHeaderView::section { background:#fafafa; color:#8b93ae; border:none;
+/* 表头：右侧分隔线让用户知道可拖拽调整列宽 */
+QHeaderView::section { background:#fafafa; color:#8b93ae;
+    border:none; border-right:1px solid #dde3ec;
     border-bottom:1px solid #e8ecf2; padding:8px 10px;
     font-size:12px; font-weight:bold; }
+QHeaderView::section:hover { background:#eef2ff; color:#3d6fdb; }
+QHeaderView::section:last { border-right:none; }
 /* Tabs */
 QTabBar::tab { background:transparent; color:#8b93ae; padding:9px 18px;
     border:none; border-bottom:2px solid transparent; }

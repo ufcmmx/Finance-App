@@ -32,14 +32,16 @@ class ClientPage(QWidget):
         self.tbl.setSelectionBehavior(QTableWidget.SelectRows); self.tbl.setShowGrid(False)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setColumnCount(7)
-        self.tbl.setHorizontalHeaderLabels(["","客户名称","助记码","客户类型","税号","联系人","操作"])
+        self.tbl.setHorizontalHeaderLabels(["序号","客户名称","助记码","客户类型","税号","联系人","操作"])
         hh = self.tbl.horizontalHeader()
-        hh.setSectionResizeMode(QHeaderView.Interactive)   # all columns user-draggable
-        hh.setSectionResizeMode(1, QHeaderView.Stretch)    # name column stretches
+        hh.setSectionResizeMode(QHeaderView.Interactive)   # 全部列均可拖拽调整宽度
         hh.setMinimumSectionSize(40)
-        self.tbl.setColumnWidth(0, 44); self.tbl.setColumnWidth(2, 80)
-        self.tbl.setColumnWidth(3, 110); self.tbl.setColumnWidth(4, 140)
-        self.tbl.setColumnWidth(5, 90); self.tbl.setColumnWidth(6, 300)
+        hh.setStretchLastSection(False)
+        self.tbl.setColumnWidth(0, 52); self.tbl.setColumnWidth(1, 220)
+        self.tbl.setColumnWidth(2, 80); self.tbl.setColumnWidth(3, 110)
+        self.tbl.setColumnWidth(4, 140); self.tbl.setColumnWidth(5, 90)
+        self.tbl.setColumnWidth(6, 300)
+        self.tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         vl.addWidget(self.tbl); L.addWidget(f)
 
     def load(self):

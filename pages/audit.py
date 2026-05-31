@@ -21,9 +21,7 @@ class AuditPage(QWidget):
         hdr.addWidget(lbl("操作审计日志", bold=True, size=18)); hdr.addStretch()
         b_exp = QPushButton("导出审计报告(Excel)"); b_exp.setObjectName("btn_outline")
         b_exp.clicked.connect(self._export)
-        b_clr = QPushButton("清空日志"); b_clr.setObjectName("btn_red")
-        b_clr.clicked.connect(self._clear)
-        hdr.addWidget(b_exp); hdr.addWidget(b_clr); L.addLayout(hdr)
+        hdr.addWidget(b_exp); L.addLayout(hdr)
 
         info = QLabel("  记录所有凭证新增/审核/删除、期末结账、数据导入等操作，可作为内部审计依据。")
         info.setStyleSheet("background:#f6f8ff;color:#444;border-radius:6px;padding:8px 12px;font-size:12px;")
@@ -148,14 +146,5 @@ class AuditPage(QWidget):
         wb.save(path)
         QMessageBox.information(self,"成功",f"审计报告已导出:\n{path}")
 
-    def _clear(self):
-        if QMessageBox.question(self,"确认","清空全部审计日志？此操作不可恢复。",
-                QMessageBox.Yes|QMessageBox.No) != QMessageBox.Yes: return
-        conn = get_db()
-        where = "client_id=?" if self.client_id else "1=1"
-        params = [self.client_id] if self.client_id else []
-        conn.execute(f"DELETE FROM audit_log WHERE {where}", params)
-        conn.commit(); conn.close()
-        self.load()
 
 

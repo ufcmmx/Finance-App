@@ -62,6 +62,15 @@ class AccountEditDialog(QDialog):
             for i in range(self.parent_cb.count()):
                 if self.parent_cb.itemData(i) == r["parent_code"]:
                     self.parent_cb.setCurrentIndex(i); break
+        # 检查该科目是否已被凭证分录使用，若已使用则禁止修改编码
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE client_id=? AND account_code=?",
+                  (self.client_id, r["code"]))
+        used = c.fetchone()[0]; conn.close()
+        if used > 0:
+            self.code.setReadOnly(True)
+            self.code.setToolTip(f"该科目已在 {used} 条凭证分录中使用，编码不可修改。如需调整请联系管理员。")
+            self.code.setStyleSheet("background:#f5f5f5;color:#888;border:1px solid #d9d9d9;")
 
     def _prefill_from_parent(self):
         p = self.parent_acct

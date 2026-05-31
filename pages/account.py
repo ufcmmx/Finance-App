@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QBrush, QPalette, QCursor, QIcon, QPixm
 from db import get_db, log_action
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import AccountEditDialog, ImportExcelDialog, AuxPage
+from session import AppSession
 # openpyxl imported lazily inside each export function
 
 
@@ -84,11 +85,11 @@ class AccountPage(QWidget):
 
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("会计科目管理", bold=True, size=18)); hdr.addStretch()
-        b_add = QPushButton("＋ 新增科目"); b_add.setObjectName("btn_primary")
-        b_add.clicked.connect(self._add)
-        b_imp = QPushButton("从Excel导入历史数据"); b_imp.setObjectName("btn_outline")
-        b_imp.clicked.connect(self._import_excel)
-        hdr.addWidget(b_imp); hdr.addWidget(b_add); L.addLayout(hdr)
+        self.b_add = QPushButton("＋ 新增科目"); self.b_add.setObjectName("btn_primary")
+        self.b_add.clicked.connect(self._add)
+        self.b_imp = QPushButton("从Excel导入历史数据"); self.b_imp.setObjectName("btn_outline")
+        self.b_imp.clicked.connect(self._import_excel)
+        hdr.addWidget(self.b_imp); hdr.addWidget(self.b_add); L.addLayout(hdr)
 
         info = QLabel("  提示：可新增子科目（如 6602.100 管理费用-其他）。系统默认科目不可删除，但可冻结或添加子科目。")
         info.setStyleSheet("background:#fffbe6;color:#ad6800;border-radius:6px;padding:8px 12px;font-size:12px;")
@@ -174,6 +175,9 @@ class AccountPage(QWidget):
 
     def load(self):
         if not self.client_id: return
+        can_manage = AppSession.has_perm("account.manage")
+        self.b_add.setVisible(can_manage)
+        self.b_imp.setVisible(can_manage)
         kw = self.search_acct.text().strip()
         tf = self.type_filter.currentText()
         conn = get_db(); c = conn.cursor()
@@ -263,15 +267,16 @@ class AccountPage(QWidget):
                 self.tbl.setCellWidget(i,4,bw)
                 continue
             
-            b_sub = self._make_icon_btn(
-                self._glyph_icon("add"),
-                "新增子科目", outline_style)
-            b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
-            b_ed = self._make_icon_btn(
-                self._glyph_icon("edit"),
-                "编辑科目", outline_style)
-            b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
-            bl.addWidget(b_sub); bl.addWidget(b_ed)
+            if can_manage:
+                b_sub = self._make_icon_btn(
+                    self._glyph_icon("add"),
+                    "新增子科目", outline_style)
+                b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
+                b_ed = self._make_icon_btn(
+                    self._glyph_icon("edit"),
+                    "编辑科目", outline_style)
+                b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
+                bl.addWidget(b_sub); bl.addWidget(b_ed)
 
             if not is_aux_entry:
                 bound_dims = aux_bound_map.get(r["code"], [])
@@ -281,24 +286,22 @@ class AccountPage(QWidget):
                         f"查看辅助核算：{', '.join(bound_dims)}", outline_style)
                     b_aux_view.clicked.connect(lambda _,rr=r, dims=bound_dims: self._open_aux_page(rr, dims[0]))
                     bl.addWidget(b_aux_view)
-                else:
+                elif can_manage:
                     b_aux = self._make_icon_btn(
                         self._glyph_icon("aux"),
                         "辅助核算", outline_style)
                     b_aux.clicked.connect(lambda _,rr=r: self._setup_aux(rr))
                     bl.addWidget(b_aux)
-            
-            if level > 1:
+
+            if can_manage and level > 1:
                 is_used = r['code'] in used_accounts
                 if is_used:
-                    # Account has been used, show freeze button instead of delete
                     b_freeze = self._make_icon_btn(
                         self._glyph_icon("freeze"),
                         "冻结科目", outline_style)
                     b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
                     bl.addWidget(b_freeze)
                 else:
-                    # Account not used, show delete button
                     b_del = self._make_icon_btn(
                         self._glyph_icon("delete", "#ffffff"),
                         "删除科目", red_style)
@@ -454,8 +457,9 @@ class AccountPage(QWidget):
             QMessageBox.warning(self, "系统默认科目", f"科目【{acct_code} {acct_name}】是系统默认科目，不可删除。如不需要使用，可以点击【冻结科目】。")
             return
         
-        # Check if account has been used
-        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE account_code=?", (acct_code,))
+        # Check if account has been used (限定当前客户，避免误判其他账套的同编码科目)
+        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE client_id=? AND account_code=?",
+                  (self.client_id, acct_code))
         used_count = c.fetchone()[0]
         conn.close()
         

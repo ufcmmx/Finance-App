@@ -165,10 +165,13 @@ class ReportPage(QWidget):
         t.setHorizontalHeaderLabels(cols)
         t.verticalHeader().setVisible(False); t.setShowGrid(True)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)  # 所有列均可拖拽
+        t.horizontalHeader().setStretchLastSection(False)
+        t.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         if col_widths:
-            for i,w in enumerate(col_widths):
-                if w == -1: t.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
-                else: t.setColumnWidth(i,w)
+            for i, w in enumerate(col_widths):
+                # -1 原为 Stretch（不可调），改为 Interactive 并给合适默认宽度
+                t.setColumnWidth(i, 220 if w == -1 else w)
         return t
 
     def _build_balance(self):
@@ -887,8 +890,7 @@ class ReportPage(QWidget):
         )
         self.eq_tbl.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
         self.eq_tbl.setWordWrap(True)
-        self.eq_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.eq_tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        # col 0 保持 Interactive（已在 _make_report_table 中统一设置，不再覆盖为 Stretch）
         L.addWidget(self.eq_tbl)
         self.stack.addWidget(w)
 

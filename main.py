@@ -26,8 +26,8 @@ import auto_backup
 # 导航菜单：名称 → (stack索引, 所需权限)
 _NAV_ITEMS = [
     ("客户管理",    0, "client.view"),
-    ("科目管理",    1, "account.manage"),
-    ("科目期初",    2, "opening.manage"),
+    ("科目管理",    1, "account.view"),    # 会计/只读可查看；管理权限由页面内按钮控制
+    ("科目期初",    2, "opening.view"),    # 同上
     ("记账（凭证）", 3, "voucher.view"),
     ("期末结账",    4, "settle.manage"),
     ("财务报表",    5, "report.view"),
@@ -237,7 +237,9 @@ def main():
         _pal.setColor(QPalette.ToolTipText,     QColor("#1e2130"))
         _pal.setColor(QPalette.PlaceholderText, QColor("#aab0c0"))
         app.setPalette(_pal)
-        app.setStyleSheet(SS)
+        # 用绝对路径替换样式表中的箭头占位符（兼容开发环境和 PyInstaller 打包）
+        _arrow_path = os.path.join(_here, "arrow_dn.svg").replace("\\", "/")
+        app.setStyleSheet(SS.replace("__ARROW_DN__", _arrow_path))
 
         # ── 设置应用图标 ──
         _here2 = os.path.dirname(os.path.abspath(__file__))
