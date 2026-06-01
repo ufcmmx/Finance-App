@@ -60,12 +60,12 @@ class ReportPage(QWidget):
         b_refresh.clicked.connect(self._refresh_reports)
         tl2.addWidget(b_refresh)
         tl2.addStretch()
-        b_dl = QPushButton("↓ Excel"); b_dl.setObjectName("btn_outline")
-        b_dl.clicked.connect(self._export)
+        b_dl = QPushButton("⬇ 下载"); b_dl.setObjectName("btn_outline")
+        b_dl.clicked.connect(self._show_download_menu)
         tl2.addWidget(b_dl)
-        b_pdf = QPushButton("↓ PDF"); b_pdf.setObjectName("btn_outline")
-        b_pdf.clicked.connect(self._export_pdf)
-        tl2.addWidget(b_pdf)
+        b_print = QPushButton("🖨 打印"); b_print.setObjectName("btn_outline")
+        b_print.clicked.connect(self._print_report)
+        tl2.addWidget(b_print)
         L.addWidget(tb2)
         self.stack = QStackedWidget(); L.addWidget(self.stack)
 
@@ -1470,16 +1470,118 @@ class ReportPage(QWidget):
         elif idx==3: self._load_cf_stmt()
         elif idx==4: self._load_cashflow()
 
-    def _export(self):
-        if not self.client_id: return
-        # Get current tab
-        current_tab = None
+    # ── 辅助：获取当前激活 Tab 名称 ────────────────────────────────────────────
+    def _get_current_tab(self) -> str | None:
         for b in self._rtabs:
             if b.property("active") == "true":
-                current_tab = b.text()
-                break
+                return b.text()
+        return None
+
+    # ── 辅助：下载按钮弹出格式选择菜单 ─────────────────────────────────────────
+    def _show_download_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.addAction("Excel (.xlsx)", self._export)
+        menu.addAction("PDF", self._export_pdf)
+        btn = self.sender()
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    # ── 辅助：将当前报表渲染为 PDF（不弹对话框，供打印/导出共用）───────────────
+    def _render_pdf(self, tab_name: str, path: str) -> None:
+        """按 tab_name 将对应 QTableWidget 用 reportlab 渲染到 path。"""
+        from print_utils import export_report_pdf
+        start, end = self._get_periods()
+        if not start:
+            return
+        _cfg: dict = {
+            "资产负债表": dict(
+                table_widget      = self.bs_tbl,
+                col_headers       = ["资产项目","行次","期末金额","年初金额",
+                                     "负债和所有者权益","行次","期末金额","年初金额"],
+                col_ratios        = [0.260, 0.047, 0.140, 0.140, 0.230, 0.047, 0.068, 0.068],
+                report_title      = "资产负债表",
+                is_landscape      = True,
+                amount_col_indices= [2, 3, 6, 7],
+            ),
+            "利润表": dict(
+                table_widget      = self.inc_tbl,
+                col_headers       = ["项目", "行次", "本期金额", "本年累计金额"],
+                col_ratios        = [0.478, 0.067, 0.228, 0.227],
+                report_title      = "利润表",
+                is_landscape      = False,
+                amount_col_indices= [2, 3],
+            ),
+            "所有者权益变动表": dict(
+                table_widget      = self.eq_tbl,
+                col_headers       = ["项目","实收资本(股本)","资本公积",
+                                     "其他综合收益","盈余公积","未分配利润","合计"],
+                col_ratios        = [0.247, 0.126, 0.126, 0.126, 0.126, 0.126, 0.123],
+                report_title      = "所有者权益变动表",
+                is_landscape      = True,
+                amount_col_indices= [1, 2, 3, 4, 5, 6],
+            ),
+            "现金流量表": dict(
+                table_widget      = self.cf_stmt_tbl,
+                col_headers       = ["项目", "行次", "本期金额", "本年累计金额"],
+                col_ratios        = [0.478, 0.067, 0.228, 0.227],
+                report_title      = "现金流量表",
+                is_landscape      = False,
+                amount_col_indices= [2, 3],
+            ),
+            "收支统计表": dict(
+                table_widget      = self.cf_tbl,
+                col_headers       = ["科目编号","科目名称","类型","本期借方","本期贷方","净额"],
+                col_ratios        = [0.124, 0.373, 0.101, 0.134, 0.134, 0.134],
+                report_title      = "收支统计表",
+                is_landscape      = False,
+                amount_col_indices= [3, 4, 5],
+            ),
+        }
+        cfg = _cfg.get(tab_name)
+        if not cfg:
+            return
+        export_report_pdf(
+            path         = path,
+            company_name = self.client_name,
+            period_text  = f"{start} 至 {end}",
+            **cfg,
+        )
+
+    # ── 打印：生成临时 PDF → 用系统默认应用打开（支持直接打印）───────────────
+    def _print_report(self):
+        if not self.client_id:
+            return
+        if not self._check_pdf_deps():
+            return
+        tab = self._get_current_tab()
+        if not tab:
+            return
+        _, end = self._get_periods()
+        if not end:
+            return
+        import tempfile, os, sys, subprocess
+        safe = tab.replace("/", "_").replace(" ", "_")
+        tmp_path = os.path.join(tempfile.mkdtemp(), f"{safe}_{end}.pdf")
+        try:
+            self._render_pdf(tab, tmp_path)
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"生成打印预览失败：\n{e}")
+            return
+        if not os.path.exists(tmp_path):
+            QMessageBox.warning(self, "错误", "生成打印文件失败，请检查 reportlab 安装。")
+            return
+        if sys.platform == "win32":
+            os.startfile(tmp_path)          # 在默认 PDF 阅读器中打开
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", tmp_path])
+        else:
+            subprocess.Popen(["xdg-open", tmp_path])
+
+    def _export(self):
+        if not self.client_id: return
+        current_tab = self._get_current_tab()
         if not current_tab: return
-        
+
         # Call corresponding export method
         if current_tab == "资产负债表":
             self._export_balance()
@@ -1701,26 +1803,28 @@ class ReportPage(QWidget):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _export_pdf(self):
-        """根据当前 Tab 调用对应的 PDF 导出方法。"""
+        """根据当前 Tab 弹出保存对话框后导出 PDF。"""
         if not self.client_id:
             return
-        current_tab = None
-        for b in self._rtabs:
-            if b.property("active") == "true":
-                current_tab = b.text()
-                break
-        if not current_tab:
+        if not self._check_pdf_deps():
             return
-        dispatch = {
-            "资产负债表":       self._export_balance_pdf,
-            "利润表":           self._export_income_pdf,
-            "所有者权益变动表": self._export_equity_pdf,
-            "现金流量表":       self._export_cf_stmt_pdf,
-            "收支统计表":       self._export_cashflow_pdf,
-        }
-        fn = dispatch.get(current_tab)
-        if fn:
-            fn()
+        tab = self._get_current_tab()
+        if not tab:
+            return
+        _, end = self._get_periods()
+        if not end:
+            return
+        safe = tab.replace("/", "_")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存 PDF", f"{safe}_{end}.pdf", "PDF 文件 (*.pdf)")
+        if not path:
+            return
+        try:
+            self._render_pdf(tab, path)
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"导出 PDF 失败：\n{e}")
+            return
+        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")
 
     def _get_periods(self):
         """返回 (start_period, end_period)；任一为空则返回 (None, None)。"""
@@ -1741,130 +1845,3 @@ class ReportPage(QWidget):
             )
             return False
 
-    def _export_balance_pdf(self):
-        """资产负债表 → A4 横向 PDF（8列）。"""
-        if not self._check_pdf_deps():
-            return
-        start, end = self._get_periods()
-        if not start:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存 PDF", f"资产负债表_{end}.pdf", "PDF 文件 (*.pdf)")
-        if not path:
-            return
-        from print_utils import export_report_pdf
-        export_report_pdf(
-            path        = path,
-            table_widget= self.bs_tbl,
-            col_headers = ["资产项目","行次","期末金额","年初金额",
-                           "负债和所有者权益","行次","期末金额","年初金额"],
-            col_ratios  = [0.260, 0.047, 0.140, 0.140,
-                           0.230, 0.047, 0.068, 0.068],
-            company_name= self.client_name,
-            report_title= "资产负债表",
-            period_text = f"{start} 至 {end}",
-            is_landscape= True,
-            amount_col_indices=[2, 3, 6, 7],
-        )
-        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")
-
-    def _export_income_pdf(self):
-        """利润表 → A4 纵向 PDF（4列）。"""
-        if not self._check_pdf_deps():
-            return
-        start, end = self._get_periods()
-        if not start:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存 PDF", f"利润表_{end}.pdf", "PDF 文件 (*.pdf)")
-        if not path:
-            return
-        from print_utils import export_report_pdf
-        export_report_pdf(
-            path        = path,
-            table_widget= self.inc_tbl,
-            col_headers = ["项目", "行次", "本期金额", "本年累计金额"],
-            col_ratios  = [0.478, 0.067, 0.228, 0.227],
-            company_name= self.client_name,
-            report_title= "利润表",
-            period_text = f"{start} 至 {end}",
-            is_landscape= False,
-            amount_col_indices=[2, 3],
-        )
-        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")
-
-    def _export_equity_pdf(self):
-        """所有者权益变动表 → A4 横向 PDF（7列）。"""
-        if not self._check_pdf_deps():
-            return
-        start, end = self._get_periods()
-        if not start:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存 PDF", f"所有者权益变动表_{end}.pdf", "PDF 文件 (*.pdf)")
-        if not path:
-            return
-        from print_utils import export_report_pdf
-        export_report_pdf(
-            path        = path,
-            table_widget= self.eq_tbl,
-            col_headers = ["项目","实收资本(股本)","资本公积",
-                           "其他综合收益","盈余公积","未分配利润","合计"],
-            col_ratios  = [0.247, 0.126, 0.126, 0.126, 0.126, 0.126, 0.123],
-            company_name= self.client_name,
-            report_title= "所有者权益变动表",
-            period_text = f"{start} 至 {end}",
-            is_landscape= True,
-            amount_col_indices=[1, 2, 3, 4, 5, 6],
-        )
-        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")
-
-    def _export_cf_stmt_pdf(self):
-        """现金流量表 → A4 纵向 PDF（4列）。"""
-        if not self._check_pdf_deps():
-            return
-        start, end = self._get_periods()
-        if not start:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存 PDF", f"现金流量表_{end}.pdf", "PDF 文件 (*.pdf)")
-        if not path:
-            return
-        from print_utils import export_report_pdf
-        export_report_pdf(
-            path        = path,
-            table_widget= self.cf_stmt_tbl,
-            col_headers = ["项目", "行次", "本期金额", "本年累计金额"],
-            col_ratios  = [0.478, 0.067, 0.228, 0.227],
-            company_name= self.client_name,
-            report_title= "现金流量表",
-            period_text = f"{start} 至 {end}",
-            is_landscape= False,
-            amount_col_indices=[2, 3],
-        )
-        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")
-
-    def _export_cashflow_pdf(self):
-        """收支统计表 → A4 纵向 PDF（6列）。"""
-        if not self._check_pdf_deps():
-            return
-        start, end = self._get_periods()
-        if not start:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存 PDF", f"收支统计表_{end}.pdf", "PDF 文件 (*.pdf)")
-        if not path:
-            return
-        from print_utils import export_report_pdf
-        export_report_pdf(
-            path        = path,
-            table_widget= self.cf_tbl,
-            col_headers = ["科目编号","科目名称","类型","本期借方","本期贷方","净额"],
-            col_ratios  = [0.124, 0.373, 0.101, 0.134, 0.134, 0.134],
-            company_name= self.client_name,
-            report_title= "收支统计表",
-            period_text = f"{start} 至 {end}",
-            is_landscape= False,
-            amount_col_indices=[3, 4, 5],
-        )
-        QMessageBox.information(self, "成功", f"已导出 PDF：\n{path}")

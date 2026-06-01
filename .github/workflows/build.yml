@@ -6,6 +6,7 @@ on:
       - main
       - refactor/split-modules
       - feature/dual-accounting-std
+      - feature/print-pdf
   workflow_dispatch:
 
 env:
