@@ -104,12 +104,12 @@ class AuditPage(QWidget):
             action = r[2]
             color  = action_colors.get(action,"#555")
             for j,(val,align) in enumerate([
-                (r[0][:19],    Qt.AlignCenter),
-                (r[1] or "",   Qt.AlignCenter),
-                (action,       Qt.AlignCenter),
-                (r[3] or "",   Qt.AlignCenter),
-                (str(r[4] or ""), Qt.AlignCenter),
-                (r[5] or "",   Qt.AlignLeft|Qt.AlignVCenter),
+                (r[0][:19],    Qt.AlignmentFlag.AlignCenter),
+                (r[1] or "",   Qt.AlignmentFlag.AlignCenter),
+                (action,       Qt.AlignmentFlag.AlignCenter),
+                (r[3] or "",   Qt.AlignmentFlag.AlignCenter),
+                (str(r[4] or ""), Qt.AlignmentFlag.AlignCenter),
+                (r[5] or "",   Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
             ]):
                 it = QTableWidgetItem(val); it.setTextAlignment(align)
                 if j==2: it.setForeground(QColor(color))

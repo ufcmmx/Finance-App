@@ -214,7 +214,7 @@ class AccountPage(QWidget):
             level = r["level"] or 1
             indent = "    " * (level-1)
             code_it = QTableWidgetItem(r["code"])
-            code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignCenter)
+            code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             # Mark accounts with _ in code as aux dimension entries
             code_str = r["code"] or ""
             is_aux_entry = '_' in code_str
@@ -244,8 +244,8 @@ class AccountPage(QWidget):
             
             type_it = QTableWidgetItem(r["type"] or "")
             type_it.setForeground(QColor(type_colors.get(r["type"],"#888")))
-            type_it.setTextAlignment(Qt.AlignCenter)
-            dir_it = QTableWidgetItem(r["direction"] or "借"); dir_it.setTextAlignment(Qt.AlignCenter)
+            type_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            dir_it = QTableWidgetItem(r["direction"] or "借"); dir_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             for j,it in enumerate([code_it, name_it, type_it, dir_it]):
                 self.tbl.setItem(i,j,it)
 

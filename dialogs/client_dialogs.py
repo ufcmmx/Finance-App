@@ -23,7 +23,7 @@ class ClientDialog(QDialog):
     def _build(self):
         L = QVBoxLayout(self); L.setContentsMargins(24,24,24,24); L.setSpacing(14)
         L.addWidget(lbl("客户信息", bold=True, size=15))
-        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignRight)
+        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.name = QLineEdit(); self.name.setPlaceholderText("公司全称（必填）")
         self.code = QLineEdit(); self.code.setPlaceholderText("如 ZY")
         self.typ = QComboBox(); self.typ.addItems(["小规模纳税人","一般纳税人","其他"])
@@ -164,7 +164,7 @@ class AccountInitDialog(QDialog):
                 sp.setValue(val or 0)
                 sp.setMinimumHeight(32)
                 sp.setMinimumWidth(140)
-                sp.setAlignment(Qt.AlignRight)
+                sp.setAlignment(Qt.AlignmentFlag.AlignRight)
                 if editable:
                     sp.setStyleSheet("QDoubleSpinBox{padding:4px 8px;font-size:13px;}")
                 else:

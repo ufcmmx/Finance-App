@@ -146,7 +146,7 @@ class ReportPage(QWidget):
         it = self.bs_tbl.item(row, col)
         if not it:
             return
-        data = it.data(Qt.UserRole)
+        data = it.data(Qt.ItemDataRole.UserRole)
         if not data:
             return
         self._show_formula_tip(data[0], data[1], self.bs_tbl, it)
@@ -158,7 +158,7 @@ class ReportPage(QWidget):
         it = self.inc_tbl.item(row, col)
         if not it:
             return
-        data = it.data(Qt.UserRole)
+        data = it.data(Qt.ItemDataRole.UserRole)
         if not data:
             return
         self._show_formula_tip(data[0], data[1], self.inc_tbl, it)
@@ -170,7 +170,7 @@ class ReportPage(QWidget):
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)  # 所有列均可拖拽
         t.horizontalHeader().setStretchLastSection(False)
-        t.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        t.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         if col_widths:
             for i, w in enumerate(col_widths):
                 # -1 原为 Stretch（不可调），改为 Interactive 并给合适默认宽度
@@ -581,10 +581,10 @@ class ReportPage(QWidget):
             self.bs_tbl.setRowHeight(i, 32)
             # Left
             for j,(text,align) in enumerate([
-                (l_name, Qt.AlignLeft|Qt.AlignVCenter),
-                (str(l_row), Qt.AlignCenter),
-                (fmt_amt(l_val) if isinstance(l_val,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
-                (fmt_amt(l_ys) if isinstance(l_ys,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
+                (l_name, Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
+                (str(l_row), Qt.AlignmentFlag.AlignCenter),
+                (fmt_amt(l_val) if isinstance(l_val,(int,float)) else "", Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
+                (fmt_amt(l_ys) if isinstance(l_ys,(int,float)) else "", Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
             ]):
                 it = QTableWidgetItem(text); it.setTextAlignment(align)
                 if is_hdr or is_tot:
@@ -597,15 +597,15 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 # 名称列存公式，鼠标指针改为问号提示可点击
                 if j == 0 and l_fml and not is_hdr:
-                    it.setData(Qt.UserRole, (l_name.replace("\n"," "), l_fml))
+                    it.setData(Qt.ItemDataRole.UserRole, (l_name.replace("\n"," "), l_fml))
                     it.setToolTip("点击查看取数公式")
                 self.bs_tbl.setItem(i,j,it)
             # Right
             for j,(text,align) in enumerate([
-                (r_name, Qt.AlignLeft|Qt.AlignVCenter),
-                (str(r_row), Qt.AlignCenter),
-                (fmt_amt(r_val) if isinstance(r_val,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
-                (fmt_amt(r_ys) if isinstance(r_ys,(int,float)) else "", Qt.AlignRight|Qt.AlignVCenter),
+                (r_name, Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
+                (str(r_row), Qt.AlignmentFlag.AlignCenter),
+                (fmt_amt(r_val) if isinstance(r_val,(int,float)) else "", Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
+                (fmt_amt(r_ys) if isinstance(r_ys,(int,float)) else "", Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
             ],4):
                 it = QTableWidgetItem(text); it.setTextAlignment(align)
                 if is_hdr or is_tot:
@@ -618,7 +618,7 @@ class ReportPage(QWidget):
                     it.setForeground(QColor("#e05252"))
                 # 名称列存公式，鼠标指针改为问号提示可点击
                 if j == 4 and r_fml and not is_hdr:
-                    it.setData(Qt.UserRole, (r_name.replace("\n"," "), r_fml))
+                    it.setData(Qt.ItemDataRole.UserRole, (r_name.replace("\n"," "), r_fml))
                     it.setToolTip("点击查看取数公式")
                 self.bs_tbl.setItem(i,j,it)
 
@@ -858,7 +858,7 @@ class ReportPage(QWidget):
                                    fmt_amt(cur_v) if isinstance(cur_v,(int,float)) else "",
                                    fmt_amt(ytd_v) if isinstance(ytd_v,(int,float)) else ""]):
                 it = QTableWidgetItem(v)
-                it.setTextAlignment(Qt.AlignLeft|Qt.AlignVCenter if j==0 else Qt.AlignCenter if j==1 else Qt.AlignRight|Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter if j==0 else Qt.AlignmentFlag.AlignCenter if j==1 else Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
                 if is_key:
                     it.setFont(QFont("",weight=QFont.Bold))
                     if bg: it.setBackground(bg)
@@ -867,7 +867,7 @@ class ReportPage(QWidget):
                     if val and val < 0: it.setForeground(QColor("#ff4d4f"))
                 # 名称列存公式
                 if j == 0 and formula:
-                    it.setData(Qt.UserRole, (name.strip(), formula))
+                    it.setData(Qt.ItemDataRole.UserRole, (name.strip(), formula))
                     it.setToolTip("点击查看取数公式")
                 self.inc_tbl.setItem(i,j,it)
 
@@ -891,7 +891,7 @@ class ReportPage(QWidget):
              "合计"],
             [-1, 110, 110, 100, 100, 110, 110]
         )
-        self.eq_tbl.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        self.eq_tbl.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.eq_tbl.setWordWrap(True)
         # col 0 保持 Interactive（已在 _make_report_table 中统一设置，不再覆盖为 Stretch）
         L.addWidget(self.eq_tbl)
@@ -961,7 +961,7 @@ class ReportPage(QWidget):
             for j, v in enumerate(vals):
                 text = v if j == 0 else (fmt_amt(v) if v else "")
                 it = QTableWidgetItem(text)
-                it.setTextAlignment(Qt.AlignLeft|Qt.AlignVCenter if j==0 else Qt.AlignRight|Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter if j==0 else Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
                 if bold: it.setFont(QFont("", weight=QFont.Bold))
                 if bg:   it.setBackground(QColor(bg))
                 if j > 0 and isinstance(v, float) and v < 0:
@@ -1279,12 +1279,12 @@ class ReportPage(QWidget):
             bg = QColor(HDR_BG) if is_hdr else QColor(BOLD_BG) if is_sub or is_tot else None
 
             for j, (text, align) in enumerate([
-                (label,  Qt.AlignLeft|Qt.AlignVCenter),
-                (rowno,  Qt.AlignCenter),
+                (label,  Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
+                (rowno,  Qt.AlignmentFlag.AlignCenter),
                 (fmt_amt(cur_v) if isinstance(cur_v, (int,float)) else "",
-                         Qt.AlignRight|Qt.AlignVCenter),
+                         Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
                 (fmt_amt(ytd_v) if isinstance(ytd_v, (int,float)) else "",
-                         Qt.AlignRight|Qt.AlignVCenter),
+                         Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter),
             ]):
                 it = QTableWidgetItem(text); it.setTextAlignment(align)
                 if is_hdr:
@@ -1396,7 +1396,7 @@ class ReportPage(QWidget):
             vals = [r['account_code'],r['account_name'] or "",atype,fmt_amt(d),fmt_amt(cr),fmt_amt(net)]
             for j,v in enumerate(vals):
                 it = QTableWidgetItem(v)
-                it.setTextAlignment(Qt.AlignCenter if j!=1 else Qt.AlignLeft|Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j!=1 else Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
                 if j==2: it.setForeground(QColor(tcolor))
                 if j==5: it.setForeground(QColor("#3d6fdb") if net>0 else QColor("#ff4d4f") if net<0 else QColor("#888"))
                 self.cf_tbl.setItem(i,j,it)
@@ -1405,7 +1405,7 @@ class ReportPage(QWidget):
         self.cf_tbl.setRowCount(n+1)
         self.cf_tbl.setRowHeight(n,38)
         for j,v in enumerate(["","合计","",fmt_amt(td_total),fmt_amt(tc_total),fmt_amt(td_total-tc_total)]):
-            it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter if j!=1 else Qt.AlignLeft|Qt.AlignVCenter)
+            it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j!=1 else Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
             it.setFont(QFont("",weight=QFont.Bold)); it.setBackground(QColor("#f5f7fa"))
             self.cf_tbl.setItem(n,j,it)
 

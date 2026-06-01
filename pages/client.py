@@ -41,7 +41,7 @@ class ClientPage(QWidget):
         self.tbl.setColumnWidth(2, 80); self.tbl.setColumnWidth(3, 110)
         self.tbl.setColumnWidth(4, 140); self.tbl.setColumnWidth(5, 90)
         self.tbl.setColumnWidth(6, 300)
-        self.tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         vl.addWidget(self.tbl); L.addWidget(f)
 
     def load(self):
@@ -84,12 +84,12 @@ class ClientPage(QWidget):
             # Index badge
             badge = QLabel(f"  {r['id']:02d}  ")
             badge.setStyleSheet("background:#f0f4ff;color:#3d6fdb;border-radius:4px;font-size:11px;")
-            badge.setAlignment(Qt.AlignCenter)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tbl.setCellWidget(i,0,badge)
             for j,v in enumerate([r['name'],r['short_code'] or '',r['client_type'] or '',
                                    r['tax_id'] or '',r['contact'] or ''],1):
-                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter)
-                it.setData(Qt.UserRole, r['id']); self.tbl.setItem(i,j,it)
+                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                it.setData(Qt.ItemDataRole.UserRole, r['id']); self.tbl.setItem(i,j,it)
             # Buttons
             bw = QWidget()
             bw.setObjectName("btnRow"); bw.setStyleSheet("#btnRow { background:#ffffff; }")

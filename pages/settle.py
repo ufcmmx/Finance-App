@@ -23,7 +23,7 @@ class SettlePage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
 
         content = QWidget()
@@ -74,7 +74,7 @@ class SettlePage(QWidget):
         self.activity_tbl = QTableWidget()
         self.activity_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.activity_tbl.setShowGrid(False); self.activity_tbl.verticalHeader().setVisible(False)
-        self.activity_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.activity_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.activity_tbl.setColumnCount(6)
         self.activity_tbl.setHorizontalHeaderLabels(["科目编号","科目名称","类型","本期借方","本期贷方","发生额"])
         self.activity_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
@@ -93,7 +93,7 @@ class SettlePage(QWidget):
         self.check_list.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.check_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.check_list.verticalHeader().setVisible(False); self.check_list.setShowGrid(False)
-        self.check_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.check_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         L.addWidget(self.check_list)
 
         # ── 全部账期状态总览 ──
@@ -117,7 +117,7 @@ class SettlePage(QWidget):
         self.overview_tbl.setColumnWidth(2, 70)
         self.overview_tbl.setColumnWidth(4, 150)
         self.overview_tbl.setColumnWidth(5, 100)
-        self.overview_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.overview_tbl.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         L.addWidget(self.overview_tbl)
         L.addStretch()
 
@@ -141,10 +141,10 @@ class SettlePage(QWidget):
         smart = lbl("智能生成", color="#52c41a", size=11)
         row.addWidget(cb); row.addStretch(); row.addWidget(smart)
         vl.addLayout(row)
-        icon = lbl("⟳", color=color, size=28); icon.setAlignment(Qt.AlignCenter)
+        icon = lbl("⟳", color=color, size=28); icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vl.addWidget(icon)
-        t = lbl(title, color="#555"); t.setAlignment(Qt.AlignCenter); vl.addWidget(t)
-        a = lbl(f"金额：{amount}", bold=True, color=color, size=14); a.setAlignment(Qt.AlignCenter)
+        t = lbl(title, color="#555"); t.setAlignment(Qt.AlignmentFlag.AlignCenter); vl.addWidget(t)
+        a = lbl(f"金额：{amount}", bold=True, color=color, size=14); a.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vl.addWidget(a)
         f._amount_lbl = a; f._cb = cb
         return f
@@ -279,16 +279,16 @@ class SettlePage(QWidget):
                 status_color = "#888888"
 
             items = [
-                (period, Qt.AlignCenter),
-                (str(total), Qt.AlignCenter),
-                (str(approved), Qt.AlignCenter),
-                (status_text, Qt.AlignCenter),
-                (last_time[:16] if last_time else "", Qt.AlignCenter),
-                (last_op, Qt.AlignCenter),
+                (period, Qt.AlignmentFlag.AlignCenter),
+                (str(total), Qt.AlignmentFlag.AlignCenter),
+                (str(approved), Qt.AlignmentFlag.AlignCenter),
+                (status_text, Qt.AlignmentFlag.AlignCenter),
+                (last_time[:16] if last_time else "", Qt.AlignmentFlag.AlignCenter),
+                (last_op, Qt.AlignmentFlag.AlignCenter),
             ]
             for col, (text, align) in enumerate(items):
                 item = QTableWidgetItem(text)
-                item.setTextAlignment(align | Qt.AlignVCenter)
+                item.setTextAlignment(align | Qt.AlignmentFlag.AlignVCenter)
                 if col == 3:
                     item.setForeground(QColor(status_color))
                     f = item.font(); f.setBold(True); item.setFont(f)
@@ -542,7 +542,7 @@ class SettlePage(QWidget):
             vals = [r[0], r[1], r[2], fmt_amt(td), fmt_amt(tc), fmt_amt(net_amt)]
             for j, val in enumerate(vals):
                 it = QTableWidgetItem(val)
-                it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j != 1 else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 if j == 2: it.setForeground(QColor(cat_color))
                 if j == 3 and td: it.setForeground(QColor("#3d6fdb"))
                 if j == 4 and tc: it.setForeground(QColor("#e05252"))
@@ -705,7 +705,7 @@ class SettlePage(QWidget):
         for i, (no, name, status) in enumerate(checks):
             self.check_list.setRowHeight(i, 40)
             for j, v in enumerate([no, name]):
-                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter)
+                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.check_list.setItem(i, j, it)
             is_ok = "风险" not in status
             icon = "✓" if is_ok else "✗"

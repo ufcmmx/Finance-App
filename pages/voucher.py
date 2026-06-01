@@ -130,13 +130,13 @@ class VoucherPage(QWidget):
             status_color = {"待审核":"#fa8c16","已审核":"#52c41a","已拒绝":"#ff4d4f"}.get(status,'#888')
             no_w = QLabel(f"  {r['voucher_no']}  ")
             no_w.setStyleSheet("color:#3d6fdb;font-weight:bold;padding:0 8px;")
-            no_w.setAlignment(Qt.AlignCenter)
+            no_w.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.v_tbl.setCellWidget(i,0,no_w)
             for j,v in enumerate([r['date'],r['summ'] or '',r['accts'] or ''],1):
-                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignCenter)
-                it.setData(Qt.UserRole,r['id']); self.v_tbl.setItem(i,j,it)
+                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                it.setData(Qt.ItemDataRole.UserRole,r['id']); self.v_tbl.setItem(i,j,it)
             for j,v in enumerate([fmt_amt(r['td']),fmt_amt(r['tc'])],4):
-                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignRight|Qt.AlignVCenter)
+                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
                 it.setForeground(QColor("#3d6fdb")); self.v_tbl.setItem(i,j,it)
             # Action cell — status pill + audit buttons + edit + delete
             bw = QWidget(); bl = QHBoxLayout(bw); bl.setContentsMargins(6,3,6,3); bl.setSpacing(5)
@@ -358,7 +358,7 @@ class VoucherPage(QWidget):
                 text = v if j < 2 else fmt_amt(v)
                 it = QTableWidgetItem(text)
                 it.setTextAlignment(
-                    Qt.AlignCenter if j < 2 else Qt.AlignRight | Qt.AlignVCenter)
+                    Qt.AlignmentFlag.AlignCenter if j < 2 else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if j == 0:
                     it.setForeground(QColor("#3d6fdb" if is_leaf else "#888"))
                 if not is_leaf:
@@ -371,12 +371,12 @@ class VoucherPage(QWidget):
         it0 = QTableWidgetItem(""); it1 = QTableWidgetItem("合  计（末级合计）")
         it1.setFont(QFont("", weight=QFont.Bold))
         it0.setBackground(QColor("#f5f7fa")); it1.setBackground(QColor("#f5f7fa"))
-        it1.setTextAlignment(Qt.AlignCenter)
+        it1.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.bal_tbl.setItem(len(rows), 0, it0)
         self.bal_tbl.setItem(len(rows), 1, it1)
         for j, v in enumerate(totals, 2):
             it = QTableWidgetItem(fmt_amt(v))
-            it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             it.setBackground(QColor("#f5f7fa"))
             it.setFont(QFont("", weight=QFont.Bold))
             self.bal_tbl.setItem(len(rows), j, it)
@@ -452,7 +452,7 @@ class VoucherPage(QWidget):
                     fmt_amt(bal) if bal is not None else ""]
             for j,v in enumerate(vals):
                 it = QTableWidgetItem(v)
-                it.setTextAlignment(Qt.AlignCenter if j<2 else Qt.AlignRight|Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j<2 else Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
                 if is_header:
                     it.setBackground(QColor("#f5f7fa")); it.setFont(QFont("",weight=QFont.Bold))
                 if j==2 and d: it.setForeground(QColor("#3d6fdb"))

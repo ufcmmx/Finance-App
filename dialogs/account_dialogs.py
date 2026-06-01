@@ -25,7 +25,7 @@ class AccountEditDialog(QDialog):
     def _build(self):
         L = QVBoxLayout(self); L.setContentsMargins(24,20,24,20); L.setSpacing(12)
         L.addWidget(lbl("科目信息", bold=True, size=15))
-        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignRight)
+        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.code = QLineEdit(); self.code.setPlaceholderText("如 1002.01")
         self.name = QLineEdit(); self.name.setPlaceholderText("科目名称（必填）")
         self.full_name = QLineEdit(); self.full_name.setPlaceholderText("完整名称，如 银行存款-工商银行")

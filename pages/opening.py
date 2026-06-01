@@ -218,10 +218,10 @@ class OpeningBalancePage(QWidget):
             code_it.setForeground(QColor("#3d6fdb"))
             name_it = QTableWidgetItem(r['name'])
             d_it = QTableWidgetItem(fmt_amt(od))
-            d_it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            d_it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if od: d_it.setForeground(QColor("#3d6fdb"))
             c_it = QTableWidgetItem(fmt_amt(oc))
-            c_it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            c_it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if oc: c_it.setForeground(QColor("#e05252"))
             for j, it in enumerate([code_it, name_it, d_it, c_it]):
                 self.tbl.setItem(i, j, it)
@@ -230,7 +230,7 @@ class OpeningBalancePage(QWidget):
             self.tbl.setRowHeight(i, row_h)
             for j in range(self.tbl.columnCount()):
                 it = QTableWidgetItem("")
-                it.setFlags(Qt.ItemIsEnabled)
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 self.tbl.setItem(i, j, it)
 
     def resizeEvent(self, event):

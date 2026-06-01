@@ -110,7 +110,7 @@ class LoginDialog(QDialog):
         # 默认账号提示（首次使用）
         hint = QLabel("默认账号：admin  /  默认密码：admin123")
         hint.setStyleSheet("color:#aaa;font-size:11px;")
-        hint.setAlignment(Qt.AlignCenter)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bl.addWidget(hint)
 
         root.addWidget(body)

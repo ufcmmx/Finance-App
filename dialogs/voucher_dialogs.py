@@ -641,7 +641,7 @@ class AuxItemDialog(QDialog):
     def _build(self):
         L = QVBoxLayout(self); L.setContentsMargins(22,20,22,20); L.setSpacing(12)
         L.addWidget(lbl("核算对象信息", bold=True, size=14))
-        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignRight)
+        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.f_name    = QLineEdit(); self.f_name.setPlaceholderText("名称（必填）")
         self.f_code    = QLineEdit(); self.f_code.setPlaceholderText("编码（可选）")
         self.f_contact = QLineEdit(); self.f_contact.setPlaceholderText("联系人")
@@ -1039,7 +1039,7 @@ class AuxPage(QWidget):
             self.item_tbl.setRowHeight(i, 44)
             for j, v in enumerate([r["code"] or "", r["name"], r["contact"] or "", r["phone"] or ""]):
                 it = QTableWidgetItem(v)
-                it.setTextAlignment(Qt.AlignCenter if j != 1 else Qt.AlignLeft | Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j != 1 else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 self.item_tbl.setItem(i, j, it)
             bw = QWidget()
             bw.setMinimumWidth(100)
@@ -1114,7 +1114,7 @@ class AuxPage(QWidget):
                     fmt_amt(od), fmt_amt(td), fmt_amt(tc), fmt_amt(ending)]
             for j, v in enumerate(vals):
                 it = QTableWidgetItem(v)
-                it.setTextAlignment(Qt.AlignLeft|Qt.AlignVCenter if j<=1 else Qt.AlignRight|Qt.AlignVCenter)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter if j<=1 else Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
                 if j == 3 and td: it.setForeground(QColor("#3d6fdb"))
                 if j == 4 and tc: it.setForeground(QColor("#e05252"))
                 if j == 5:
@@ -1126,7 +1126,7 @@ class AuxPage(QWidget):
         for j, v in enumerate(["合计", "", "", fmt_amt(td_tot), fmt_amt(tc_tot), fmt_amt(td_tot-tc_tot)]):
             it = QTableWidgetItem(v)
             it.setFont(QFont("", weight=QFont.Bold)); it.setBackground(QColor("#f5f7fa"))
-            it.setTextAlignment(Qt.AlignRight|Qt.AlignVCenter if j >= 2 else Qt.AlignLeft|Qt.AlignVCenter)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter if j >= 2 else Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
             self.aux_rpt_tbl.setItem(n, j, it)
 
     def _export_aux_report(self):

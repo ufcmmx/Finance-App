@@ -20,7 +20,7 @@ from kr_utils import kr_get, kr_set, kr_available
 
 # ── 新增/编辑用户对话框 ────────────────────────────────────────────────────
 class UserDialog(QDialog):
-    def __init__(self, parent=None, user: dict = None):
+    def __init__(self, parent=None, user: dict | None = None):
         super().__init__(parent)
         self.user = user  # None = 新增，dict = 编辑
         self.setWindowTitle("编辑用户" if user else "新增用户")
@@ -37,7 +37,7 @@ class UserDialog(QDialog):
 
         F = QFormLayout()
         F.setSpacing(10)
-        F.setLabelAlignment(Qt.AlignRight)
+        F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.f_username = QLineEdit()
         self.f_username.setPlaceholderText("登录用户名（不可重复）")
@@ -145,7 +145,7 @@ class UserDialog(QDialog):
 # ── 客户授权对话框 ─────────────────────────────────────────────────────────
 class ClientAccessDialog(QDialog):
     """为某个用户分配可访问的客户账套"""
-    def __init__(self, parent=None, user: dict = None):
+    def __init__(self, parent=None, user: dict | None = None):
         super().__init__(parent)
         self.user = user
         self.setWindowTitle(f"客户授权 — {user['display_name']}")
@@ -208,13 +208,13 @@ class ClientAccessDialog(QDialog):
         self.client_list.clear()
         for cl in all_clients:
             item = QListWidgetItem(cl["name"])
-            item.setData(Qt.UserRole, cl["id"])
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if cl["id"] in granted else Qt.Unchecked)
+            item.setData(Qt.ItemDataRole.UserRole, cl["id"])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if cl["id"] in granted else Qt.CheckState.Unchecked)
             self.client_list.addItem(item)
 
     def _check_all(self, checked: bool):
-        state = Qt.Checked if checked else Qt.Unchecked
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
         for i in range(self.client_list.count()):
             self.client_list.item(i).setCheckState(state)
 
@@ -222,8 +222,8 @@ class ClientAccessDialog(QDialog):
         checked_ids = []
         for i in range(self.client_list.count()):
             item = self.client_list.item(i)
-            if item.checkState() == Qt.Checked:
-                checked_ids.append(item.data(Qt.UserRole))
+            if item.checkState() == Qt.CheckState.Checked:
+                checked_ids.append(item.data(Qt.ItemDataRole.UserRole))
 
         conn = get_db(); c = conn.cursor()
         try:
@@ -260,7 +260,7 @@ class ChangePasswordDialog(QDialog):
         L.setSpacing(14)
         L.addWidget(lbl("修改登录密码", bold=True, size=14))
 
-        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignRight)
+        F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.f_old = QLineEdit(); self.f_old.setEchoMode(QLineEdit.Password)
         self.f_old.setPlaceholderText("当前密码")
         self.f_new1 = QLineEdit(); self.f_new1.setEchoMode(QLineEdit.Password)
@@ -405,7 +405,7 @@ class SystemPage(QWidget):
         hh = self.user_tbl.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setStretchLastSection(False)
-        self.user_tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.user_tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.user_tbl.setColumnWidth(0, 110)
         self.user_tbl.setColumnWidth(1, 160)   # 显示名称，可拖拽调整
         self.user_tbl.setColumnWidth(2, 100)
@@ -435,11 +435,11 @@ class SystemPage(QWidget):
             last_login = (u["last_login"] or "从未登录")[:16]
 
             for j, (val, align, color) in enumerate([
-                (u["username"],   Qt.AlignCenter,              None),
-                (u["display_name"], Qt.AlignLeft|Qt.AlignVCenter, None),
-                (role_label,      Qt.AlignCenter,              role_color),
-                (active_text,     Qt.AlignCenter,              active_color),
-                (last_login,      Qt.AlignCenter,              "#888"),
+                (u["username"],   Qt.AlignmentFlag.AlignCenter,              None),
+                (u["display_name"], Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter, None),
+                (role_label,      Qt.AlignmentFlag.AlignCenter,              role_color),
+                (active_text,     Qt.AlignmentFlag.AlignCenter,              active_color),
+                (last_login,      Qt.AlignmentFlag.AlignCenter,              "#888"),
             ]):
                 it = QTableWidgetItem(val)
                 it.setTextAlignment(align)
@@ -549,7 +549,7 @@ class SystemPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         w = QWidget()
         L = QVBoxLayout(w)

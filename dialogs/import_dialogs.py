@@ -77,7 +77,7 @@ class ImportAccountSetDialog(QDialog):
         self.right_scroll = QScrollArea()
         self.right_scroll.setWidgetResizable(True)
         self.right_scroll.setFrameShape(QFrame.NoFrame)
-        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.right = QStackedWidget()
         self.right_scroll.setWidget(self.right)
         bl.addWidget(self.right_scroll)
@@ -136,7 +136,7 @@ class ImportAccountSetDialog(QDialog):
 
         # 新建表单
         self.form_new = QWidget(); fn = QFormLayout(self.form_new)
-        fn.setSpacing(10); fn.setLabelAlignment(Qt.AlignRight)
+        fn.setSpacing(10); fn.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.f_name  = QLineEdit(); self.f_name.setPlaceholderText("公司全称（必填）")
         self.f_code  = QLineEdit(); self.f_code.setPlaceholderText("助记码，如 ZY")
         self.f_type  = QComboBox()
@@ -151,7 +151,7 @@ class ImportAccountSetDialog(QDialog):
 
         # 已有账套
         self.form_exist = QWidget(); fe = QFormLayout(self.form_exist)
-        fe.setSpacing(10); fe.setLabelAlignment(Qt.AlignRight)
+        fe.setSpacing(10); fe.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.f_exist_combo = QComboBox(); self.f_exist_combo.setMinimumWidth(280)
         fe.addRow("选择已有账套", self.f_exist_combo)
         warn = QLabel("  ⚠ 追加模式：同期间同凭证号自动跳过，不会重复写入。")
@@ -340,9 +340,9 @@ class ImportAccountSetDialog(QDialog):
     def _build_step4(self):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(32,24,32,24); L.setSpacing(10)
         self.result_icon  = lbl("⏳", size=40, color="#3d6fdb")
-        self.result_icon.setAlignment(Qt.AlignCenter)
+        self.result_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.result_title = lbl("正在导入…", bold=True, size=15)
-        self.result_title.setAlignment(Qt.AlignCenter)
+        self.result_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         L.addStretch()
         L.addWidget(self.result_icon); L.addWidget(self.result_title); L.addSpacing(8)
         self.log_box = QTextEdit(); self.log_box.setReadOnly(True)
