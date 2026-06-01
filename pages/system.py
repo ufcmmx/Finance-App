@@ -49,10 +49,10 @@ class UserDialog(QDialog):
             self.f_role.addItem(role_label, role_key)
 
         self.f_pw1 = QLineEdit()
-        self.f_pw1.setEchoMode(QLineEdit.Password)
+        self.f_pw1.setEchoMode(QLineEdit.EchoMode.Password)
         self.f_pw1.setPlaceholderText("留空则不修改密码" if self.user else "请输入密码")
         self.f_pw2 = QLineEdit()
-        self.f_pw2.setEchoMode(QLineEdit.Password)
+        self.f_pw2.setEchoMode(QLineEdit.EchoMode.Password)
         self.f_pw2.setPlaceholderText("再次输入密码")
 
         self.f_active = QCheckBox("账号启用")
@@ -134,7 +134,7 @@ class UserDialog(QDialog):
                 c.execute("""INSERT INTO users(username, password_hash, display_name, role, is_active)
                              VALUES(?,?,?,?,?)""",
                           (username, hash_pw(pw1), display, role, active))
-                log_action(conn, None, "新增用户", "user", c.lastrowid,
+                log_action(conn, None, "新增用户", "user", str(c.lastrowid or 0),
                            f"用户:{username} 角色:{role}")
             conn.commit()
             self.accept()
@@ -151,7 +151,8 @@ class ClientAccessDialog(QDialog):
     def __init__(self, parent=None, user: dict | None = None):
         super().__init__(parent)
         self.user = user
-        self.setWindowTitle(f"客户授权 — {user['display_name']}")
+        _dn = user['display_name'] if user else ''
+        self.setWindowTitle(f"客户授权 — {_dn}")
         self.setMinimumSize(460, 500)
         self._build()
         self._load()
@@ -264,11 +265,11 @@ class ChangePasswordDialog(QDialog):
         L.addWidget(lbl("修改登录密码", bold=True, size=14))
 
         F = QFormLayout(); F.setSpacing(10); F.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.f_old = QLineEdit(); self.f_old.setEchoMode(QLineEdit.Password)
+        self.f_old = QLineEdit(); self.f_old.setEchoMode(QLineEdit.EchoMode.Password)
         self.f_old.setPlaceholderText("当前密码")
-        self.f_new1 = QLineEdit(); self.f_new1.setEchoMode(QLineEdit.Password)
+        self.f_new1 = QLineEdit(); self.f_new1.setEchoMode(QLineEdit.EchoMode.Password)
         self.f_new1.setPlaceholderText("新密码（至少6位）")
-        self.f_new2 = QLineEdit(); self.f_new2.setEchoMode(QLineEdit.Password)
+        self.f_new2 = QLineEdit(); self.f_new2.setEchoMode(QLineEdit.EchoMode.Password)
         self.f_new2.setPlaceholderText("再次输入新密码")
         F.addRow("当前密码", self.f_old)
         F.addRow("新密码",   self.f_new1)
@@ -827,7 +828,7 @@ class SystemPage(QWidget):
         # 修改时需先验证旧密码
         if existing:
             old, ok = QInputDialog.getText(
-                self, title, "请输入当前备份密码以验证身份：", QLineEdit.Password)
+                self, title, "请输入当前备份密码以验证身份：", QLineEdit.EchoMode.Password)
             if not ok:
                 return
             if old != existing:
@@ -835,14 +836,14 @@ class SystemPage(QWidget):
                 return
 
         pw1, ok1 = QInputDialog.getText(
-            self, title, "请输入新备份密码（至少8位）：", QLineEdit.Password)
+            self, title, "请输入新备份密码（至少8位）：", QLineEdit.EchoMode.Password)
         if not ok1 or not pw1:
             return
         if len(pw1) < 8:
             QMessageBox.warning(self, "密码太短", "备份密码至少需要 8 位。")
             return
         pw2, ok2 = QInputDialog.getText(
-            self, title, "请再次输入新备份密码：", QLineEdit.Password)
+            self, title, "请再次输入新备份密码：", QLineEdit.EchoMode.Password)
         if not ok2 or pw1 != pw2:
             QMessageBox.warning(self, "密码不一致", "两次输入的密码不一致，请重新操作。")
             return
@@ -951,7 +952,7 @@ class SystemPage(QWidget):
                 if saved_pw else
                 "当前设备尚未保存备份密码，请手动输入该备份文件的密码："
             )
-            pw_manual, ok = QInputDialog.getText(self, "输入备份密码", hint, QLineEdit.Password)
+            pw_manual, ok = QInputDialog.getText(self, "输入备份密码", hint, QLineEdit.EchoMode.Password)
             if not ok or not pw_manual:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
