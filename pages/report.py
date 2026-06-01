@@ -1644,7 +1644,7 @@ class ReportPage(QWidget):
             printer.setPageOrientation(QPageLayout.Orientation.Landscape)
         else:
             printer.setPageOrientation(QPageLayout.Orientation.Portrait)
-        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPrinter.Unit.Millimeter)
+        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
 
         dialog = QPrintDialog(printer, self)
         dialog.setWindowTitle(f"打印 — {tab}")
