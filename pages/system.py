@@ -67,7 +67,8 @@ class UserDialog(QDialog):
         L.addLayout(F)
 
         # 禁止修改自己的角色和状态（防止把自己降权/停用）
-        if self.user and self.user["id"] == AppSession.get()["id"]:
+        _cur = AppSession.get()
+        if self.user and _cur and self.user["id"] == _cur["id"]:
             self.f_role.setEnabled(False)
             self.f_active.setEnabled(False)
             note = QLabel("⚠ 不能修改自己的角色和启用状态")
@@ -85,6 +86,8 @@ class UserDialog(QDialog):
 
     def _load(self):
         u = self.user
+        if u is None:
+            return
         self.f_username.setText(u["username"])
         self.f_username.setReadOnly(True)  # 用户名建立后不可改
         self.f_username.setStyleSheet("background:#f5f5f5;color:#999;")
@@ -291,7 +294,10 @@ class ChangePasswordDialog(QDialog):
         if len(new1) < 6:
             QMessageBox.warning(self, "提示", "新密码不能少于6位"); return
 
-        uid = AppSession.get()["id"]
+        _sess = AppSession.get()
+        if _sess is None:
+            return
+        uid = _sess["id"]
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT password_hash FROM users WHERE id=?", (uid,))
         row = c.fetchone()
@@ -423,7 +429,8 @@ class SystemPage(QWidget):
         users = c.fetchall(); conn.close()
 
         self.user_tbl.setRowCount(len(users))
-        cur_uid = AppSession.get()["id"]
+        _cur_sess = AppSession.get()
+        cur_uid = _cur_sess["id"] if _cur_sess else -1
 
         for i, u in enumerate(users):
             self.user_tbl.setRowHeight(i, 46)
