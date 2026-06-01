@@ -1547,35 +1547,115 @@ class ReportPage(QWidget):
             **cfg,
         )
 
-    # ── 打印：生成临时 PDF → 用系统默认应用打开（支持直接打印）───────────────
+    # ── 打印辅助：将 QTableWidget 转为打印用 HTML ─────────────────────────────
+    def _build_print_html(self, tab: str) -> str:
+        tab_map = {
+            "资产负债表":      (self.bs_tbl,      ["资产项目","行次","期末金额","年初金额",
+                                                   "负债和所有者权益","行次","期末金额","年初金额"]),
+            "利润表":          (self.inc_tbl,     ["项目","行次","本期金额","本年累计金额"]),
+            "所有者权益变动表": (self.eq_tbl,      ["项目","实收资本(股本)","资本公积",
+                                                   "其他综合收益","盈余公积","未分配利润","合计"]),
+            "现金流量表":      (self.cf_stmt_tbl, ["项目","行次","本期金额","本年累计金额"]),
+            "收支统计表":      (self.cf_tbl,      ["科目编号","科目名称","类型",
+                                                   "本期借方","本期贷方","净额"]),
+        }
+        tbl, headers = tab_map.get(tab, (None, []))
+        if tbl is None:
+            return ""
+        start, end = self._get_periods()
+        period_text = f"{start} 至 {end}" if start else ""
+        amount_cols = {
+            "资产负债表":      {2, 3, 6, 7},
+            "利润表":          {2, 3},
+            "所有者权益变动表": {1, 2, 3, 4, 5, 6},
+            "现金流量表":      {2, 3},
+            "收支统计表":      {3, 4, 5},
+        }.get(tab, set())
+
+        rows_html = []
+        for ri in range(tbl.rowCount()):
+            row_bg = ""; is_sec = False; bold = False
+            item0 = tbl.item(ri, 0)
+            if item0:
+                brush = item0.background()
+                if brush.style() != Qt.BrushStyle.NoBrush:
+                    c = brush.color()
+                    r, g, b = c.red(), c.green(), c.blue()
+                    if b > 240 and b > r + 5:          # 蓝调 → section header
+                        row_bg = "#f0f4ff"; is_sec = True
+                    elif r > 240 and g > 240 and b > 240:  # 浅灰 → 合计行
+                        row_bg = "#f5f7fa"
+                f = item0.font()
+                bold = f.bold() or f.weight() >= 63
+
+            cells = []
+            for ci in range(tbl.columnCount()):
+                item = tbl.item(ri, ci)
+                text = (item.text() if item else "").replace("&", "&amp;").replace("<", "&lt;")
+                align = "right" if ci in amount_cols else ("center" if ci == 1 else "left")
+                s = f"padding:3px 5px;border:1px solid #ddd;text-align:{align};"
+                if bold:
+                    s += "font-weight:bold;"
+                if is_sec and ci == 0:
+                    s += "color:#3d6fdb;"
+                if item and ci in amount_cols:
+                    fg = item.foreground().color()
+                    if fg.isValid() and fg.red() > 180 and fg.green() < 100:
+                        s += "color:#e05252;"
+                cells.append(f'<td style="{s}">{text}</td>')
+
+            tr_bg = f'style="background:{row_bg};"' if row_bg else ""
+            rows_html.append(f"<tr {tr_bg}>{''.join(cells)}</tr>")
+
+        hcells = "".join(
+            f'<th style="padding:5px;background:#1c2340;color:#fff;'
+            f'text-align:center;border:1px solid #1c2340;">{h}</th>'
+            for h in headers
+        )
+        return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  body{{font-family:"Microsoft YaHei","PingFang SC",sans-serif;font-size:10px;margin:8px;}}
+  h2{{text-align:center;margin:3px 0;font-size:14px;}}
+  h3{{text-align:center;margin:2px 0;font-size:12px;color:#333;}}
+  p{{text-align:center;color:#777;font-size:9px;margin:2px 0 6px;}}
+  table{{border-collapse:collapse;width:100%;}}
+</style></head><body>
+<h2>{self.client_name}</h2><h3>{tab}</h3>
+<p>期间：{period_text}</p>
+<table><thead><tr>{hcells}</tr></thead>
+<tbody>{''.join(rows_html)}</tbody></table>
+</body></html>"""
+
+    # ── 打印：调用系统打印对话框，直接打印 ───────────────────────────────────
     def _print_report(self):
         if not self.client_id:
-            return
-        if not self._check_pdf_deps():
             return
         tab = self._get_current_tab()
         if not tab:
             return
-        _, end = self._get_periods()
-        if not end:
-            return
-        import tempfile, os, sys, subprocess
-        safe = tab.replace("/", "_").replace(" ", "_")
-        tmp_path = os.path.join(tempfile.mkdtemp(), f"{safe}_{end}.pdf")
-        try:
-            self._render_pdf(tab, tmp_path)
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"生成打印预览失败：\n{e}")
-            return
-        if not os.path.exists(tmp_path):
-            QMessageBox.warning(self, "错误", "生成打印文件失败，请检查 reportlab 安装。")
-            return
-        if sys.platform == "win32":
-            os.startfile(tmp_path)          # 在默认 PDF 阅读器中打开
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", tmp_path])
+        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+        from PySide6.QtGui import QTextDocument, QPageLayout
+        from PySide6.QtCore import QMarginsF
+        from PySide6.QtGui import QPageSize
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        # 宽表用横向
+        if tab in ("资产负债表", "所有者权益变动表"):
+            printer.setPageOrientation(QPageLayout.Orientation.Landscape)
         else:
-            subprocess.Popen(["xdg-open", tmp_path])
+            printer.setPageOrientation(QPageLayout.Orientation.Portrait)
+        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPrinter.Unit.Millimeter)
+
+        dialog = QPrintDialog(printer, self)
+        dialog.setWindowTitle(f"打印 — {tab}")
+        if dialog.exec() != QPrintDialog.DialogCode.Accepted:
+            return
+
+        html = self._build_print_html(tab)
+        doc = QTextDocument()
+        doc.setHtml(html)
+        doc.setPageSize(printer.pageRect(QPrinter.Unit.Point).size())
+        doc.print_(printer)
 
     def _export(self):
         if not self.client_id: return
