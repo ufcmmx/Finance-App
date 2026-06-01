@@ -162,7 +162,8 @@ class ClientAccessDialog(QDialog):
         L.setContentsMargins(24, 20, 24, 20)
         L.setSpacing(12)
 
-        title = lbl(f"为【{self.user['display_name']}】分配可访问的客户", bold=True, size=14)
+        _dn = self.user['display_name'] if self.user else ''
+        title = lbl(f"为【{_dn}】分配可访问的客户", bold=True, size=14)
         L.addWidget(title)
 
         note = QLabel("  superadmin / admin 可访问全部客户，无需单独授权。\n"
@@ -201,6 +202,7 @@ class ClientAccessDialog(QDialog):
         L.addLayout(row)
 
     def _load(self):
+        assert self.user is not None
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT id, name FROM clients ORDER BY name")
         all_clients = c.fetchall()
@@ -223,6 +225,7 @@ class ClientAccessDialog(QDialog):
             self.client_list.item(i).setCheckState(state)
 
     def _save(self):
+        assert self.user is not None
         checked_ids = []
         for i in range(self.client_list.count()):
             item = self.client_list.item(i)
@@ -402,15 +405,15 @@ class SystemPage(QWidget):
         f = card()
         vl = QVBoxLayout(f); vl.setContentsMargins(0, 0, 0, 0)
         self.user_tbl = QTableWidget()
-        self.user_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.user_tbl.setSelectionBehavior(QTableWidget.SelectRows)
+        self.user_tbl.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.user_tbl.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.user_tbl.setShowGrid(False)
         self.user_tbl.verticalHeader().setVisible(False)
         self.user_tbl.setColumnCount(6)
         self.user_tbl.setHorizontalHeaderLabels(
             ["用户名", "显示名称", "角色", "状态", "最后登录", "操作"])
         hh = self.user_tbl.horizontalHeader()
-        hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hh.setStretchLastSection(False)
         self.user_tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.user_tbl.setColumnWidth(0, 110)
@@ -449,7 +452,7 @@ class SystemPage(QWidget):
                 (active_text,     Qt.AlignmentFlag.AlignCenter,              active_color),
                 (last_login,      Qt.AlignmentFlag.AlignCenter,              "#888"),
             ]):
-                it = QTableWidgetItem(val)
+                it = QTableWidgetItem(str(val))
                 it.setTextAlignment(align)
                 if color:
                     it.setForeground(QColor(color))
@@ -501,11 +504,11 @@ class SystemPage(QWidget):
         if QMessageBox.question(
                 self, "确认删除",
                 f"确认删除用户【{username}】？\n该用户的所有客户授权也会同步删除。",
-                QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         conn = get_db()
         conn.execute("DELETE FROM users WHERE id=?", (uid,))
-        log_action(conn, None, "删除用户", "user", uid, f"用户:{username}")
+        log_action(conn, None, "删除用户", "user", str(uid), f"用户:{username}")
         conn.commit(); conn.close()
         self._load_users()
 
@@ -556,7 +559,7 @@ class SystemPage(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         w = QWidget()
@@ -808,7 +811,7 @@ class SystemPage(QWidget):
         set_setting("auto_backup_enabled", enabled)
         set_setting("auto_backup_path",    path)
         conn = get_db()
-        log_action(conn, 0, "修改自动备份设置", "system", 0,
+        log_action(conn, 0, "修改自动备份设置", "system", "0",
                    f"启用:{enabled} 目录:{path or '(默认)'}")
         conn.commit(); conn.close()
         QMessageBox.information(self, "已保存", "自动备份设置已保存。")
@@ -851,7 +854,7 @@ class SystemPage(QWidget):
         if kr_set(pw1):
             conn = get_db()
             action = "修改备份密码" if existing else "设置备份密码"
-            log_action(conn, 0, action, "system", 0, "备份密码已更新至系统凭据管理器")
+            log_action(conn, 0, action, "system", "0", "备份密码已更新至系统凭据管理器")
             conn.commit(); conn.close()
             self._refresh_pw_status()
             msg = (
@@ -876,8 +879,8 @@ class SystemPage(QWidget):
                 "首次备份需要先设置备份密码。\n\n"
                 "密码将安全保存在系统凭据管理器中，今后备份无需重复输入。\n\n"
                 "点击「确定」立即设置。",
-                QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
-            if ret != QMessageBox.Ok:
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Ok)
+            if ret != QMessageBox.StandardButton.Ok:
                 return
             self._set_backup_password()
             pw = kr_get()
@@ -893,7 +896,7 @@ class SystemPage(QWidget):
         try:
             encrypt_backup(DB_PATH, dest, pw)
             conn = get_db()
-            log_action(conn, 0, "数据备份", "system", 0, f"备份文件：{dest}")
+            log_action(conn, 0, "数据备份", "system", "0", f"备份文件：{dest}")
             conn.commit(); conn.close()
             self._refresh_last_backup()
             QMessageBox.information(self, "备份成功", f"备份已保存至：\n{dest}")
@@ -907,8 +910,8 @@ class SystemPage(QWidget):
             "恢复操作将完全覆盖当前数据库！\n\n"
             "所有未备份的数据（凭证、用户、账套）将永久丢失。\n\n"
             "确认要继续吗？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply != QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         src, _ = QFileDialog.getOpenFileName(
@@ -919,8 +922,8 @@ class SystemPage(QWidget):
         reply2 = QMessageBox.critical(
             self, "最终确认",
             "即将覆盖当前数据库，此操作不可撤销。\n\n确认执行恢复？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply2 != QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply2 != QMessageBox.StandardButton.Yes:
             return
 
         # 优先用 keyring 密码，失败再让用户手动输入
@@ -961,7 +964,7 @@ class SystemPage(QWidget):
                 # 手动输入也错了 → 记录日志并提示
                 conn = get_db()
                 user = AppSession.get()
-                log_action(conn, 0, "恢复备份失败", "system", 0,
+                log_action(conn, 0, "恢复备份失败", "system", "0",
                            f"密码错误或文件损坏，文件：{src}",
                            operator=user["username"] if user else "未知")
                 conn.commit(); conn.close()
@@ -975,7 +978,7 @@ class SystemPage(QWidget):
         # 解密成功，替换数据库
         try:
             conn = get_db()
-            log_action(conn, 0, "数据恢复", "system", 0, f"从备份恢复：{src}")
+            log_action(conn, 0, "数据恢复", "system", "0", f"从备份恢复：{src}")
             conn.commit(); conn.close()
             if os.path.exists(DB_PATH):
                 os.replace(DB_PATH, DB_PATH + ".pre_restore_bak")
