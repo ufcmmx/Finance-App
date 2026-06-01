@@ -9,6 +9,191 @@ from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBo
 
 # openpyxl imported lazily inside each export function
 
+
+class _PrintDialog(QDialog):
+    """
+    一体化打印窗口：左侧打印设置 + 右侧实时预览。
+    布局参考 Chrome / Office 打印面板风格。
+    """
+
+    def __init__(self, report_title: str, html: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"打印 — {report_title}")
+        self.resize(1060, 700)
+        self._html = html
+        self._report_title = report_title
+
+        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewWidget, QPrinterInfo
+        from PySide6.QtGui import QPageLayout
+        from PySide6.QtCore import QMarginsF
+
+        # ── 初始化打印机 ──
+        self._printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        self._printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
+        wide = report_title in ("资产负债表", "所有者权益变动表")
+        self._printer.setPageOrientation(
+            QPageLayout.Orientation.Landscape if wide else QPageLayout.Orientation.Portrait)
+
+        # ═══════════════════════════════════════════════════════
+        # 布局：左侧设置面板（固定宽） | 右侧预览
+        # ═══════════════════════════════════════════════════════
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── 左侧面板 ──────────────────────────────────────────
+        panel = QWidget()
+        panel.setFixedWidth(260)
+        panel.setStyleSheet("background:#f8f9fc;border-right:1px solid #e0e0e0;")
+        pl = QVBoxLayout(panel)
+        pl.setContentsMargins(16, 16, 16, 16)
+        pl.setSpacing(14)
+
+        def _sec(text):
+            l = QLabel(text)
+            l.setStyleSheet("font-weight:bold;color:#333;font-size:12px;margin-top:4px;")
+            return l
+
+        # 打印机选择
+        pl.addWidget(_sec("打印机"))
+        self._printer_combo = QComboBox()
+        self._printer_combo.setStyleSheet("padding:4px;")
+        default_name = QPrinterInfo.defaultPrinter().printerName()
+        for info in QPrinterInfo.availablePrinters():
+            self._printer_combo.addItem(info.printerName())
+        if default_name:
+            idx = self._printer_combo.findText(default_name)
+            if idx >= 0:
+                self._printer_combo.setCurrentIndex(idx)
+        pl.addWidget(self._printer_combo)
+
+        # 份数
+        pl.addWidget(_sec("份数"))
+        self._copies_spin = QSpinBox()
+        self._copies_spin.setRange(1, 999)
+        self._copies_spin.setValue(1)
+        self._copies_spin.setStyleSheet("padding:4px;")
+        pl.addWidget(self._copies_spin)
+
+        # 方向
+        pl.addWidget(_sec("方向"))
+        self._orient_port = QRadioButton("纵向")
+        self._orient_land = QRadioButton("横向")
+        self._orient_port.setChecked(not wide)
+        self._orient_land.setChecked(wide)
+        orient_grp = QButtonGroup(self)
+        orient_grp.addButton(self._orient_port)
+        orient_grp.addButton(self._orient_land)
+        pl.addWidget(self._orient_port)
+        pl.addWidget(self._orient_land)
+
+        # 纸张
+        pl.addWidget(_sec("纸张大小"))
+        self._paper_combo = QComboBox()
+        self._paper_combo.setStyleSheet("padding:4px;")
+        from PySide6.QtGui import QPageSize
+        paper_list = [
+            ("A4",     QPageSize.PageSizeId.A4),
+            ("A3",     QPageSize.PageSizeId.A3),
+            ("Letter", QPageSize.PageSizeId.Letter),
+        ]
+        for name, pid in paper_list:
+            self._paper_combo.addItem(name, pid)
+        pl.addWidget(self._paper_combo)
+
+        # 边距
+        pl.addWidget(_sec("边距（毫米）"))
+        margin_row = QHBoxLayout()
+        self._margin_spin = QSpinBox()
+        self._margin_spin.setRange(5, 50)
+        self._margin_spin.setValue(15)
+        self._margin_spin.setStyleSheet("padding:4px;")
+        margin_row.addWidget(QLabel("四边:"))
+        margin_row.addWidget(self._margin_spin)
+        pl.addLayout(margin_row)
+
+        pl.addStretch()
+
+        # 打印 / 取消 按钮
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setStyleSheet(
+            "QPushButton{padding:8px 20px;border:1px solid #ccc;border-radius:5px;background:#fff;}"
+            "QPushButton:hover{background:#f0f0f0;}")
+        btn_cancel.clicked.connect(self.reject)
+        btn_print = QPushButton("打印")
+        btn_print.setStyleSheet(
+            "QPushButton{padding:8px 20px;border:none;border-radius:5px;"
+            "background:#3d6fdb;color:#fff;font-weight:bold;}"
+            "QPushButton:hover{background:#2d5dc8;}")
+        btn_print.clicked.connect(self._do_print)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_print)
+        pl.addLayout(btn_row)
+
+        root.addWidget(panel)
+
+        # ── 右侧预览 ──────────────────────────────────────────
+        self._preview = QPrintPreviewWidget(self._printer, self)
+        self._preview.setStyleSheet("background:#e8e8e8;")
+        self._preview.paintRequested.connect(self._render)
+        root.addWidget(self._preview, 1)
+
+        # ── 信号连接（控件全部建好后再连，避免初始化期间误触发）──
+        self._orient_port.toggled.connect(self._update_preview)
+        self._orient_land.toggled.connect(self._update_preview)
+        self._paper_combo.currentIndexChanged.connect(self._update_preview)
+        self._margin_spin.valueChanged.connect(self._update_preview)
+
+    # ── 渲染函数（paintRequested 信号回调，预览 & 实际打印共用）─────────────
+    def _render(self, printer):
+        from PySide6.QtGui import QTextDocument, QPageSize
+        from PySide6.QtPrintSupport import QPrinter
+        doc = QTextDocument()
+        doc.setHtml(self._html)
+        # pageRect(Unit.Point) 在 Qt6 中仍可用，但需通过类名访问
+        rect = printer.pageRect(QPrinter.Unit.Point)
+        doc.setPageSize(rect.size())
+        doc.print_(printer)
+
+    # ── 设置变更 → 更新打印机参数 → 刷新预览 ────────────────────────────────
+    def _apply_settings(self):
+        """将左侧面板的设置写入 self._printer，不触发预览刷新。"""
+        from PySide6.QtGui import QPageLayout, QPageSize
+        from PySide6.QtCore import QMarginsF
+        orient = (QPageLayout.Orientation.Landscape if self._orient_land.isChecked()
+                  else QPageLayout.Orientation.Portrait)
+        self._printer.setPageOrientation(orient)
+        pid = self._paper_combo.currentData()
+        if pid is not None:
+            self._printer.setPageSize(QPageSize(pid))
+        m = self._margin_spin.value()
+        self._printer.setPageMargins(QMarginsF(m, m, m, m), QPageLayout.Unit.Millimeter)
+
+    def _update_preview(self):
+        """设置变更时：先写入打印机，再刷新预览（仅刷新一次）。"""
+        self._apply_settings()
+        self._preview.updatePreview()
+
+    # ── 实际打印 ──────────────────────────────────────────────────────────────
+    def _do_print(self):
+        from PySide6.QtPrintSupport import QPrinterInfo
+
+        # 应用选定打印机
+        selected = self._printer_combo.currentText()
+        for info in QPrinterInfo.availablePrinters():
+            if info.printerName() == selected:
+                self._printer.setPrinterName(selected)
+                break
+
+        self._printer.setCopyCount(self._copies_spin.value())
+        self._apply_settings()   # 确保最终设置写入，不重复刷新预览
+
+        # 渲染并送打印机（直接调用，不经过 paintRequested 信号）
+        self._render(self._printer)
+        self.accept()
+
+
 class ReportPage(QWidget):
     """财务报表 — 资产负债表 + 利润表"""
 
@@ -1626,36 +1811,16 @@ class ReportPage(QWidget):
 <tbody>{''.join(rows_html)}</tbody></table>
 </body></html>"""
 
-    # ── 打印：调用系统打印对话框，直接打印 ───────────────────────────────────
+    # ── 打印：一体化打印窗口（左侧设置 + 右侧实时预览）────────────────────────
     def _print_report(self):
         if not self.client_id:
             return
         tab = self._get_current_tab()
         if not tab:
             return
-        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-        from PySide6.QtGui import QTextDocument, QPageLayout
-        from PySide6.QtCore import QMarginsF
-        from PySide6.QtGui import QPageSize
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        # 宽表用横向
-        if tab in ("资产负债表", "所有者权益变动表"):
-            printer.setPageOrientation(QPageLayout.Orientation.Landscape)
-        else:
-            printer.setPageOrientation(QPageLayout.Orientation.Portrait)
-        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
-
-        dialog = QPrintDialog(printer, self)
-        dialog.setWindowTitle(f"打印 — {tab}")
-        if dialog.exec() != QPrintDialog.DialogCode.Accepted:
-            return
-
         html = self._build_print_html(tab)
-        doc = QTextDocument()
-        doc.setHtml(html)
-        doc.setPageSize(printer.pageRect(QPrinter.Unit.Point).size())
-        doc.print_(printer)
+        dlg = _PrintDialog(tab, html, self)
+        dlg.exec()
 
     def _export(self):
         if not self.client_id: return
