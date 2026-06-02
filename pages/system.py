@@ -336,7 +336,7 @@ class SystemPage(QWidget):
         tl.setContentsMargins(16, 0, 16, 0)
         tl.setSpacing(0)
         self._tabs = []
-        for name in ["用户管理", "修改密码", "数据备份"]:
+        for name in ["用户管理", "修改密码", "数据备份", "账套导出"]:
             b = QPushButton(name)
             b.setStyleSheet("""QPushButton{background:transparent;color:#888;border:none;
                 padding:12px 16px;border-bottom:2px solid transparent;}
@@ -351,13 +351,17 @@ class SystemPage(QWidget):
         self._build_user_mgmt()
         self._build_change_pw()
         self._build_backup()
+        self._build_export()
         L.addWidget(self.stack)
         self._switch("用户管理")
 
     def _switch(self, name):
-        mapping = {"用户管理": 0, "修改密码": 1, "数据备份": 2}
+        mapping = {"用户管理": 0, "修改密码": 1, "数据备份": 2, "账套导出": 3}
         is_superadmin = AppSession.has_perm("system.manage")
+        is_admin_plus = is_superadmin or (AppSession.get() or {}).get("role") == "admin"
         if name in ("用户管理", "数据备份") and not is_superadmin:
+            name = "修改密码"
+        if name == "账套导出" and not is_admin_plus:
             name = "修改密码"
         self.stack.setCurrentIndex(mapping[name])
         for b in self._tabs:
@@ -366,6 +370,8 @@ class SystemPage(QWidget):
             b.style().unpolish(b); b.style().polish(b)
             if b.text() in ("用户管理", "数据备份"):
                 b.setVisible(is_superadmin)
+            if b.text() == "账套导出":
+                b.setVisible(is_admin_plus)
         if name == "用户管理":
             self._load_users()
         elif name == "修改密码":
@@ -374,6 +380,8 @@ class SystemPage(QWidget):
             self._refresh_last_backup()
             self._refresh_pw_status()
             self._refresh_auto_backup_ui()
+        elif name == "账套导出":
+            self._load_export_clients()
 
     def refresh_after_login(self):
         """登录后调用，重新刷新 SystemPage 的状态"""
@@ -993,3 +1001,416 @@ class SystemPage(QWidget):
             QMessageBox.critical(self, "恢复失败", f"恢复过程中发生错误：\n{e}")
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    # ── Tab 4：账套导出（admin 及以上）──────────────────────────────────────
+    def _build_export(self):
+        outer = QWidget()
+        outer_l = QVBoxLayout(outer)
+        outer_l.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        w = QWidget()
+        L = QVBoxLayout(w)
+        L.setContentsMargins(24, 16, 24, 24)
+        L.setSpacing(16)
+
+        title_lbl = QLabel("账套导出")
+        title_lbl.setStyleSheet("font-size:15px;font-weight:bold;color:#1a1a2e;")
+        L.addWidget(title_lbl)
+
+        intro = QLabel(
+            "将指定账套在选定期间范围内的数据导出为多个 Excel 文件，打包为 ZIP 压缩包。\n"
+            "导出内容：账套基本信息、科目表与期初余额、凭证汇总、凭证明细、科目余额表、财务报表。"
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
+            "color:#555;font-size:12px;background:#f6f8fc;"
+            "border-radius:6px;padding:10px 14px;")
+        L.addWidget(intro)
+
+        # ── 参数卡片 ──
+        pf = QFrame()
+        pf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        pl = QFormLayout(pf)
+        pl.setContentsMargins(20, 16, 20, 18)
+        pl.setSpacing(12)
+        pl.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.exp_client = QComboBox()
+        self.exp_client.setMinimumWidth(200)
+        self.exp_client.currentIndexChanged.connect(self._load_export_periods)
+
+        self.exp_period_from = QComboBox()
+        self.exp_period_from.setMinimumWidth(120)
+        self.exp_period_to = QComboBox()
+        self.exp_period_to.setMinimumWidth(120)
+
+        period_row = QHBoxLayout()
+        period_row.addWidget(self.exp_period_from)
+        period_row.addWidget(QLabel("  至  "))
+        period_row.addWidget(self.exp_period_to)
+        period_row.addStretch()
+
+        pl.addRow("选择账套 *", self.exp_client)
+        pl.addRow("期间范围 *", period_row)
+        L.addWidget(pf)
+
+        # ── 导出按钮 ──
+        btn_row = QHBoxLayout()
+        self.btn_export = QPushButton("选择保存位置并导出…")
+        self.btn_export.setObjectName("btn_primary")
+        self.btn_export.setFixedWidth(200)
+        self.btn_export.clicked.connect(self._do_export)
+        btn_row.addWidget(self.btn_export)
+        btn_row.addStretch()
+        L.addLayout(btn_row)
+
+        L.addStretch()
+        scroll.setWidget(w)
+        outer_l.addWidget(scroll)
+        self.stack.addWidget(outer)
+
+    def _load_export_clients(self):
+        """加载客户列表到下拉框。"""
+        conn = get_db(); c = conn.cursor()
+        sess = AppSession.get()
+        role = (sess or {}).get("role", "")
+        uid  = (sess or {}).get("id", -1)
+
+        if role in ("superadmin", "admin"):
+            c.execute("SELECT id, name FROM clients ORDER BY name")
+        else:
+            c.execute("""SELECT cl.id, cl.name FROM clients cl
+                         JOIN user_client_access uca ON uca.client_id=cl.id
+                         WHERE uca.user_id=? ORDER BY cl.name""", (uid,))
+        clients = c.fetchall(); conn.close()
+
+        self.exp_client.blockSignals(True)
+        self.exp_client.clear()
+        self._export_client_ids: list[int] = []
+        for cl in clients:
+            self.exp_client.addItem(cl["name"])
+            self._export_client_ids.append(cl["id"])
+        self.exp_client.blockSignals(False)
+        self._load_export_periods()
+
+    def _load_export_periods(self):
+        """根据当前选中的账套，加载该账套已有的期间列表。"""
+        idx = self.exp_client.currentIndex()
+        if idx < 0 or not hasattr(self, "_export_client_ids"):
+            return
+        client_id = self._export_client_ids[idx]
+
+        conn = get_db(); c = conn.cursor()
+        c.execute("""SELECT DISTINCT period FROM vouchers
+                     WHERE client_id=? ORDER BY period""", (client_id,))
+        periods = [r["period"] for r in c.fetchall()]
+        conn.close()
+
+        self.exp_period_from.clear()
+        self.exp_period_to.clear()
+        for p in periods:
+            self.exp_period_from.addItem(p)
+            self.exp_period_to.addItem(p)
+        if periods:
+            self.exp_period_to.setCurrentIndex(len(periods) - 1)
+
+    def _do_export(self):
+        """执行账套导出：生成多个 xlsx 并打包为 zip。"""
+        idx = self.exp_client.currentIndex()
+        if idx < 0 or not hasattr(self, "_export_client_ids"):
+            QMessageBox.warning(self, "提示", "请先选择账套"); return
+        client_id = self._export_client_ids[idx]
+        client_name = self.exp_client.currentText()
+        period_from = self.exp_period_from.currentText()
+        period_to   = self.exp_period_to.currentText()
+
+        if not period_from or not period_to:
+            QMessageBox.warning(self, "提示", "该账套暂无凭证数据，无法导出期间范围"); return
+        if period_from > period_to:
+            QMessageBox.warning(self, "提示", "开始期间不能晚于结束期间"); return
+
+        import zipfile, io, tempfile
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        except ImportError:
+            QMessageBox.critical(self, "缺少依赖",
+                                 "导出功能需要 openpyxl 库。\n请在终端执行：pip install openpyxl")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = client_name.replace("/", "_").replace("\\", "_")
+        default_name = f"{safe_name}_导出_{period_from}_{period_to}_{ts}.zip"
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "选择保存位置", default_name, "ZIP 文件 (*.zip)")
+        if not dest:
+            return
+
+        conn = get_db(); c = conn.cursor()
+
+        # ── 样式定义 ──
+        def hdr_font(): return Font(bold=True, color="FFFFFF", size=11)
+        def hdr_fill(): return PatternFill("solid", fgColor="3D6FDB")
+        def sub_fill(): return PatternFill("solid", fgColor="D6E4FF")
+        thin = Side(style="thin", color="CCCCCC")
+        def thin_border(): return Border(left=thin, right=thin, top=thin, bottom=thin)
+        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+
+        def style_header_row(ws, row_num, col_count):
+            for col in range(1, col_count + 1):
+                cell = ws.cell(row=row_num, column=col)
+                cell.font  = hdr_font()
+                cell.fill  = hdr_fill()
+                cell.border = thin_border()
+                cell.alignment = center
+
+        def style_data_row(ws, row_num, col_count, alt=False):
+            for col in range(1, col_count + 1):
+                cell = ws.cell(row=row_num, column=col)
+                cell.border = thin_border()
+                cell.alignment = left
+                if alt:
+                    cell.fill = PatternFill("solid", fgColor="F5F7FF")
+
+        def auto_width(ws):
+            for col in ws.columns:
+                max_len = 0
+                col_letter = col[0].column_letter
+                for cell in col:
+                    try:
+                        val = str(cell.value or "")
+                        max_len = max(max_len, len(val.encode("gbk", errors="replace")))
+                    except Exception:
+                        pass
+                ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 40)
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+
+            # ① 账套基本信息
+            c.execute("SELECT * FROM clients WHERE id=?", (client_id,))
+            cl_row = c.fetchone()
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "账套基本信息"
+            ws.row_dimensions[1].height = 22
+            headers = ["字段", "值"]
+            for ci, h in enumerate(headers, 1):
+                ws.cell(1, ci, h).font = hdr_font()
+                ws.cell(1, ci, h).fill = hdr_fill()
+                ws.cell(1, ci, h).alignment = center
+                ws.cell(1, ci, h).border = thin_border()
+            field_map = [
+                ("账套名称", cl_row["name"] if cl_row else ""),
+                ("简码", cl_row["short_code"] if cl_row else ""),
+                ("税号", cl_row["tax_id"] if cl_row else ""),
+                ("客户类型", cl_row["client_type"] if cl_row else ""),
+                ("会计准则", cl_row["accounting_std"] if cl_row else ""),
+                ("联系人", cl_row["contact"] if cl_row else ""),
+                ("电话", cl_row["phone"] if cl_row else ""),
+                ("邮箱", cl_row["email"] if cl_row else ""),
+            ]
+            for ri, (f, v) in enumerate(field_map, 2):
+                ws.cell(ri, 1, f).border = thin_border(); ws.cell(ri, 1, f).alignment = center
+                ws.cell(ri, 2, v).border = thin_border(); ws.cell(ri, 2, v).alignment = left
+                if ri % 2 == 0:
+                    ws.cell(ri, 1).fill = PatternFill("solid", fgColor="F5F7FF")
+                    ws.cell(ri, 2).fill = PatternFill("solid", fgColor="F5F7FF")
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("账套基本信息.xlsx", buf.getvalue())
+
+            # ② 科目表与期初余额
+            c.execute("""SELECT code, name, type, direction, parent_code, level,
+                                opening_debit, opening_credit
+                         FROM accounts WHERE client_id=? ORDER BY code""", (client_id,))
+            accounts = c.fetchall()
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "科目表与期初余额"
+            cols = ["科目代码", "科目名称", "类型", "方向", "上级科目", "级次", "期初借方", "期初贷方"]
+            for ci, h in enumerate(cols, 1):
+                ws.cell(1, ci, h); ws.cell(1, ci, h)
+            style_header_row(ws, 1, len(cols))
+            for ri, acc in enumerate(accounts, 2):
+                vals = [acc["code"], acc["name"], acc["type"], acc["direction"],
+                        acc["parent_code"] or "", acc["level"],
+                        acc["opening_debit"] or 0, acc["opening_credit"] or 0]
+                for ci, v in enumerate(vals, 1):
+                    ws.cell(ri, ci, v)
+                style_data_row(ws, ri, len(cols), ri % 2 == 0)
+                for ci in [7, 8]:
+                    ws.cell(ri, ci).number_format = '#,##0.00'
+                    ws.cell(ri, ci).alignment = Alignment(horizontal="right", vertical="center")
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("科目表与期初余额.xlsx", buf.getvalue())
+
+            # ③ 凭证汇总
+            c.execute("""SELECT period, voucher_no, date, preparer, status, note
+                         FROM vouchers
+                         WHERE client_id=? AND period>=? AND period<=?
+                         ORDER BY period, voucher_no""",
+                      (client_id, period_from, period_to))
+            vouchers = c.fetchall()
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "凭证汇总"
+            cols = ["期间", "凭证号", "日期", "制单人", "状态", "摘要"]
+            for ci, h in enumerate(cols, 1):
+                ws.cell(1, ci, h)
+            style_header_row(ws, 1, len(cols))
+            for ri, v in enumerate(vouchers, 2):
+                vals = [v["period"], v["voucher_no"], v["date"],
+                        v["preparer"], v["status"], v["note"] or ""]
+                for ci, val in enumerate(vals, 1):
+                    ws.cell(ri, ci, val)
+                style_data_row(ws, ri, len(cols), ri % 2 == 0)
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("凭证汇总.xlsx", buf.getvalue())
+
+            # ④ 凭证明细
+            c.execute("""SELECT v.period, v.voucher_no, v.date, v.preparer,
+                                e.line_no, e.summary, e.account_code, e.account_name,
+                                e.debit, e.credit
+                         FROM voucher_entries e
+                         JOIN vouchers v ON v.id=e.voucher_id
+                         WHERE v.client_id=? AND v.period>=? AND v.period<=?
+                         ORDER BY v.period, v.voucher_no, e.line_no""",
+                      (client_id, period_from, period_to))
+            entries = c.fetchall()
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "凭证明细"
+            cols = ["期间", "凭证号", "日期", "制单人", "行号", "摘要", "科目代码", "科目名称", "借方金额", "贷方金额"]
+            for ci, h in enumerate(cols, 1):
+                ws.cell(1, ci, h)
+            style_header_row(ws, 1, len(cols))
+            for ri, e in enumerate(entries, 2):
+                vals = [e["period"], e["voucher_no"], e["date"], e["preparer"],
+                        e["line_no"], e["summary"], e["account_code"], e["account_name"],
+                        e["debit"] or 0, e["credit"] or 0]
+                for ci, val in enumerate(vals, 1):
+                    ws.cell(ri, ci, val)
+                style_data_row(ws, ri, len(cols), ri % 2 == 0)
+                for ci in [9, 10]:
+                    ws.cell(ri, ci).number_format = '#,##0.00'
+                    ws.cell(ri, ci).alignment = Alignment(horizontal="right", vertical="center")
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("凭证明细.xlsx", buf.getvalue())
+
+            # ⑤ 科目余额表（期初 + 期间发生 + 期末）
+            c.execute("""SELECT a.code, a.name, a.type, a.direction,
+                                a.opening_debit, a.opening_credit
+                         FROM accounts a WHERE a.client_id=? AND a.is_leaf=1
+                         ORDER BY a.code""", (client_id,))
+            leaf_accounts = c.fetchall()
+
+            # 汇总期间内发生额
+            c.execute("""SELECT e.account_code,
+                                SUM(e.debit)  AS period_debit,
+                                SUM(e.credit) AS period_credit
+                         FROM voucher_entries e
+                         JOIN vouchers v ON v.id=e.voucher_id
+                         WHERE v.client_id=? AND v.period>=? AND v.period<=?
+                         GROUP BY e.account_code""",
+                      (client_id, period_from, period_to))
+            movement = {r["account_code"]: r for r in c.fetchall()}
+
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "科目余额表"
+            cols = ["科目代码", "科目名称", "类型", "方向",
+                    "期初借方", "期初贷方",
+                    "本期借方", "本期贷方",
+                    "期末借方", "期末贷方"]
+            for ci, h in enumerate(cols, 1):
+                ws.cell(1, ci, h)
+            style_header_row(ws, 1, len(cols))
+
+            for ri, acc in enumerate(leaf_accounts, 2):
+                code = acc["code"]
+                ob_d = acc["opening_debit"]  or 0.0
+                ob_c = acc["opening_credit"] or 0.0
+                mv   = movement.get(code)
+                mv_d = (mv["period_debit"]  or 0.0) if mv else 0.0
+                mv_c = (mv["period_credit"] or 0.0) if mv else 0.0
+                end_d = ob_d + mv_d
+                end_c = ob_c + mv_c
+                vals = [code, acc["name"], acc["type"], acc["direction"],
+                        ob_d, ob_c, mv_d, mv_c, end_d, end_c]
+                for ci, val in enumerate(vals, 1):
+                    ws.cell(ri, ci, val)
+                style_data_row(ws, ri, len(cols), ri % 2 == 0)
+                for ci in range(5, 11):
+                    ws.cell(ri, ci).number_format = '#,##0.00'
+                    ws.cell(ri, ci).alignment = Alignment(horizontal="right", vertical="center")
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("科目余额表.xlsx", buf.getvalue())
+
+            # ⑥ 财务报表（试算平衡表）
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "试算平衡表"
+            ws.merge_cells("A1:F1")
+            ws.cell(1, 1, f"{client_name}  试算平衡表  {period_from} ~ {period_to}")
+            ws.cell(1, 1).font = Font(bold=True, size=13)
+            ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
+            ws.row_dimensions[1].height = 28
+
+            cols = ["科目代码", "科目名称", "期初借方余额", "期初贷方余额", "本期借方发生", "本期贷方发生", "期末借方余额", "期末贷方余额"]
+            for ci, h in enumerate(cols, 1):
+                ws.cell(2, ci, h)
+            style_header_row(ws, 2, len(cols))
+
+            total = [0.0] * 6  # ob_d, ob_c, mv_d, mv_c, end_d, end_c
+            c.execute("""SELECT a.code, a.name, a.opening_debit, a.opening_credit
+                         FROM accounts a WHERE a.client_id=? AND a.is_leaf=1
+                         ORDER BY a.code""", (client_id,))
+            all_leaf = c.fetchall()
+            for ri, acc in enumerate(all_leaf, 3):
+                code = acc["code"]
+                ob_d = acc["opening_debit"]  or 0.0
+                ob_c = acc["opening_credit"] or 0.0
+                mv   = movement.get(code)
+                mv_d = (mv["period_debit"]  or 0.0) if mv else 0.0
+                mv_c = (mv["period_credit"] or 0.0) if mv else 0.0
+                end_d = ob_d + mv_d
+                end_c = ob_c + mv_c
+                for i, v in enumerate([ob_d, ob_c, mv_d, mv_c, end_d, end_c]):
+                    total[i] += v
+                vals = [code, acc["name"], ob_d, ob_c, mv_d, mv_c, end_d, end_c]
+                for ci, val in enumerate(vals, 1):
+                    ws.cell(ri, ci, val)
+                style_data_row(ws, ri, len(cols), ri % 2 == 1)
+                for ci in range(3, 9):
+                    ws.cell(ri, ci).number_format = '#,##0.00'
+                    ws.cell(ri, ci).alignment = Alignment(horizontal="right", vertical="center")
+
+            # 合计行
+            total_row = len(all_leaf) + 3
+            ws.cell(total_row, 1, "合计")
+            ws.cell(total_row, 2, "")
+            for ci, v in enumerate(total, 3):
+                ws.cell(total_row, ci, v)
+                ws.cell(total_row, ci).number_format = '#,##0.00'
+                ws.cell(total_row, ci).alignment = Alignment(horizontal="right", vertical="center")
+            for ci in range(1, len(cols) + 1):
+                ws.cell(total_row, ci).font = Font(bold=True)
+                ws.cell(total_row, ci).fill = sub_fill()
+                ws.cell(total_row, ci).border = thin_border()
+            auto_width(ws)
+            buf = io.BytesIO(); wb.save(buf)
+            zf.writestr("财务报表（试算平衡表）.xlsx", buf.getvalue())
+
+        conn.close()
+
+        # 写出 ZIP
+        with open(dest, "wb") as f:
+            f.write(zip_buffer.getvalue())
+
+        conn2 = get_db()
+        log_action(conn2, client_id, "账套导出", "client", str(client_id),
+                   f"期间:{period_from}~{period_to} 文件:{dest}")
+        conn2.commit(); conn2.close()
+
+        QMessageBox.information(self, "导出成功",
+                                f"账套数据已导出至：\n{dest}\n\n"
+                                f"共6个工作表，包含期间 {period_from} ~ {period_to} 的完整数据。")
