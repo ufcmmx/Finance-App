@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
 from db import get_db, log_action
-from utils import lbl, sep, card, fmt_amt, cn_amount, NoScrollSpinBox, NoScrollDoubleSpinBox
+from utils import lbl, sep, card, fmt_amt, cn_amount, make_export_button, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import VoucherDialog, AccountInitDialog, AuxPage
 from session import AppSession
 # openpyxl imported lazily inside each export function
@@ -68,16 +68,15 @@ class VoucherPage(QWidget):
         self.lock_lbl = QLabel("")  # shows 🔒 已封账 when period is closed
         hdr.addSpacing(12); hdr.addWidget(self.lock_lbl)
         hdr.addStretch()
-        b_new = QPushButton("＋ 新增凭证"); b_new.setObjectName("btn_primary")
-        b_new.clicked.connect(self._new_voucher)
-        b_new.setVisible(AppSession.has_perm("voucher.create"))
-        b_exp_doc = QPushButton("导出记账凭证(PDF)"); b_exp_doc.setObjectName("btn_outline")
-        b_exp_doc.clicked.connect(self._export_voucher_pdf)
-        b_exp_doc.setVisible(AppSession.has_perm("report.export"))
-        b_exp = QPushButton("导出Excel"); b_exp.setObjectName("btn_outline")
-        b_exp.clicked.connect(self._export_vouchers)
-        b_exp.setVisible(AppSession.has_perm("report.export"))
-        hdr.addWidget(b_exp_doc); hdr.addWidget(b_exp); hdr.addWidget(b_new); L.addLayout(hdr)
+        self._btn_new = QPushButton("＋ 新增凭证"); self._btn_new.setObjectName("btn_primary")
+        self._btn_new.clicked.connect(self._new_voucher)
+        self._btn_exp = make_export_button([
+            ("Excel (.xlsx)",  self._export_vouchers),
+            ("记账凭证 PDF",    self._export_voucher_pdf),
+        ])
+        hdr.addWidget(self._btn_exp); hdr.addWidget(self._btn_new)
+        L.addLayout(hdr)
+        self.refresh_after_login()  # 初始化时按当前权限设置可见性
 
         f = card(); vl = QVBoxLayout(f); vl.setContentsMargins(0,0,0,0)
         self.v_tbl = QTableWidget(); self.v_tbl.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -466,6 +465,11 @@ class VoucherPage(QWidget):
         d.exec()
 
     # ─ Aux report (往来对账) ─
+    def refresh_after_login(self):
+        """登录后重新按权限刷新按钮可见性。"""
+        self._btn_new.setVisible(AppSession.has_perm("voucher.create"))
+        self._btn_exp.setVisible(AppSession.has_perm("report.export"))
+
     def set_client(self, client_id, client_name, period):
         self.client_id = client_id; self.client_name = client_name; self.period = period
         self.client_lbl.setText(f"【{client_name}】")

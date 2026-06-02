@@ -609,9 +609,9 @@ class ImportAccountSetDialog(QDialog):
         default_period = f"{pm.group(1)}-{pm.group(2)}" if pm else "2026-01"
 
         if is_yonyou:
-            cur_vno = None; cur_date = ""; entries = []
+            cur_vno = None; cur_date = ""; cur_preparer = ""; entries = []
 
-            def flush(vno, date, ents):
+            def flush(vno, date, preparer, ents):
                 nonlocal ok, skip, err
                 if not vno or not ents: return
                 c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
@@ -630,9 +630,9 @@ class ImportAccountSetDialog(QDialog):
                                   f"凭证已导入但不计入余额表/报表")
                         actual = code   # 原样写入，不影响凭证导入
                     resolved_ents.append((summ, actual, aname, d, cr))
-                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
-                          " VALUES(?,?,?,?,?)",
-                          (self._client_id, default_period, vno, date, "已审核"))
+                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,preparer,status)"
+                          " VALUES(?,?,?,?,?,?)",
+                          (self._client_id, default_period, vno, date, preparer, "已审核"))
                 vid = c.lastrowid
                 for ln, ent in enumerate(resolved_ents, 1):
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"
@@ -646,11 +646,13 @@ class ImportAccountSetDialog(QDialog):
                 row = df.iloc[ri]
                 cell1 = str(row.iloc[1] if df.shape[1] > 1 else "").strip()
                 if "凭证字号" in cell1:
-                    flush(cur_vno, cur_date, entries); entries = []
+                    flush(cur_vno, cur_date, cur_preparer, entries); entries = []
                     dm = re.search(r"日期:(\S+)", cell1)
                     nm = re.search(r"凭证字号:(\S+)", cell1)
-                    cur_date = dm.group(1) if dm else default_period + "-28"
-                    cur_vno  = nm.group(1).split()[0] if nm else None
+                    pm = re.search(r"记账人:(\S+)", cell1)
+                    cur_date     = dm.group(1) if dm else default_period + "-28"
+                    cur_vno      = nm.group(1).split()[0] if nm else None
+                    cur_preparer = pm.group(1) if pm else ""
                 elif not cell1 or cell1.startswith("合计"): continue
                 else:
                     af = str(row.iloc[2] if df.shape[1] > 2 else "").strip()
@@ -662,7 +664,7 @@ class ImportAccountSetDialog(QDialog):
                     cr = self._flt(row.iloc[4]) if df.shape[1] > 4 else 0
                     if d == 0 and cr == 0: continue
                     entries.append((cell1, code, aname, d, cr))
-            flush(cur_vno, cur_date, entries)
+            flush(cur_vno, cur_date, cur_preparer, entries)
         else:
             # 通用模板格式
             from collections import OrderedDict
@@ -683,10 +685,14 @@ class ImportAccountSetDialog(QDialog):
                 period = gcol(0); vno = gcol(1); date = gcol(2)
                 summ   = gcol(3); code = gcol(4); aname = gcol(5)
                 d = gcolf(6); cr = gcolf(7)
+                preparer = gcol(8)   # 第9列：制单人（与导出格式对应，可选）
                 if not period or not vno or not code: continue
                 key = (period, vno)
                 if key not in vouchers:
-                    vouchers[key] = {"period":period,"vno":vno,"date":date,"entries":[]}
+                    vouchers[key] = {"period":period,"vno":vno,"date":date,
+                                     "preparer":preparer,"entries":[]}
+                elif preparer and not vouchers[key]["preparer"]:
+                    vouchers[key]["preparer"] = preparer
                 vouchers[key]["entries"].append((summ, code, aname, d, cr))
             for (period, vno), v in vouchers.items():
                 c.execute("SELECT id FROM vouchers WHERE client_id=? AND period=? AND voucher_no=?",
@@ -706,9 +712,9 @@ class ImportAccountSetDialog(QDialog):
                                   f"凭证已导入但不计入余额表/报表")
                         actual = code
                     resolved_ents.append((summ, actual, aname, d, cr))
-                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,status)"
-                          " VALUES(?,?,?,?,?)",
-                          (self._client_id, period, vno, v["date"], "已审核"))
+                c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,preparer,status)"
+                          " VALUES(?,?,?,?,?,?)",
+                          (self._client_id, period, vno, v["date"], v["preparer"], "已审核"))
                 vid = c.lastrowid
                 for ln, ent in enumerate(resolved_ents, 1):
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,"

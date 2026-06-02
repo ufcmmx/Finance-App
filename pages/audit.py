@@ -32,7 +32,7 @@ class AuditPage(QWidget):
         self.action_filter = QComboBox()
         self.action_filter.addItems(["全部操作","新增凭证","编辑凭证","凭证审核:已审核","凭证审核:已拒绝",
                                       "凭证审核:待审核","批量导入凭证","期末结转","期间结账封账",
-                                      "期间反结账","删除凭证"])
+                                      "期间反结账","删除凭证","账套导出"])
         self.action_filter.currentIndexChanged.connect(self.load)
         self.date_from = QDateEdit(); self.date_from.setDisplayFormat("yyyy-MM-dd")
         self.date_from.setDate(QDate.currentDate().addMonths(-3))
@@ -67,9 +67,28 @@ class AuditPage(QWidget):
         vl.addWidget(self.summary_bar)
         L.addWidget(f)
 
+        self.load_recent()
+
+    def load_recent(self, n: int = 20):
+        """进入页面时默认展示最新 n 条，不受日期范围过滤限制。"""
+        conn = get_db(); c = conn.cursor()
+        where = []
+        params: list = []
+        if self.client_id:
+            where.append("(client_id=? OR client_id IS NULL)")
+            params.append(self.client_id)
+        sql = "SELECT created_at,operator,action,target_type,target_id,detail FROM audit_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += f" ORDER BY created_at DESC LIMIT {n}"
+        c.execute(sql, params)
+        rows = c.fetchall(); conn.close()
+        self._render_rows(rows)
+        self.summary_bar.setText(f"  默认显示最新 {n} 条，可通过上方条件筛选查看更多")
+
     def set_client(self, client_id):
         self.client_id = client_id
-        self.load()
+        self.load_recent()
 
     def load(self):
         conn = get_db(); c = conn.cursor()
@@ -78,7 +97,7 @@ class AuditPage(QWidget):
         date_to   = self.date_to.date().toString("yyyy-MM-dd") + " 23:59:59"
 
         where = ["created_at >= ? AND created_at <= ?"]
-        params = [date_from, date_to]
+        params: list = [date_from, date_to]
         if self.client_id:
             where.append("(client_id=? OR client_id IS NULL)")
             params.append(self.client_id)
@@ -89,33 +108,34 @@ class AuditPage(QWidget):
             FROM audit_log WHERE {" AND ".join(where)} ORDER BY created_at DESC LIMIT 500""",
             params)
         rows = c.fetchall(); conn.close()
+        self._render_rows(rows)
+        self.summary_bar.setText(f"  共 {len(rows)} 条记录")
 
+    def _render_rows(self, rows):
         action_colors = {
             "新增凭证":"#3d6fdb","编辑凭证":"#fa8c16",
             "凭证审核:已审核":"#52c41a","凭证审核:已拒绝":"#ff4d4f",
             "凭证审核:待审核":"#888","批量导入凭证":"#722ed1",
             "期末结转":"#eb2f96","期间结账封账":"#fa8c16",
             "期间反结账":"#13c2c2","删除凭证":"#ff4d4f",
+            "账套导出":"#3d6fdb",
         }
-
         self.tbl.setRowCount(len(rows))
-        for i,r in enumerate(rows):
-            self.tbl.setRowHeight(i,36)
+        for i, r in enumerate(rows):
+            self.tbl.setRowHeight(i, 36)
             action = r[2]
-            color  = action_colors.get(action,"#555")
-            for j,(val,align) in enumerate([
-                (r[0][:19],    Qt.AlignmentFlag.AlignCenter),
-                (r[1] or "",   Qt.AlignmentFlag.AlignCenter),
-                (action,       Qt.AlignmentFlag.AlignCenter),
-                (r[3] or "",   Qt.AlignmentFlag.AlignCenter),
+            color  = action_colors.get(action, "#555")
+            for j, (val, align) in enumerate([
+                (r[0][:19],       Qt.AlignmentFlag.AlignCenter),
+                (r[1] or "",      Qt.AlignmentFlag.AlignCenter),
+                (action,          Qt.AlignmentFlag.AlignCenter),
+                (r[3] or "",      Qt.AlignmentFlag.AlignCenter),
                 (str(r[4] or ""), Qt.AlignmentFlag.AlignCenter),
-                (r[5] or "",   Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
+                (r[5] or "",      Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
             ]):
                 it = QTableWidgetItem(val); it.setTextAlignment(align)
-                if j==2: it.setForeground(QColor(color))
-                self.tbl.setItem(i,j,it)
-
-        self.summary_bar.setText(f"  共 {len(rows)} 条记录")
+                if j == 2: it.setForeground(QColor(color))
+                self.tbl.setItem(i, j, it)
 
     def _export(self):
         import openpyxl

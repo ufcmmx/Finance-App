@@ -9,7 +9,7 @@ from db import get_db, DB_PATH, log_action, get_setting, set_setting
 from pw_utils import hash_pw, verify_pw
 from backup_utils import encrypt_backup, decrypt_backup
 from session import AppSession, ROLE_LABELS
-from utils import lbl, card, sep
+from utils import lbl, card, sep, cn_amount
 
 from datetime import datetime
 
@@ -1181,14 +1181,17 @@ class SystemPage(QWidget):
         def auto_width(ws):
             for col in ws.columns:
                 max_len = 0
-                col_letter = col[0].column_letter
+                col_letter = None
                 for cell in col:
+                    if hasattr(cell, "column_letter"):
+                        col_letter = cell.column_letter
                     try:
                         val = str(cell.value or "")
                         max_len = max(max_len, len(val.encode("gbk", errors="replace")))
                     except Exception:
                         pass
-                ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 40)
+                if col_letter:
+                    ws.column_dimensions[col_letter].width = min(max(max_len + 2, 8), 40)
 
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1270,34 +1273,104 @@ class SystemPage(QWidget):
             buf = io.BytesIO(); wb.save(buf)
             zf.writestr("凭证汇总.xlsx", buf.getvalue())
 
-            # ④ 凭证明细
-            c.execute("""SELECT v.period, v.voucher_no, v.date, v.preparer,
-                                e.line_no, e.summary, e.account_code, e.account_name,
-                                e.debit, e.credit
-                         FROM voucher_entries e
-                         JOIN vouchers v ON v.id=e.voucher_id
-                         WHERE v.client_id=? AND v.period>=? AND v.period<=?
-                         ORDER BY v.period, v.voucher_no, e.line_no""",
-                      (client_id, period_from, period_to))
-            entries = c.fetchall()
-            wb = openpyxl.Workbook(); ws = wb.active; ws.title = "凭证明细"
-            cols = ["期间", "凭证号", "日期", "制单人", "行号", "摘要", "科目代码", "科目名称", "借方金额", "贷方金额"]
-            for ci, h in enumerate(cols, 1):
-                ws.cell(1, ci, h)
-            style_header_row(ws, 1, len(cols))
-            for ri, e in enumerate(entries, 2):
-                vals = [e["period"], e["voucher_no"], e["date"], e["preparer"],
-                        e["line_no"], e["summary"], e["account_code"], e["account_name"],
-                        e["debit"] or 0, e["credit"] or 0]
-                for ci, val in enumerate(vals, 1):
-                    ws.cell(ri, ci, val)
-                style_data_row(ws, ri, len(cols), ri % 2 == 0)
-                for ci in [9, 10]:
-                    ws.cell(ri, ci).number_format = '#,##0.00'
-                    ws.cell(ri, ci).alignment = Alignment(horizontal="right", vertical="center")
-            auto_width(ws)
-            buf = io.BytesIO(); wb.save(buf)
-            zf.writestr("凭证明细.xlsx", buf.getvalue())
+            # ④ 记账凭证（用友样式，每期一个 Sheet，可直接回导）
+            c.execute("""SELECT DISTINCT period FROM vouchers
+                         WHERE client_id=? AND period>=? AND period<=?
+                         ORDER BY period""", (client_id, period_from, period_to))
+            periods_list = [r["period"] for r in c.fetchall()]
+
+            gray_fill  = PatternFill("solid", fgColor="D9D9D9")
+            light_fill = PatternFill("solid", fgColor="F2F2F2")
+
+            for period in periods_list:
+                year, mon = period.split("-")
+                sheet_name = f"{year}年{mon}期"
+                wb = openpyxl.Workbook()
+                ws = wb.active; ws.title = sheet_name
+                ws.column_dimensions["A"].width = 3   # 留白列
+                ws.column_dimensions["B"].width = 22  # 摘要
+                ws.column_dimensions["C"].width = 50  # 科目
+                ws.column_dimensions["D"].width = 16  # 借方
+                ws.column_dimensions["E"].width = 16  # 贷方
+
+                # ── 第1行：标题 ──
+                ws.merge_cells("B1:E1")
+                ws.row_dimensions[1].height = 30
+                tc = ws.cell(1, 2, f"{year}年{mon}期 凭证")
+                tc.font = Font(bold=True, size=14)
+                tc.alignment = Alignment(horizontal="center", vertical="center")
+
+                # ── 第2行：列头 ──
+                ws.row_dimensions[2].height = 22
+                for ci, h in enumerate(["摘要", "科目", "借方金额", "贷方金额"], 2):
+                    cell = ws.cell(2, ci, h)
+                    cell.font = Font(bold=True, size=11)
+                    cell.fill = gray_fill
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                    cell.border = thin_border()
+
+                # ── 查该期凭证 ──
+                c.execute("""SELECT id, voucher_no, date, preparer
+                             FROM vouchers WHERE client_id=? AND period=?
+                             ORDER BY voucher_no""", (client_id, period))
+                v_list = c.fetchall()
+
+                cur_row = 3
+                for v in v_list:
+                    c.execute("""SELECT summary, account_code, account_name, debit, credit
+                                 FROM voucher_entries WHERE voucher_id=?
+                                 ORDER BY line_no""", (v["id"],))
+                    ents = c.fetchall()
+                    total_d = sum(e["debit"]  or 0 for e in ents)
+                    total_c = sum(e["credit"] or 0 for e in ents)
+
+                    # 凭证头行
+                    ws.merge_cells(f"B{cur_row}:E{cur_row}")
+                    ws.row_dimensions[cur_row].height = 20
+                    htext = (f"日期:{v['date']}   凭证字号:{v['voucher_no']}"
+                             f"   记账人:{v['preparer'] or ''}   附单据0张")
+                    hc = ws.cell(cur_row, 2, htext)
+                    hc.font = Font(size=11); hc.fill = light_fill
+                    hc.border = thin_border()
+                    hc.alignment = Alignment(horizontal="left", vertical="center")
+                    cur_row += 1
+
+                    # 明细行
+                    for e in ents:
+                        ws.row_dimensions[cur_row].height = 20
+                        bc = ws.cell(cur_row, 2, e["summary"] or "")
+                        bc.border = thin_border()
+                        bc.alignment = Alignment(horizontal="left", vertical="center")
+                        cc = ws.cell(cur_row, 3, f"{e['account_code']} {e['account_name']}")
+                        cc.border = thin_border()
+                        cc.alignment = Alignment(horizontal="left", vertical="center")
+                        dc = ws.cell(cur_row, 4, e["debit"] if e["debit"] else "")
+                        dc.border = thin_border()
+                        dc.number_format = '#,##0.00'
+                        dc.alignment = Alignment(horizontal="right", vertical="center")
+                        ec = ws.cell(cur_row, 5, e["credit"] if e["credit"] else "")
+                        ec.border = thin_border()
+                        ec.number_format = '#,##0.00'
+                        ec.alignment = Alignment(horizontal="right", vertical="center")
+                        cur_row += 1
+
+                    # 合计行
+                    ws.row_dimensions[cur_row].height = 20
+                    tc2 = ws.cell(cur_row, 2, f"合计：{cn_amount(total_d)}")
+                    tc2.font = Font(bold=True)
+                    tc2.border = thin_border()
+                    tc2.alignment = Alignment(horizontal="left", vertical="center")
+                    ws.cell(cur_row, 3, "").border = thin_border()
+                    for ci, val in [(4, total_d), (5, total_c)]:
+                        xc = ws.cell(cur_row, ci, val)
+                        xc.font = Font(bold=True)
+                        xc.number_format = '#,##0.00'
+                        xc.alignment = Alignment(horizontal="right", vertical="center")
+                        xc.border = thin_border()
+                    cur_row += 2  # 合计行 + 空行
+
+                buf = io.BytesIO(); wb.save(buf)
+                zf.writestr(f"记账凭证({year}年{mon}期).xlsx", buf.getvalue())
 
             # ⑤ 科目余额表（期初 + 期间发生 + 期末）
             c.execute("""SELECT a.code, a.name, a.type, a.direction,

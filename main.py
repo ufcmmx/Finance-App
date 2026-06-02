@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         # 刷新客户管理页按钮和系统管理页状态
         self.pg_clients.load()
         self.pg_system.refresh_after_login()
+        self.pg_vouchers.refresh_after_login()
         self._nav("客户管理")
         # 登录后检查是否有未完成的月末自动备份（补跑机制）
         auto_backup.check_and_run(self)

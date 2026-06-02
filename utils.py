@@ -1,6 +1,6 @@
 """utils.py — 全局样式、UI辅助函数、控件子类、会计工具函数"""
 from PySide6.QtWidgets import (QLabel, QFrame, QVBoxLayout, QSpinBox,
-                                QDoubleSpinBox)
+                                QDoubleSpinBox, QPushButton, QMenu)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 
@@ -88,6 +88,33 @@ def lbl(text, bold=False, color=None, size=None):
     if size: st += f"font-size:{size}px;"
     if st: w.setStyleSheet(st)
     return w
+
+def make_export_button(actions: list[tuple[str, callable]], label: str = "⬇ 导出") -> QPushButton:
+    """创建一个带下拉菜单的导出按钮。
+
+    用法：
+        btn = make_export_button([
+            ("Excel (.xlsx)", self._export_excel),
+            ("PDF",           self._export_pdf),
+        ])
+        hdr.addWidget(btn)
+
+    参数：
+        actions: [(菜单项文字, 回调函数), ...]
+        label:   按钮文字，默认"⬇ 导出"
+    """
+    btn = QPushButton(label)
+    btn.setObjectName("btn_outline")
+
+    def _show_menu():
+        menu = QMenu()
+        for text, callback in actions:
+            menu.addAction(text, callback)
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    btn.clicked.connect(_show_menu)
+    return btn
+
 
 def sep():
     f = QFrame(); f.setFrameShape(QFrame.HLine)

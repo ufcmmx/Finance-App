@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
 from db import get_db, log_action
-from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
+from utils import lbl, sep, card, fmt_amt, make_export_button, NoScrollSpinBox, NoScrollDoubleSpinBox
 
 # openpyxl imported lazily inside each export function
 
@@ -245,8 +245,10 @@ class ReportPage(QWidget):
         b_refresh.clicked.connect(self._refresh_reports)
         tl2.addWidget(b_refresh)
         tl2.addStretch()
-        b_dl = QPushButton("⬇ 下载"); b_dl.setObjectName("btn_outline")
-        b_dl.clicked.connect(self._show_download_menu)
+        b_dl = make_export_button([
+            ("Excel (.xlsx)", self._export),
+            ("PDF",           self._export_pdf),
+        ], label="⬇ 下载")
         tl2.addWidget(b_dl)
         b_print = QPushButton("🖨 打印"); b_print.setObjectName("btn_outline")
         b_print.clicked.connect(self._print_report)
@@ -1661,15 +1663,6 @@ class ReportPage(QWidget):
             if b.property("active") == "true":
                 return b.text()
         return None
-
-    # ── 辅助：下载按钮弹出格式选择菜单 ─────────────────────────────────────────
-    def _show_download_menu(self):
-        from PySide6.QtWidgets import QMenu
-        menu = QMenu(self)
-        menu.addAction("Excel (.xlsx)", self._export)
-        menu.addAction("PDF", self._export_pdf)
-        btn = self.sender()
-        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     # ── 辅助：将当前报表渲染为 PDF（不弹对话框，供打印/导出共用）───────────────
     def _render_pdf(self, tab_name: str, path: str) -> None:
