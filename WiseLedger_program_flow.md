@@ -43,7 +43,7 @@ flowchart TD
     B --> C{用户存在且启用?}
     C -- 否 --> D[记录失败日志，提示错误]
     C -- 是 --> E{旧 SHA-256 哈希?}
-    E -- 是 --> F[迁移为 bcrypt 哈希]
+    E -- 是 --> F[迁移为 Argon2id 哈希]
     F --> G[verify_pw 校验密码]
     E -- 否 --> G
     G --> H{密码正确?}
