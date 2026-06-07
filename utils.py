@@ -59,6 +59,9 @@ QDateEdit::down-arrow { image:url(__ARROW_DN__); width:10px; height:6px; }
 QTableWidget { background:#fff; border:none; gridline-color:#f0f2f5;
     selection-background-color:#e6f0ff; selection-color:#1e2130; }
 QTableWidget::item { padding:8px 10px; }
+/* QTreeWidget / QListWidget — 全局统一选中色（避免系统深蓝与按钮蓝边融合）*/
+QTreeWidget { selection-background-color:#e6f0ff; selection-color:#1e2130; }
+QListWidget { selection-background-color:#e6f0ff; selection-color:#1e2130; }
 /* 表头：右侧分隔线让用户知道可拖拽调整列宽 */
 QHeaderView::section { background:#fafafa; color:#8b93ae;
     border:none; border-right:1px solid #dde3ec;
