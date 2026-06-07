@@ -137,6 +137,14 @@ class AccountPage(QWidget):
         self.tbl.setColumnWidth(2,80);  self.tbl.setColumnWidth(3,55)
         self.tbl.setColumnWidth(4,350)
         self.tbl.setHorizontalScrollMode(QTreeWidget.ScrollPerPixel)
+        # 选中行用浅蓝色（避免与按钮的蓝色描边融合看不见）
+        self.tbl.setStyleSheet("""
+            QTreeWidget { outline: 0; border: none; background: #ffffff; }
+            QTreeWidget::item { padding: 2px 0; }
+            QTreeWidget::item:selected { background: #e6f0ff; color: #1e2130; }
+            QTreeWidget::item:selected:active { background: #e6f0ff; color: #1e2130; }
+            QTreeWidget::item:hover { background: #f7f9fc; }
+        """)
         vl.addWidget(self.tbl); L.addWidget(f)
 
     def set_client(self, client_id):
