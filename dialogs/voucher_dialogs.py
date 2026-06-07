@@ -1034,6 +1034,18 @@ class AuxPage(QWidget):
                   (self._cur_dim_id, self.client_id))
         rows = c.fetchall(); conn.close()
         self._items = [dict(r) for r in rows]
+        # 先彻底清理旧行（含 cellWidget 残留 — 必须显式销毁，否则脱离 cell 后仍漂在 widget 树里）
+        old_rows = self.item_tbl.rowCount()
+        for i in range(old_rows):
+            for j in range(self.item_tbl.columnCount()):
+                old_w = self.item_tbl.cellWidget(i, j)
+                if old_w is not None:
+                    self.item_tbl.removeCellWidget(i, j)
+                    old_w.setParent(None)
+                    old_w.deleteLater()
+        self.item_tbl.clearContents()
+        self.item_tbl.setRowCount(0)
+        # 再按新数据建行
         self.item_tbl.setRowCount(len(rows))
         for i, r in enumerate(self._items):
             self.item_tbl.setRowHeight(i, 44)
@@ -1042,7 +1054,6 @@ class AuxPage(QWidget):
                 it.setTextAlignment(Qt.AlignmentFlag.AlignCenter if j != 1 else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 self.item_tbl.setItem(i, j, it)
             bw = QWidget()
-            bw.setMinimumWidth(100)
             bl = QHBoxLayout(bw)
             bl.setContentsMargins(6, 0, 6, 0); bl.setSpacing(6)
             b_ed = self._make_icon_btn(
