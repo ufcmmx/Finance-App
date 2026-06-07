@@ -105,20 +105,38 @@ class AccountPage(QWidget):
         fr.addWidget(self.search_acct); fr.addWidget(self.type_filter); fr.addStretch()
         L.addLayout(fr)
 
+        # 小工具栏：左 统计 + 右 展开/收起图标按钮
+        tr = QHBoxLayout(); tr.setContentsMargins(2,0,2,0); tr.setSpacing(6)
+        self.stats_lbl = QLabel("")
+        self.stats_lbl.setStyleSheet("color:#888;font-size:12px;")
+        tr.addWidget(self.stats_lbl); tr.addStretch()
+        icon_btn_style = ("color:#3d6fdb; border:1px solid #d0d7e2; background:#fff;"
+                          "border-radius:4px; padding:2px 6px; font-size:13px;")
+        self.b_expand = QPushButton("⊕ 展开全部")
+        self.b_expand.setFixedHeight(26); self.b_expand.setStyleSheet(icon_btn_style)
+        self.b_expand.clicked.connect(lambda: self.tbl.expandAll())
+        self.b_collapse = QPushButton("⊖ 收起全部")
+        self.b_collapse.setFixedHeight(26); self.b_collapse.setStyleSheet(icon_btn_style)
+        self.b_collapse.clicked.connect(lambda: self.tbl.collapseAll())
+        tr.addWidget(self.b_expand); tr.addWidget(self.b_collapse)
+        L.addLayout(tr)
+
         f = card(); vl = QVBoxLayout(f); vl.setContentsMargins(0,0,0,0)
-        self.tbl = QTableWidget(); self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tbl.setSelectionBehavior(QTableWidget.SelectRows); self.tbl.setShowGrid(False)
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.setColumnCount(5)
-        self.tbl.setHorizontalHeaderLabels(["科目编号","科目名称","类型","方向","操作"])
-        hh = self.tbl.horizontalHeader()
+        self.tbl = QTreeWidget()
+        self.tbl.setHeaderLabels(["科目编号","科目名称","类型","方向","操作"])
+        self.tbl.setRootIsDecorated(True)
+        self.tbl.setUniformRowHeights(False)
+        self.tbl.setAlternatingRowColors(False)
+        self.tbl.setIndentation(20)
+        self.tbl.setSelectionBehavior(QTreeWidget.SelectRows)
+        hh = self.tbl.header()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setStretchLastSection(True)
         hh.setMinimumSectionSize(55)
-        self.tbl.setColumnWidth(0,120); self.tbl.setColumnWidth(1,240)
+        self.tbl.setColumnWidth(0,160); self.tbl.setColumnWidth(1,260)
         self.tbl.setColumnWidth(2,80);  self.tbl.setColumnWidth(3,55)
         self.tbl.setColumnWidth(4,350)
-        self.tbl.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        self.tbl.setHorizontalScrollMode(QTreeWidget.ScrollPerPixel)
         vl.addWidget(self.tbl); L.addWidget(f)
 
     def set_client(self, client_id):
@@ -197,7 +215,7 @@ class AccountPage(QWidget):
         aux_bound_map = {}
         for row in c.fetchall():
             aux_bound_map.setdefault(row["account_code"], []).append(row["name"])
-        
+
         # Check which accounts have been used
         used_accounts = set()
         c.execute("SELECT DISTINCT account_code FROM voucher_entries")
@@ -206,75 +224,97 @@ class AccountPage(QWidget):
 
         conn.close()
 
-        self.tbl.setRowCount(len(rows))
+        self.tbl.clear()
         type_colors = {"资产":"#3d6fdb","负债":"#e05252","所有者权益":"#722ed1",
                        "成本":"#fa8c16","收入":"#52c41a","费用":"#eb5757"}
-        for i,r in enumerate(rows):
-            self.tbl.setRowHeight(i,68)
-            level = r["level"] or 1
-            indent = "    " * (level-1)
-            code_it = QTableWidgetItem(r["code"])
-            code_it.setForeground(QColor("#3d6fdb")); code_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Mark accounts with _ in code as aux dimension entries
+
+        # ── 父代码推断（带 _ 的辅助核算条目挂到 _ 之前；带 . 的挂到上一级；纯 4 位为顶层）──
+        def parent_of(code):
+            if '_' in code:
+                return code[:code.rindex('_')]
+            if '.' in code:
+                return code[:code.rindex('.')]
+            return None
+
+        # 已存在的代码集合，用于父节点存在性校验
+        code_set = {r['code'] for r in rows}
+
+        # 按 code 升序，确保父先于子被创建
+        sorted_rows = sorted(rows, key=lambda x: x['code'])
+        code_to_item = {}
+
+        from utils import _infer_aux_dim_name
+
+        for r in sorted_rows:
             code_str = r["code"] or ""
             is_aux_entry = '_' in code_str
             if is_aux_entry:
-                # Extract dim name from utils helper
-                from utils import _infer_aux_dim_name
                 base = code_str[:code_str.rindex('_')]
                 dim_name = _infer_aux_dim_name(base)
-                dim_tag = f"  [{dim_name}]"
+                name_text = r["name"] + f"  [{dim_name}]"
             else:
-                dim_tag = ""
-            name_it = QTableWidgetItem(indent + r["name"] + dim_tag)
-            if level == 1: name_it.setFont(QFont("",weight=QFont.Bold))
-            if is_aux_entry:
-                name_it.setToolTip(f"辅助核算条目 · 维度：{dim_name}")
-            
-            # If account is frozen, show gray text
+                dim_name = ""
+                name_text = r["name"]
+
+            level = r["level"] or 1
+
+            # ── 创建 QTreeWidgetItem ──
+            item = QTreeWidgetItem([code_str, name_text, r["type"] or "", r["direction"] or "借", ""])
+            # 行高（保证操作按钮可见）
+            item.setSizeHint(0, QSize(0, 40))
+
+            # 文字样式
+            item.setForeground(0, QBrush(QColor("#3d6fdb")))
+            item.setTextAlignment(0, Qt.AlignmentFlag.AlignCenter)
+            item.setForeground(2, QBrush(QColor(type_colors.get(r["type"],"#888"))))
+            item.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
+            item.setTextAlignment(3, Qt.AlignmentFlag.AlignCenter)
+            if level == 1:
+                f_bold = QFont(); f_bold.setBold(True)
+                item.setFont(1, f_bold)
+
+            # 冻结状态：灰色显示
             try:
                 is_frozen = r['is_frozen']
             except (KeyError, IndexError):
                 is_frozen = 0
             if is_frozen:
-                code_it.setForeground(QColor("#ccc"))
-                name_it.setForeground(QColor("#ccc"))
+                item.setForeground(0, QBrush(QColor("#ccc")))
+                item.setForeground(1, QBrush(QColor("#ccc")))
             elif is_aux_entry:
-                name_it.setForeground(QColor("#1e2130"))  # normal name color
-            
-            type_it = QTableWidgetItem(r["type"] or "")
-            type_it.setForeground(QColor(type_colors.get(r["type"],"#888")))
-            type_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            dir_it = QTableWidgetItem(r["direction"] or "借"); dir_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            for j,it in enumerate([code_it, name_it, type_it, dir_it]):
-                self.tbl.setItem(i,j,it)
+                item.setToolTip(1, f"辅助核算条目 · 维度：{dim_name}")
+                item.setForeground(1, QBrush(QColor("#1e2130")))
 
+            # 挂到父节点或顶层
+            pcode = parent_of(code_str)
+            parent_item = code_to_item.get(pcode) if pcode in code_set else None
+            if parent_item is not None:
+                parent_item.addChild(item)
+            else:
+                self.tbl.addTopLevelItem(item)
+            code_to_item[code_str] = item
+
+            # ── 操作按钮区（同原逻辑）──
             bw = QWidget()
-            bw.setObjectName("btnRow"); bw.setStyleSheet("#btnRow { background:#ffffff; }")
-            bl = QHBoxLayout(bw); bl.setContentsMargins(8,10,8,10); bl.setSpacing(8)
-            
-            # Button style to ensure text is visible on Windows
+            bw.setObjectName("btnRow")
+            bw.setStyleSheet("#btnRow { background:transparent; }")
+            bl = QHBoxLayout(bw); bl.setContentsMargins(8,4,8,4); bl.setSpacing(8)
+
             outline_style = ("color:#3d6fdb; border:1px solid #3d6fdb; background:transparent;"
                              "border-radius:4px; padding:4px; font-size:14px; font-weight:bold;")
             red_style = ("color:#fff; background:#ff4d4f; border:none;"
                          "border-radius:4px; padding:4px; font-size:14px; font-weight:bold;")
-            
-            # If frozen, show frozen status
+
             if is_frozen:
                 frozen_lbl = lbl("已冻结", color="#ccc", bold=True)
-                bl.addWidget(frozen_lbl)
-                bl.addStretch()
-                self.tbl.setCellWidget(i,4,bw)
+                bl.addWidget(frozen_lbl); bl.addStretch()
+                self.tbl.setItemWidget(item, 4, bw)
                 continue
-            
+
             if can_manage:
-                b_sub = self._make_icon_btn(
-                    self._glyph_icon("add"),
-                    "新增子科目", outline_style)
+                b_sub = self._make_icon_btn(self._glyph_icon("add"), "新增子科目", outline_style)
                 b_sub.clicked.connect(lambda _,rr=r: self._add_sub(rr))
-                b_ed = self._make_icon_btn(
-                    self._glyph_icon("edit"),
-                    "编辑科目", outline_style)
+                b_ed = self._make_icon_btn(self._glyph_icon("edit"), "编辑科目", outline_style)
                 b_ed.clicked.connect(lambda _,rr=r: self._edit(rr))
                 bl.addWidget(b_sub); bl.addWidget(b_ed)
 
@@ -287,28 +327,30 @@ class AccountPage(QWidget):
                     b_aux_view.clicked.connect(lambda _,rr=r, dims=bound_dims: self._open_aux_page(rr, dims[0]))
                     bl.addWidget(b_aux_view)
                 elif can_manage:
-                    b_aux = self._make_icon_btn(
-                        self._glyph_icon("aux"),
-                        "辅助核算", outline_style)
+                    b_aux = self._make_icon_btn(self._glyph_icon("aux"), "辅助核算", outline_style)
                     b_aux.clicked.connect(lambda _,rr=r: self._setup_aux(rr))
                     bl.addWidget(b_aux)
 
             if can_manage and level > 1:
                 is_used = r['code'] in used_accounts
                 if is_used:
-                    b_freeze = self._make_icon_btn(
-                        self._glyph_icon("freeze"),
-                        "冻结科目", outline_style)
+                    b_freeze = self._make_icon_btn(self._glyph_icon("freeze"), "冻结科目", outline_style)
                     b_freeze.clicked.connect(lambda _,rid=r["id"]: self._freeze(rid))
                     bl.addWidget(b_freeze)
                 else:
-                    b_del = self._make_icon_btn(
-                        self._glyph_icon("delete", "#ffffff"),
-                        "删除科目", red_style)
+                    b_del = self._make_icon_btn(self._glyph_icon("delete", "#ffffff"), "删除科目", red_style)
                     b_del.clicked.connect(lambda _,rid=r["id"]: self._del(rid))
                     bl.addWidget(b_del)
             bl.addStretch()
-            self.tbl.setCellWidget(i,4,bw)
+            self.tbl.setItemWidget(item, 4, bw)
+
+        # 默认状态：折叠所有节点（只显示一级科目）
+        self.tbl.collapseAll()
+
+        # 更新统计提示
+        total = len(rows)
+        top_level = sum(1 for r in rows if (r['level'] or 1) == 1)
+        self.stats_lbl.setText(f"共 {total} 个科目（一级 {top_level} 个）")
 
     def _add(self):
         dlg = AccountEditDialog(self, self.client_id)
