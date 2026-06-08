@@ -79,8 +79,11 @@ class AccountEditDialog(QDialog):
                 if self.parent_cb.itemData(i) == r["parent_code"]:
                     self.parent_cb.setCurrentIndex(i); break
         # 检查该科目是否已被凭证分录使用，若已使用则禁止修改编码
+        # 注意：voucher_entries 表没有 client_id 字段，必须 JOIN vouchers 过滤
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE client_id=? AND account_code=?",
+        c.execute("""SELECT COUNT(*) FROM voucher_entries ve
+                     JOIN vouchers v ON v.id = ve.voucher_id
+                     WHERE v.client_id=? AND ve.account_code=?""",
                   (self.client_id, r["code"]))
         used = c.fetchone()[0]
         # 查询该科目已绑定的辅助核算维度（回显勾选 + 下拉）

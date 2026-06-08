@@ -508,7 +508,10 @@ class AccountPage(QWidget):
             return
         
         # Check if account has been used (限定当前客户，避免误判其他账套的同编码科目)
-        c.execute("SELECT COUNT(*) FROM voucher_entries WHERE client_id=? AND account_code=?",
+        # 注意：voucher_entries 表没有 client_id 字段，必须 JOIN vouchers 过滤
+        c.execute("""SELECT COUNT(*) FROM voucher_entries ve
+                     JOIN vouchers v ON v.id = ve.voucher_id
+                     WHERE v.client_id=? AND ve.account_code=?""",
                   (self.client_id, acct_code))
         used_count = c.fetchone()[0]
         conn.close()
