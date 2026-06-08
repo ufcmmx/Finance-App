@@ -40,10 +40,26 @@ class AccountEditDialog(QDialog):
         conn.close()
         self.od = NoScrollDoubleSpinBox(); self.od.setRange(0,9999999999); self.od.setDecimals(2); self.od.setPrefix("¥ ")
         self.oc = NoScrollDoubleSpinBox(); self.oc.setRange(0,9999999999); self.oc.setDecimals(2); self.oc.setPrefix("¥ ")
+        # ── 辅助核算配置 ──
+        self.aux_chk = QCheckBox("启用辅助核算")
+        self.aux_dim_cb = QComboBox(); self.aux_dim_cb.setEditable(True)
+        self.aux_dim_cb.lineEdit().setPlaceholderText("选择已有维度或输入新维度名（如：客户、员工、项目）")
+        # 加载该客户已有的维度
+        conn2 = get_db(); c2 = conn2.cursor()
+        c2.execute("SELECT name FROM aux_dimensions WHERE client_id=? ORDER BY sort_order, id",
+                   (self.client_id,))
+        for rr in c2.fetchall():
+            self.aux_dim_cb.addItem(rr["name"])
+        conn2.close()
+        self.aux_dim_cb.setEnabled(False)
+        self.aux_chk.toggled.connect(self.aux_dim_cb.setEnabled)
+
         F.addRow("科目编号 *", self.code); F.addRow("科目名称 *", self.name)
         F.addRow("完整名称", self.full_name); F.addRow("科目类型", self.type_cb)
         F.addRow("余额方向", self.dir_cb); F.addRow("上级科目", self.parent_cb)
         F.addRow("期初借方", self.od); F.addRow("期初贷方", self.oc)
+        F.addRow("辅助核算", self.aux_chk)
+        F.addRow("　└ 维度", self.aux_dim_cb)
         L.addLayout(F)
         row = QHBoxLayout(); row.addStretch()
         bc = QPushButton("取消"); bc.setObjectName("btn_gray")
@@ -66,11 +82,26 @@ class AccountEditDialog(QDialog):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM voucher_entries WHERE client_id=? AND account_code=?",
                   (self.client_id, r["code"]))
-        used = c.fetchone()[0]; conn.close()
+        used = c.fetchone()[0]
+        # 查询该科目已绑定的辅助核算维度（回显勾选 + 下拉）
+        c.execute("""SELECT ad.name FROM account_aux_config ac
+                     JOIN aux_dimensions ad ON ad.id = ac.dimension_id
+                     WHERE ac.client_id=? AND ac.account_code=?
+                     ORDER BY ad.sort_order, ad.id LIMIT 1""",
+                  (self.client_id, r["code"]))
+        bound = c.fetchone()
+        conn.close()
         if used > 0:
             self.code.setReadOnly(True)
             self.code.setToolTip(f"该科目已在 {used} 条凭证分录中使用，编码不可修改。如需调整请联系管理员。")
             self.code.setStyleSheet("background:#f5f5f5;color:#888;border:1px solid #d9d9d9;")
+        if bound:
+            self.aux_chk.setChecked(True)
+            idx_dim = self.aux_dim_cb.findText(bound["name"])
+            if idx_dim >= 0:
+                self.aux_dim_cb.setCurrentIndex(idx_dim)
+            else:
+                self.aux_dim_cb.setEditText(bound["name"])
 
     def _prefill_from_parent(self):
         p = self.parent_acct
@@ -80,6 +111,18 @@ class AccountEditDialog(QDialog):
         for i in range(self.parent_cb.count()):
             if self.parent_cb.itemData(i) == p["code"]:
                 self.parent_cb.setCurrentIndex(i); break
+        # 根据父科目代码推断辅助核算维度（不勾选，用户自行决定）
+        try:
+            from utils import _infer_aux_dim_name
+            recommended = _infer_aux_dim_name(p["code"])
+            if recommended:
+                idx_dim = self.aux_dim_cb.findText(recommended)
+                if idx_dim >= 0:
+                    self.aux_dim_cb.setCurrentIndex(idx_dim)
+                else:
+                    self.aux_dim_cb.setEditText(recommended)
+        except Exception:
+            pass
 
     def _pick_opening_balance_target(self, c, parent_code, parent_name, opening_debit, opening_credit):
         """Ask which leaf child should receive the parent's opening balance."""
@@ -194,6 +237,29 @@ class AccountEditDialog(QDialog):
                                 "未选择余额承接科目，本次新增已取消。")
                             return
                         self._migrate_opening_balance(c, parent, target_code)
+            # ── 辅助核算绑定处理 ──
+            enable_aux = self.aux_chk.isChecked()
+            dim_name = self.aux_dim_cb.currentText().strip() if enable_aux else ""
+            # 先删除该科目原有绑定
+            c.execute("DELETE FROM account_aux_config WHERE client_id=? AND account_code=?",
+                      (self.client_id, code))
+            if enable_aux:
+                if not dim_name:
+                    raise ValueError("启用辅助核算时必须选择或输入维度名")
+                # 查或建维度
+                c.execute("SELECT id FROM aux_dimensions WHERE client_id=? AND name=?",
+                          (self.client_id, dim_name))
+                d_row = c.fetchone()
+                if d_row:
+                    dim_id = d_row["id"]
+                else:
+                    c.execute("INSERT INTO aux_dimensions(client_id, name) VALUES(?, ?)",
+                              (self.client_id, dim_name))
+                    dim_id = c.lastrowid
+                # 绑定
+                c.execute("""INSERT INTO account_aux_config(client_id, account_code, dimension_id)
+                             VALUES(?, ?, ?)""",
+                          (self.client_id, code, dim_id))
             conn.commit(); conn.close(); self.accept()
         except Exception as e:
             conn.rollback(); conn.close(); QMessageBox.warning(self,"错误",f"保存失败：{e}")
