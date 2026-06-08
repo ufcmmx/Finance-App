@@ -97,6 +97,13 @@ class AccountInitDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self._load()
         L.addWidget(self.table)
+        # ── 底部借贷平衡状态栏（实时反馈）──
+        self.balance_lbl = QLabel("借方合计 ¥ 0.00　　贷方合计 ¥ 0.00　　差额 ¥ 0.00　　✓ 借贷平衡")
+        self.balance_lbl.setStyleSheet(
+            "font-size:13px;padding:8px 12px;border-radius:5px;"
+            "background:#f6ffed;color:#1a5028;font-weight:bold;")
+        L.addWidget(self.balance_lbl)
+        self._refresh_parents()   # 初始化时再算一次确保状态栏与表格一致
         row = QHBoxLayout(); row.addStretch()
         bs = QPushButton("保存期初"); bs.setObjectName("btn_primary")
         bc = QPushButton("关闭"); bc.setObjectName("btn_gray")
@@ -226,7 +233,51 @@ class AccountInitDialog(QDialog):
             if dw: dw.blockSignals(True); dw.setValue(d_total); dw.blockSignals(False)
             if cw: cw.blockSignals(True); cw.setValue(cr_total); cw.blockSignals(False)
 
+        # ── 更新底部借贷平衡状态栏 ──
+        if hasattr(self, "balance_lbl"):
+            total_d = sum(d for d, cr in leaf_vals.values())
+            total_c = sum(cr for d, cr in leaf_vals.values())
+            diff = total_d - total_c
+            if abs(diff) < 0.01:
+                self.balance_lbl.setText(
+                    f"借方合计 ¥ {total_d:,.2f}　　贷方合计 ¥ {total_c:,.2f}　　"
+                    f"差额 ¥ 0.00　　✓ 借贷平衡")
+                self.balance_lbl.setStyleSheet(
+                    "font-size:13px;padding:8px 12px;border-radius:5px;"
+                    "background:#f6ffed;color:#1a5028;font-weight:bold;")
+            else:
+                self.balance_lbl.setText(
+                    f"借方合计 ¥ {total_d:,.2f}　　贷方合计 ¥ {total_c:,.2f}　　"
+                    f"差额 ¥ {abs(diff):,.2f}　　✗ 借贷不平")
+                self.balance_lbl.setStyleSheet(
+                    "font-size:13px;padding:8px 12px;border-radius:5px;"
+                    "background:#fff1f0;color:#b03020;font-weight:bold;")
+
     def _save(self):
+        # ── 保存前借贷平衡校验（仅末级科目参与合计）──
+        total_d = 0.0
+        total_c = 0.0
+        for i, is_leaf in enumerate(self._leaf_flags):
+            if not is_leaf:
+                continue
+            dw = self.table.cellWidget(i, 2)
+            cw = self.table.cellWidget(i, 3)
+            if dw: total_d += dw.value()
+            if cw: total_c += cw.value()
+        diff = abs(total_d - total_c)
+        if diff >= 0.01:
+            reply = QMessageBox.warning(
+                self, "借贷不平衡",
+                f"借方合计 ¥ {total_d:,.2f}\n"
+                f"贷方合计 ¥ {total_c:,.2f}\n"
+                f"差额 ¥ {diff:,.2f}\n\n"
+                "期初余额借贷不平衡可能导致账套数据从一开始就有错。\n"
+                "是否仍要保存？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
         conn = get_db(); c = conn.cursor()
         # Save all rows (both leaf and parent — parents have already been rolled up in UI)
         for i, aid in enumerate(self._ids):

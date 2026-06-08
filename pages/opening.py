@@ -85,6 +85,13 @@ class OpeningBalancePage(QWidget):
         vl.addWidget(self.tbl)
         L.addWidget(f, 1)
 
+        # ── 底部借贷平衡状态栏 ──
+        self.balance_lbl = QLabel("借方合计 ¥ 0.00　　贷方合计 ¥ 0.00　　差额 ¥ 0.00　　— 暂无数据")
+        self.balance_lbl.setStyleSheet(
+            "font-size:13px;padding:8px 14px;border-radius:5px;"
+            "background:#f5f5f5;color:#888;font-weight:bold;")
+        L.addWidget(self.balance_lbl)
+
         self._set_ui_enabled(False)
 
     def set_client(self, client_id, client_name, period):
@@ -199,6 +206,32 @@ class OpeningBalancePage(QWidget):
 
         self._preview_display = list(display)
         self._render_preview_table()
+
+        # ── 更新底部借贷平衡状态栏 ──
+        if hasattr(self, "balance_lbl"):
+            total_d = sum((r['opening_debit'] or 0) for r in display)
+            total_c = sum((r['opening_credit'] or 0) for r in display)
+            diff = total_d - total_c
+            if not display:
+                self.balance_lbl.setText(
+                    "借方合计 ¥ 0.00　　贷方合计 ¥ 0.00　　差额 ¥ 0.00　　— 暂无数据")
+                self.balance_lbl.setStyleSheet(
+                    "font-size:13px;padding:8px 14px;border-radius:5px;"
+                    "background:#f5f5f5;color:#888;font-weight:bold;")
+            elif abs(diff) < 0.01:
+                self.balance_lbl.setText(
+                    f"借方合计 ¥ {total_d:,.2f}　　贷方合计 ¥ {total_c:,.2f}　　"
+                    f"差额 ¥ 0.00　　✓ 借贷平衡")
+                self.balance_lbl.setStyleSheet(
+                    "font-size:13px;padding:8px 14px;border-radius:5px;"
+                    "background:#f6ffed;color:#1a5028;font-weight:bold;")
+            else:
+                self.balance_lbl.setText(
+                    f"借方合计 ¥ {total_d:,.2f}　　贷方合计 ¥ {total_c:,.2f}　　"
+                    f"差额 ¥ {abs(diff):,.2f}　　✗ 借贷不平")
+                self.balance_lbl.setStyleSheet(
+                    "font-size:13px;padding:8px 14px;border-radius:5px;"
+                    "background:#fff1f0;color:#b03020;font-weight:bold;")
 
     def _render_preview_table(self):
         display = list(getattr(self, "_preview_display", []))
