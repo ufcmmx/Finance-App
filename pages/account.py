@@ -360,9 +360,29 @@ class AccountPage(QWidget):
         top_level = sum(1 for r in rows if (r['level'] or 1) == 1)
         self.stats_lbl.setText(f"共 {total} 个科目（一级 {top_level} 个）")
 
+        # 保存 code → item 映射，供 _select_code() 使用
+        self._code_to_item = code_to_item
+
+    def _select_code(self, code):
+        """选中并滚动到指定 code 的树节点，自动展开父节点链。"""
+        if not code:
+            return
+        item = getattr(self, "_code_to_item", {}).get(code)
+        if item is None:
+            return
+        # 展开所有祖先节点
+        parent = item.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self.tbl.setCurrentItem(item)
+        self.tbl.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+
     def _add(self):
         dlg = AccountEditDialog(self, self.client_id)
-        if dlg.exec(): self.load()
+        if dlg.exec():
+            self.load()
+            self._select_code(dlg.code.text().strip())
 
     def _add_sub(self, parent_acct):
         # Check if parent account has been used (has voucher entries)
@@ -372,16 +392,20 @@ class AccountPage(QWidget):
         conn.close()
 
         if used_count > 0:
-            QMessageBox.warning(self, "无法添加下级科目", 
+            QMessageBox.warning(self, "无法添加下级科目",
                 f"上级科目 【{parent_acct['code']} {parent_acct['name']}】 已有凭证使用，不允许添加下级科目。")
             return
-        
+
         dlg = AccountEditDialog(self, self.client_id, parent_acct=parent_acct)
-        if dlg.exec(): self.load()
+        if dlg.exec():
+            self.load()
+            self._select_code(dlg.code.text().strip())
 
     def _edit(self, r):
         dlg = AccountEditDialog(self, self.client_id, account=r)
-        if dlg.exec(): self.load()
+        if dlg.exec():
+            self.load()
+            self._select_code(dlg.code.text().strip())
 
     def _setup_aux(self, acct):
         if not self.client_id:

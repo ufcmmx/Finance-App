@@ -108,7 +108,24 @@ class AccountEditDialog(QDialog):
 
     def _prefill_from_parent(self):
         p = self.parent_acct
-        self.code.setText(p["code"] + ".01")
+        # 查父科目下已有的直接子科目，取已用最大编号 + 1（首次新增为 001）
+        conn0 = get_db(); c0 = conn0.cursor()
+        c0.execute("SELECT code FROM accounts WHERE client_id=? AND parent_code=?",
+                   (self.client_id, p["code"]))
+        max_num = 0
+        for ch in c0.fetchall():
+            suffix = ch["code"][len(p["code"]) + 1:]   # 去掉 "父代码."
+            # 跳过孙级（含 .）和辅助核算条目（含 _），只看纯数字后缀
+            if "." in suffix or "_" in suffix:
+                continue
+            try:
+                n = int(suffix)
+                if n > max_num:
+                    max_num = n
+            except ValueError:
+                continue
+        conn0.close()
+        self.code.setText(f"{p['code']}.{max_num + 1:03d}")
         idx = self.type_cb.findText(p["type"] or ""); self.type_cb.setCurrentIndex(max(0,idx))
         idx2 = self.dir_cb.findText(p["direction"] or "借"); self.dir_cb.setCurrentIndex(max(0,idx2))
         for i in range(self.parent_cb.count()):
