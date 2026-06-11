@@ -228,7 +228,9 @@ class ReportPage(QWidget):
 
         # ── 第二行：期间选择 + 刷新 + 下载 ──
         tb2 = QWidget()
-        tb2.setStyleSheet("background:#f8f9fc;border-bottom:1px solid #e8ecf2;")
+        tb2.setObjectName("repToolbar")
+        # 必须带 #repToolbar 选择器，否则规则会污染所有子控件（按钮背景/边框被覆盖）
+        tb2.setStyleSheet("#repToolbar { background:#f8f9fc; border-bottom:1px solid #e8ecf2; }")
         tl2 = QHBoxLayout(tb2); tl2.setContentsMargins(16,6,16,6); tl2.setSpacing(10)
         self.period_lbl = lbl("", color="#3d6fdb", bold=True); tl2.addWidget(self.period_lbl)
         tl2.addSpacing(16)
@@ -241,7 +243,6 @@ class ReportPage(QWidget):
         tl2.addWidget(lbl("至", color="#666"))
         tl2.addWidget(self.rep_end_period)
         b_refresh = QPushButton("刷新"); b_refresh.setObjectName("btn_primary")
-        b_refresh.setStyleSheet("QPushButton{background:#3d6fdb;color:#fff;border:none;border-radius:6px;padding:7px 18px;font-weight:bold;}QPushButton:hover{background:#2d5dc8;}")
         b_refresh.clicked.connect(self._refresh_reports)
         tl2.addWidget(b_refresh)
         tl2.addStretch()
@@ -249,8 +250,10 @@ class ReportPage(QWidget):
             ("Excel (.xlsx)", self._export),
             ("PDF",           self._export_pdf),
         ], label="⬇ 下载")
+        b_dl.setFixedHeight(30)
         tl2.addWidget(b_dl)
         b_print = QPushButton("🖨 打印"); b_print.setObjectName("btn_outline")
+        b_print.setFixedHeight(30)
         b_print.clicked.connect(self._print_report)
         tl2.addWidget(b_print)
         L.addWidget(tb2)
@@ -1159,9 +1162,7 @@ class ReportPage(QWidget):
         w = QWidget(); L = QVBoxLayout(w); L.setContentsMargins(20,14,20,14); L.setSpacing(8)
         hdr = QHBoxLayout()
         hdr.addWidget(lbl("现金流量表", bold=True, size=15)); hdr.addStretch()
-        b_dl = QPushButton("导出Excel"); b_dl.setObjectName("btn_outline")
-        b_dl.clicked.connect(self._export_cf_stmt)
-        hdr.addWidget(b_dl); L.addLayout(hdr)
+        L.addLayout(hdr)
         L.addWidget(lbl("（采用直接法，现金及现金等价物 = 库存现金+银行存款+其他货币资金）",
                          color="#888", size=12))
         self.cf_stmt_tbl = self._make_report_table(

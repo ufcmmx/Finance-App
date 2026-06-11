@@ -10,6 +10,35 @@ from dialogs import ClientDialog, ImportAccountSetDialog
 from session import AppSession
 # openpyxl imported lazily inside each export function
 
+# 客户类型 → (胶囊底色, 胶囊文字色)
+_TYPE_COLORS = {
+    "小规模纳税人": ("#e8f1fd", "#1e6fb8"),  # 浅蓝
+    "一般纳税人":   ("#e8f7ee", "#1e7a3c"),  # 浅绿
+    "其他":         ("#f0f2f5", "#6b7280"),  # 浅灰
+}
+_TYPE_DEFAULT = ("#f0f2f5", "#9ca3af")
+
+
+def _type_pill(text: str) -> QWidget:
+    """生成居中的彩色胶囊标签。"""
+    wrap = QWidget()
+    lay = QHBoxLayout(wrap); lay.setContentsMargins(6, 0, 6, 0)
+    if text:
+        bg, fg = _TYPE_COLORS.get(text, _TYPE_DEFAULT)
+        pill = QLabel(text)
+        pill.setStyleSheet(
+            f"background:{bg}; color:{fg}; border-radius:10px;"
+            f"padding:2px 10px; font-size:12px; font-weight:600;"
+        )
+        pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(pill, alignment=Qt.AlignmentFlag.AlignCenter)
+    else:
+        dash = QLabel("—"); dash.setStyleSheet("color:#cbd0d9;")
+        dash.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(dash, alignment=Qt.AlignmentFlag.AlignCenter)
+    return wrap
+
+
 class ClientPage(QWidget):
     client_opened = Signal(int, str, str)
 
@@ -36,11 +65,12 @@ class ClientPage(QWidget):
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)   # 全部列均可拖拽调整宽度
         hh.setMinimumSectionSize(40)
-        hh.setStretchLastSection(False)
-        self.tbl.setColumnWidth(0, 52); self.tbl.setColumnWidth(1, 220)
-        self.tbl.setColumnWidth(2, 80); self.tbl.setColumnWidth(3, 110)
+        hh.setStretchLastSection(True)   # 操作列吸收剩余宽度，避免按钮被截断
+        hh.setFixedHeight(44)
+        self.tbl.setColumnWidth(0, 52); self.tbl.setColumnWidth(1, 200)
+        self.tbl.setColumnWidth(2, 80); self.tbl.setColumnWidth(3, 135)
         self.tbl.setColumnWidth(4, 140); self.tbl.setColumnWidth(5, 90)
-        self.tbl.setColumnWidth(6, 300)
+        # 第 6 列（操作）由 stretchLastSection 自动占满剩余
         self.tbl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         vl.addWidget(self.tbl); L.addWidget(f)
 
@@ -80,27 +110,33 @@ class ClientPage(QWidget):
         rows = c.fetchall(); conn.close()
         self.tbl.setRowCount(len(rows))
         for i,r in enumerate(rows):
-            self.tbl.setRowHeight(i,50)
-            # Index badge
+            self.tbl.setRowHeight(i,56)
+            # Index badge — 恢复原色（类型已通过 col 3 的彩色胶囊展示）
             badge = QLabel(f"  {r['id']:02d}  ")
             badge.setStyleSheet("background:#f0f4ff;color:#3d6fdb;border-radius:4px;font-size:11px;")
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tbl.setCellWidget(i,0,badge)
-            for j,v in enumerate([r['name'],r['short_code'] or '',r['client_type'] or '',
-                                   r['tax_id'] or '',r['contact'] or ''],1):
+            # 客户名称 / 助记码
+            for j,v in enumerate([r['name'],r['short_code'] or ''],1):
                 it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 it.setData(Qt.ItemDataRole.UserRole, r['id']); self.tbl.setItem(i,j,it)
-            # Buttons
+            # 客户类型 — 彩色胶囊
+            self.tbl.setCellWidget(i, 3, _type_pill(r['client_type'] or ''))
+            # 税号 / 联系人
+            for j,v in enumerate([r['tax_id'] or '', r['contact'] or ''], 4):
+                it = QTableWidgetItem(v); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                it.setData(Qt.ItemDataRole.UserRole, r['id']); self.tbl.setItem(i,j,it)
+            # Buttons — 三个按钮统一尺寸；走全局 padding（已收紧到 6px 12px）
             bw = QWidget()
             bw.setObjectName("btnRow"); bw.setStyleSheet("#btnRow { background:#ffffff; }")
             bl = QHBoxLayout(bw); bl.setContentsMargins(8,4,8,4); bl.setSpacing(8)
             b1 = QPushButton("进账簿"); b1.setObjectName("btn_primary")
-            b1.setFixedSize(94, 30)
+            b1.setFixedSize(76, 30)
             b2 = QPushButton("编辑"); b2.setObjectName("btn_outline")
-            b2.setFixedSize(68, 30)
+            b2.setFixedSize(60, 30)
             b2.setVisible(can_manage)
             b3 = QPushButton("删除"); b3.setObjectName("btn_red")
-            b3.setFixedSize(68, 30)
+            b3.setFixedSize(60, 30)
             b3.setVisible(can_manage)
             b1.clicked.connect(lambda _,rr=r: self.client_opened.emit(rr['id'],rr['name'],rr['short_code'] or ''))
             b2.clicked.connect(lambda _,rr=r: self._edit(rr))

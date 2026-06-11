@@ -20,20 +20,21 @@ QLabel#subt { color:#4a5578; font-size:11px; padding:0 20px 14px 20px; }
 /* Cards */
 QFrame#card { background:#fff; border-radius:10px; border:1px solid #e4e8f0; }
 QWidget#import_foot { background:#fff; border-top:1px solid #e4e8f0; }
-/* Buttons */
-QPushButton#btn_primary { background:#3d6fdb; color:#fff; border:none;
-    border-radius:6px; padding:7px 18px; font-weight:bold; }
-QPushButton#btn_primary:hover { background:#2d5dc8; }
-QPushButton#btn_red { background:#ff4d4f; color:#fff; border:none;
-    border-radius:6px; padding:7px 14px; }
-QPushButton#btn_red:hover { background:#e63b3d; }
-QPushButton#btn_green { background:#52c41a; color:#fff; border:none;
-    border-radius:6px; padding:7px 14px; }
+/* Buttons — 所有类都有 1px border 占位（实心按钮用同色边框，视觉无差但占空间），
+   保证 setFixedHeight 不设时各类按钮自然高度一致 ≈ 30px */
+QPushButton#btn_primary { background:#3d6fdb; color:#fff;
+    border:1px solid #3d6fdb; border-radius:6px; padding:6px 12px; font-weight:bold; }
+QPushButton#btn_primary:hover { background:#2d5dc8; border:1px solid #2d5dc8; }
+QPushButton#btn_red { background:#ff4d4f; color:#fff;
+    border:1px solid #ff4d4f; border-radius:6px; padding:6px 12px; }
+QPushButton#btn_red:hover { background:#e63b3d; border:1px solid #e63b3d; }
+QPushButton#btn_green { background:#52c41a; color:#fff;
+    border:1px solid #52c41a; border-radius:6px; padding:6px 12px; }
 QPushButton#btn_outline { background:transparent; color:#3d6fdb;
-    border:1px solid #3d6fdb; border-radius:6px; padding:7px 14px; }
+    border:1px solid #3d6fdb; border-radius:6px; padding:6px 12px; }
 QPushButton#btn_outline:hover { background:#eef3ff; }
 QPushButton#btn_gray { background:#f5f5f5; color:#666; border:1px solid #d9d9d9;
-    border-radius:6px; padding:7px 14px; }
+    border-radius:6px; padding:6px 12px; }
 QPushButton#btn_gray:hover { background:#e8e8e8; }
 /* Inputs */
 QLineEdit,QDateEdit,QComboBox,QDoubleSpinBox,QSpinBox,QTextEdit {
@@ -92,7 +93,8 @@ def lbl(text, bold=False, color=None, size=None):
     if st: w.setStyleSheet(st)
     return w
 
-def make_export_button(actions: list[tuple[str, callable]], label: str = "⬇ 导出") -> QPushButton:
+def make_export_button(actions: list[tuple[str, callable]], label: str = "⬇ 导出",
+                       fixed_height: int = 30) -> QPushButton:
     """创建一个带下拉菜单的导出按钮。
 
     用法：
@@ -105,9 +107,13 @@ def make_export_button(actions: list[tuple[str, callable]], label: str = "⬇ �
     参数：
         actions: [(菜单项文字, 回调函数), ...]
         label:   按钮文字，默认"⬇ 导出"
+        fixed_height: 锁定按钮高度，默认 30px（与其他类按钮自然高度对齐）。
+                      传 0 表示不锁。
     """
     btn = QPushButton(label)
     btn.setObjectName("btn_outline")
+    if fixed_height > 0:
+        btn.setFixedHeight(fixed_height)
 
     def _show_menu():
         menu = QMenu()

@@ -445,7 +445,7 @@ class SystemPage(QWidget):
         cur_uid = _cur_sess["id"] if _cur_sess else -1
 
         for i, u in enumerate(users):
-            self.user_tbl.setRowHeight(i, 46)
+            self.user_tbl.setRowHeight(i, 52)
             role_label = ROLE_LABELS.get(u["role"], u["role"])
             role_color = {"superadmin": "#3d6fdb", "admin": "#52c41a",
                           "accountant": "#fa8c16", "readonly": "#888"}.get(u["role"], "#555")
@@ -474,17 +474,17 @@ class SystemPage(QWidget):
             bl.setContentsMargins(6, 3, 6, 3); bl.setSpacing(6)
 
             b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline")
-            b_edit.setFixedSize(60, 28)
+            b_edit.setFixedSize(60, 30)
             b_edit.clicked.connect(lambda _, ud=dict(u): self._edit_user(ud))
 
             b_auth = QPushButton("客户授权"); b_auth.setObjectName("btn_outline")
-            b_auth.setFixedSize(76, 28)
+            b_auth.setFixedSize(88, 30)
             # superadmin/admin 不需要客户授权
             b_auth.setEnabled(u["role"] in ("accountant", "readonly"))
             b_auth.clicked.connect(lambda _, ud=dict(u): self._edit_access(ud))
 
             b_del = QPushButton("删除"); b_del.setObjectName("btn_red")
-            b_del.setFixedSize(56, 28)
+            b_del.setFixedSize(60, 30)
             # 不能删除自己
             b_del.setEnabled(u["id"] != cur_uid)
             b_del.clicked.connect(lambda _, uid=u["id"], uname=u["username"]:
@@ -670,7 +670,7 @@ class SystemPage(QWidget):
             "padding:4px 8px;font-size:12px;background:#fff;color:#333;")
         dir_row.addWidget(self.edit_auto_path)
         b_browse = QPushButton("浏览…")
-        b_browse.setFixedWidth(60)
+        b_browse.setFixedWidth(78)
         b_browse.setStyleSheet(
             "QPushButton{background:#fff;color:#3d6fdb;border:1px solid #3d6fdb;"
             "border-radius:4px;padding:4px 8px;font-size:12px;}"

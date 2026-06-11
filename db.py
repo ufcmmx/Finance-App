@@ -53,7 +53,7 @@ def init_db():
         period TEXT NOT NULL,
         voucher_no TEXT NOT NULL,
         date TEXT NOT NULL,
-        preparer TEXT DEFAULT '未来',
+        preparer TEXT DEFAULT '',
         attachment_count INTEGER DEFAULT 0,
         status TEXT DEFAULT '待审核',
         note TEXT,
@@ -83,7 +83,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER,
-        operator TEXT DEFAULT '未来',
+        operator TEXT DEFAULT '',
         action TEXT NOT NULL,
         target_type TEXT,
         target_id TEXT,

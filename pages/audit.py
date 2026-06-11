@@ -56,8 +56,9 @@ class AuditPage(QWidget):
         self.tbl.setHorizontalHeaderLabels(["时间","操作人","操作类型","对象类型","对象ID","详情"])
         hh = self.tbl.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setSectionResizeMode(0, QHeaderView.Fixed)   # 时间列宽度锁死
         hh.setSectionResizeMode(5, QHeaderView.Stretch)
-        self.tbl.setColumnWidth(0,155); self.tbl.setColumnWidth(1,80)
+        self.tbl.setColumnWidth(0,170); self.tbl.setColumnWidth(1,80)
         self.tbl.setColumnWidth(2,130); self.tbl.setColumnWidth(3,80); self.tbl.setColumnWidth(4,80)
         vl.addWidget(self.tbl)
 
@@ -126,7 +127,7 @@ class AuditPage(QWidget):
             action = r[2]
             color  = action_colors.get(action, "#555")
             for j, (val, align) in enumerate([
-                (r[0][:19],       Qt.AlignmentFlag.AlignCenter),
+                (r[0][:19],       Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter),
                 (r[1] or "",      Qt.AlignmentFlag.AlignCenter),
                 (action,          Qt.AlignmentFlag.AlignCenter),
                 (r[3] or "",      Qt.AlignmentFlag.AlignCenter),

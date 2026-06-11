@@ -22,7 +22,7 @@ class VoucherPage(QWidget):
         self.toolbar.setStyleSheet("background:#fff; border-bottom:1px solid #e8ecf2;")
         tl = QHBoxLayout(self.toolbar); tl.setContentsMargins(16,0,16,0); tl.setSpacing(0)
         self._tabs = []
-        for name in ["新增凭证","查凭证","科目余额表","明细账","辅助核算"]:
+        for name in ["查凭证","科目余额表","明细账","辅助核算"]:
             b = QPushButton(name); b.setObjectName("nav_tab")
             b.setStyleSheet("""QPushButton{background:transparent;color:#888;border:none;
                 padding:12px 16px;border-bottom:2px solid transparent;}
@@ -45,13 +45,12 @@ class VoucherPage(QWidget):
         self._switch_tab("查凭证")
 
     def _switch_tab(self, name):
-        mapping = {"新增凭证":None,"查凭证":0,"科目余额表":1,"明细账":2,
+        mapping = {"查凭证":0,"科目余额表":1,"明细账":2,
                    "辅助核算":3}
         for b in self._tabs:
             b.setProperty("active","true" if b.text()==name else "false")
             b.style().unpolish(b); b.style().polish(b)
-        if name == "新增凭证": self._new_voucher()
-        elif name == "辅助核算":
+        if name == "辅助核算":
             self.stack.setCurrentIndex(3)
             if self.client_id: self._aux_page.set_client(self.client_id, self.period)
         elif mapping.get(name) is not None:
@@ -69,11 +68,13 @@ class VoucherPage(QWidget):
         hdr.addSpacing(12); hdr.addWidget(self.lock_lbl)
         hdr.addStretch()
         self._btn_new = QPushButton("＋ 新增凭证"); self._btn_new.setObjectName("btn_primary")
+        self._btn_new.setFixedHeight(30)
         self._btn_new.clicked.connect(self._new_voucher)
         self._btn_exp = make_export_button([
             ("Excel (.xlsx)",  self._export_vouchers),
             ("记账凭证 PDF",    self._export_voucher_pdf),
         ])
+        self._btn_exp.setFixedHeight(30)
         hdr.addWidget(self._btn_exp); hdr.addWidget(self._btn_new)
         L.addLayout(hdr)
         self.refresh_after_login()  # 初始化时按当前权限设置可见性
@@ -124,7 +125,7 @@ class VoucherPage(QWidget):
                 self.lock_lbl.setStyleSheet("")
         self.v_tbl.setRowCount(len(rows))
         for i,r in enumerate(rows):
-            self.v_tbl.setRowHeight(i,46)
+            self.v_tbl.setRowHeight(i,52)
             status = r['status']
             status_color = {"待审核":"#fa8c16","已审核":"#52c41a","已拒绝":"#ff4d4f"}.get(status,'#888')
             no_w = QLabel(f"  {r['voucher_no']}  ")
@@ -148,25 +149,25 @@ class VoucherPage(QWidget):
             can_edit    = AppSession.has_perm("voucher.edit")
             can_delete  = AppSession.has_perm("voucher.delete")
             if status == "待审核" and can_approve:
-                b_ok = QPushButton("✓ 审核通过"); b_ok.setObjectName("btn_green"); b_ok.setFixedSize(88,28)
+                b_ok = QPushButton("✓ 审核通过"); b_ok.setObjectName("btn_green"); b_ok.setFixedSize(111,30)
                 b_ok.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已审核"))
-                b_no = QPushButton("✗ 拒绝"); b_no.setObjectName("btn_red"); b_no.setFixedSize(60,28)
+                b_no = QPushButton("✗ 拒绝"); b_no.setObjectName("btn_red"); b_no.setFixedSize(73,30)
                 b_no.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已拒绝"))
                 bl.addWidget(b_ok); bl.addWidget(b_no)
             elif status == "已拒绝" and can_edit:
-                b_re = QPushButton("↩ 重新提交"); b_re.setObjectName("btn_outline"); b_re.setFixedSize(88,28)
+                b_re = QPushButton("↩ 重新提交"); b_re.setObjectName("btn_outline"); b_re.setFixedSize(111,30)
                 b_re.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_re)
             elif status == "已审核" and can_approve:
-                b_un = QPushButton("↩ 撤销审核"); b_un.setObjectName("btn_gray"); b_un.setFixedSize(88,28)
+                b_un = QPushButton("↩ 撤销审核"); b_un.setObjectName("btn_gray"); b_un.setFixedSize(111,30)
                 b_un.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_un)
             if can_edit:
-                b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,28)
+                b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,30)
                 b_edit.clicked.connect(lambda _,rid=r['id']:self._edit_voucher(rid))
                 bl.addWidget(b_edit)
             if can_delete:
-                b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,28)
+                b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,30)
                 b_del.clicked.connect(lambda _,rid=r['id']:self._del_voucher(rid))
                 bl.addWidget(b_del)
             bl.addStretch()

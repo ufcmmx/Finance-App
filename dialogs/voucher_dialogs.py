@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, QDate, QTimer, QSize, QPoint
 from PySide6.QtGui import QColor, QFont, QPalette, QIcon, QPixmap, QPainter, QPen, QCursor
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES
+from session import AppSession
 from utils import (lbl, sep, card, fmt_amt, cn_amount,
                    NoScrollSpinBox, NoScrollDoubleSpinBox,
                    infer_account_type_direction)
@@ -140,7 +141,8 @@ class VoucherDialog(QDialog):
                 self.date_edit.setDate(min_date)  # 默认设置为月初
             except ValueError:
                 pass  # 如果期间格式错误，忽略限制
-        self.preparer_lbl = lbl("未来", color="#888")
+        # 新建时显示当前登录用户；编辑时由 _load_voucher 读取原制表人覆盖
+        self.preparer_lbl = lbl(AppSession.display_name() or "未登录", color="#888")
         self.attach_spin = NoScrollSpinBox(); self.attach_spin.setRange(0,999)
         self.attach_spin.setSuffix(" 张"); self.attach_spin.setFixedWidth(70)
         hdr.addWidget(self.lbl_no); hdr.addSpacing(16)
@@ -479,6 +481,8 @@ class VoucherDialog(QDialog):
         self.lbl_no.setText(v["voucher_no"])
         self.date_edit.setDate(QDate.fromString(v["date"],"yyyy-MM-dd"))
         self.attach_spin.setValue(v["attachment_count"] or 0)
+        # 编辑已有凭证：显示数据库里保存的制表人（保留原始创建人）
+        self.preparer_lbl.setText(v["preparer"] or "")
         c.execute("SELECT * FROM voucher_entries WHERE voucher_id=? ORDER BY line_no", (self.voucher_id,))
         entries = c.fetchall()
         # Load aux data per entry
@@ -593,8 +597,9 @@ class VoucherDialog(QDialog):
                       (self.client_id, self.period))
             n = c.fetchone()[0] + 1
             vno = f"记-{n:03d}"
-            c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,attachment_count) VALUES(?,?,?,?,?)",
-                      (self.client_id, self.period, vno, dt, self.attach_spin.value()))
+            preparer = AppSession.display_name() or ""
+            c.execute("INSERT INTO vouchers(client_id,period,voucher_no,date,attachment_count,preparer) VALUES(?,?,?,?,?,?)",
+                      (self.client_id, self.period, vno, dt, self.attach_spin.value(), preparer))
             vid = c.lastrowid
 
         for ln, summary, code, aname, d, cr, aux_sel in entries:
