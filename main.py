@@ -283,6 +283,19 @@ def main():
         _wlog("step 3: init_db")
         init_db()
 
+        # ── 激活授权检查（在主窗口之前）──
+        _wlog("step 3.5: license check")
+        import license as _lic
+        _activated, _lic_msg = _lic.is_activated()
+        _wlog(f"license status: {_lic_msg}")
+        if not _activated:
+            splash.close()   # 关掉启动画面再弹激活窗
+            from license_dialog import LicenseDialog
+            lic_dlg = LicenseDialog()
+            if lic_dlg.exec() != QDialog.Accepted:
+                _wlog("用户取消激活，退出")
+                sys.exit(0)
+
         # ── 关键启动顺序：先建主窗口并 show()，Windows 一次性注册所有 HWND ──
         _wlog("step 4: MainWindow()")
         w = MainWindow()
@@ -290,7 +303,8 @@ def main():
         _wlog("step 5: w.show()")
         w.show()
         app.processEvents()   # 确保所有 HWND 注册完毕
-        splash.finish(w)      # 主窗口就绪后关闭启动画面
+        if _activated:
+            splash.finish(w)  # 主窗口就绪后关闭启动画面（未激活时已关）
 
         # ── 再弹登录框（此时主窗口已稳定）──
         _wlog("step 6: LoginDialog")

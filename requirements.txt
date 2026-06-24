@@ -1,0 +1,7 @@
+# WiseLedger 运行时依赖
+PySide6>=6.5
+argon2-cffi>=23.1     # 密码哈希（pw_utils）
+cryptography>=41.0    # 备份加密（backup_utils）+ 激活验签（license.py）
+openpyxl>=3.1         # Excel 导入导出
+reportlab>=4.0        # PDF 生成
+keyring>=24.0         # 系统凭据管理（Windows Credential Manager / macOS Keychain）
