@@ -251,33 +251,69 @@ def main():
         # ── 启动画面：先让用户看到界面，再执行耗时初始化 ──
         _wlog("step 2: splash")
         from PySide6.QtWidgets import QSplashScreen
-        _splash_pm = QPixmap(420, 220)
+        from PySide6.QtGui import QImageReader, QFontMetrics, QGuiApplication
+        from PySide6.QtCore import QSize
+        SPLASH_W, SPLASH_H = 420, 220
+        # 获取设备像素比：Retina = 2.0，普通屏 = 1.0
+        _screen = QGuiApplication.primaryScreen()
+        _dpr = _screen.devicePixelRatio() if _screen else 1.0
+        # 创建 HiDPI 容器：物理像素 = 逻辑像素 × DPR
+        _splash_pm = QPixmap(int(SPLASH_W * _dpr), int(SPLASH_H * _dpr))
+        _splash_pm.setDevicePixelRatio(_dpr)
         _splash_pm.fill(QColor("#1c2340"))
         _sp = QPainter(_splash_pm)
-        # 图标
-        if os.path.exists(_ico):
-            _icon_pm = QPixmap(_ico).scaled(
-                72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            _sp.drawPixmap(28, 74, _icon_pm)
-        # 中文名
+        _sp.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        _sp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        # 字体先定义好，便于算文字块的视觉边界 → 给图标做垂直居中
         _f1 = QF("Microsoft YaHei", 20, QF.Bold)
-        _sp.setFont(_f1); _sp.setPen(QColor("#ffffff"))
-        _sp.drawText(116, 100, "智一盈小账")
-        # 英文名
         _f2 = QF("Arial", 13, QF.Bold)
+        _fm1, _fm2 = QFontMetrics(_f1), QFontMetrics(_f2)
+        _title_baseline_y = 100
+        _sub_baseline_y   = 124
+        _text_top    = _title_baseline_y - _fm1.ascent()    # 标题视觉顶部
+        _text_bottom = _sub_baseline_y + _fm2.descent()     # 副标题视觉底部
+        _text_center_y = (_text_top + _text_bottom) // 2    # 文字块视觉中心
+        # 图标 — 用 QIcon 加载多分辨率 ICO；垂直居中于文字块
+        if os.path.exists(_ico):
+            _icon_phys = int(72 * _dpr)
+            _qicon = QIcon(_ico)
+            _icon_pm = _qicon.pixmap(QSize(_icon_phys, _icon_phys))
+            _icon_pm.setDevicePixelRatio(_dpr)
+            # 图标几何中心比视觉重心略低，光学补偿向上 12px
+            _icon_y = _text_center_y - 36 - 12
+            _sp.drawPixmap(28, _icon_y, _icon_pm)
+        # 中文名 — 水平居中
+        _sp.setFont(_f1); _sp.setPen(QColor("#ffffff"))
+        _title = "智一盈小账"
+        _title_w = _fm1.horizontalAdvance(_title)
+        _title_x = (SPLASH_W - _title_w) // 2
+        _sp.drawText(_title_x, _title_baseline_y, _title)
+        # 英文副标题 — 左对齐到中文名的 x 起点
         _sp.setFont(_f2); _sp.setPen(QColor("#ff8c00"))
-        _sp.drawText(116, 124, "WiseLedger")
-        # 加载提示
+        _sp.drawText(_title_x, _sub_baseline_y, "WiseLedger")
+        # 加载提示 — 水平居中
         _f3 = QF("Microsoft YaHei", 10)
-        _sp.setFont(_f3); _sp.setPen(QColor("#4a5578"))
-        _sp.drawText(28, 192, "正在初始化，请稍候…")
+        _sp.setFont(_f3); _sp.setPen(QColor("#8b93ae"))
+        _hint = "正在初始化，请稍候…"
+        _hint_w = QFontMetrics(_f3).horizontalAdvance(_hint)
+        _sp.drawText((SPLASH_W - _hint_w) // 2, 192, _hint)
         # 底部装饰线
-        _sp.fillRect(0, 210, 420, 10, QColor("#3d6fdb"))
+        _sp.fillRect(0, 210, SPLASH_W, 10, QColor("#3d6fdb"))
         _sp.end()
         splash = QSplashScreen(_splash_pm)
         splash.setWindowFlags(Qt.SplashScreen | Qt.WindowStaysOnTopHint)
         splash.show()
+        splash.raise_()         # 确保 splash 在最前
+        splash.repaint()        # 强制立刻绘制到屏幕
         app.processEvents()
+
+        # 调试钩子：设 WL_SPLASH_DELAY=N 让 splash 真正多停 N 秒，便于截图/审视布局
+        _splash_delay = float(os.environ.get("WL_SPLASH_DELAY", "0") or "0")
+        if _splash_delay > 0:
+            from PySide6.QtCore import QEventLoop, QTimer
+            _loop = QEventLoop()
+            QTimer.singleShot(int(_splash_delay * 1000), _loop.quit)
+            _loop.exec()        # 用 Qt 自己的事件循环处理延迟，splash 全程可见
 
         # ── 耗时初始化（此时用户已看到启动画面）──
         _wlog("step 3: init_db")
