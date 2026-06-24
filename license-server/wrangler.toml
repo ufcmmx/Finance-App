@@ -1,0 +1,11 @@
+name = "wiseledger-license"
+main = "src/index.js"
+compatibility_date = "2026-06-22"
+
+# KV 命名空间 — id 在 `wrangler kv namespace create LICENSES` 之后填进来
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "8e0c713f670643a4b9db5b30edec52b1"
+
+# 敏感变量（ADMIN_KEY / ED25519_PRIVATE_KEY_B64）通过
+# `wrangler secret put` 单独设置，不在这里
