@@ -8,6 +8,16 @@ __pycache__/
 .pycache/
 *.py[cod]
 
+# Cython 编译产物（平台相关，由 CI 现编现用，不入库）
+*.c
+*.so
+*.pyd
+
+# License Server 敏感文件兜底（即使 license-server/.gitignore 丢了也挡得住）
+license-server/.env
+license-server/.wrangler/
+license-server/wrangler-account.json
+
 # 忽略本地数据库文件（避免把你的测试数据也传到网上）
 *.db
 
