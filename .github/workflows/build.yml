@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 env:
-  APP_VERSION_MAJOR: "2"
-  APP_VERSION_MINOR_OFFSET: "56"
+  APP_VERSION_MAJOR: "3"
+  APP_VERSION_MINOR_OFFSET: "98"
 
 jobs:
   build:

@@ -20,6 +20,14 @@ import shutil
 import sys
 from pathlib import Path
 
+# Windows CI 默认是 cp1252 编码，print 中文会崩溃；强制 UTF-8 输出
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ─── 需要 Cython 编译的模块（只编译防破解核心）────
 MODULES_TO_COMPILE = [
     "license.py",
