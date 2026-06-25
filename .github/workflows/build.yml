@@ -8,6 +8,8 @@ on:
       - feature/dual-accounting-std
       - feature/print-pdf
       - feat/license-activation
+    tags:
+      - 'v*.*.*'   # 触发正式发布：打 tag v1.0.0 之类即可
   workflow_dispatch:
 
 env:
@@ -31,13 +33,22 @@ jobs:
       id: version
       shell: bash
       run: |
-        MINOR=$(( ${{ github.run_number }} - ${{ env.APP_VERSION_MINOR_OFFSET }} ))
-        # ← 修复：防止 MINOR 为负数
-        if [ $MINOR -lt 0 ]; then MINOR=0; fi
-        VERSION="PR.${{ env.APP_VERSION_MAJOR }}.${MINOR}"
+        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          # Tag 触发 → 正式 release：用 tag 作为版本号（去掉 v 前缀）
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          IS_RELEASE=true
+          echo "Release build: v${VERSION}"
+        else
+          # 分支触发 → 内部 PR 构建号
+          MINOR=$(( ${{ github.run_number }} - ${{ env.APP_VERSION_MINOR_OFFSET }} ))
+          if [ $MINOR -lt 0 ]; then MINOR=0; fi
+          VERSION="PR.${{ env.APP_VERSION_MAJOR }}.${MINOR}"
+          IS_RELEASE=false
+          echo "PR build: ${VERSION}"
+        fi
         echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
         echo "APP_NAME=WiseLedger_${VERSION}" >> $GITHUB_OUTPUT
-        echo "Build version: ${VERSION}"
+        echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
 
     - name: 安装依赖
       run: |
@@ -93,3 +104,34 @@ jobs:
         name: ${{ steps.version.outputs.APP_NAME }}
         path: release/
         retention-days: 30
+
+    # ─── 以下步骤仅在 tag 触发时执行（正式 release）───
+    - name: 打包 release zip
+      if: steps.version.outputs.IS_RELEASE == 'true'
+      shell: bash
+      run: |
+        cd release
+        7z a -tzip "../${{ steps.version.outputs.APP_NAME }}.zip" "智一盈小账"
+        cd ..
+        ls -lh "${{ steps.version.outputs.APP_NAME }}.zip"
+
+    - name: 创建 GitHub Release
+      if: steps.version.outputs.IS_RELEASE == 'true'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ steps.version.outputs.APP_NAME }}.zip
+        name: WiseLedger v${{ steps.version.outputs.VERSION }}
+        body: |
+          ## 智一盈小账 · WiseLedger v${{ steps.version.outputs.VERSION }}
+
+          解压后双击 `WiseLedger.exe` 启动。首次启动需联网验证激活码。
+
+          **系统要求：** Windows 10/11 64位
+          **下载：** `${{ steps.version.outputs.APP_NAME }}.zip`
+
+          需要激活码请联系客服。
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
