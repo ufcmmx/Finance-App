@@ -73,6 +73,7 @@ jobs:
         --icon WiseLedger.ico
         --add-data "WiseLedger.ico;."
         --add-data "arrow_dn.svg;."
+        --add-data "用户许可协议.md;."
         --add-data "pages;pages"
         --add-data "dialogs;dialogs"
         --hidden-import=pages.client

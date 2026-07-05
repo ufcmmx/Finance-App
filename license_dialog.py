@@ -1,13 +1,72 @@
 """license_dialog.py — 激活窗口（首次启动未激活时弹）"""
 from __future__ import annotations
+import os
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QVBoxLayout,
+    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QTextBrowser, QVBoxLayout,
 )
 
 import license as lic
+
+
+def _find_eula_path() -> Path | None:
+    """定位 用户许可协议.md 文件；兼容开发环境和 PyInstaller 打包环境"""
+    if hasattr(sys, "_MEIPASS"):
+        # PyInstaller 打包运行时：资源解压到 sys._MEIPASS
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).parent
+    p = base / "用户许可协议.md"
+    return p if p.exists() else None
+
+
+class EulaViewerDialog(QDialog):
+    """协议全文查看窗口"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("最终用户许可协议")
+        self.resize(720, 560)
+        self.setWindowFlags(
+            Qt.Dialog | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint
+        )
+        L = QVBoxLayout(self)
+        L.setContentsMargins(0, 0, 0, 0)
+        L.setSpacing(0)
+
+        browser = QTextBrowser()
+        browser.setStyleSheet(
+            "QTextBrowser { background:#fafbfc; border:none;"
+            " padding:16px 24px; font-size:13px; line-height:1.6; }"
+        )
+        eula_path = _find_eula_path()
+        if eula_path:
+            with open(eula_path, "r", encoding="utf-8") as f:
+                browser.setMarkdown(f.read())
+        else:
+            browser.setPlainText("协议文件缺失。请联系客服。")
+        L.addWidget(browser, 1)
+
+        # 底部关闭按钮 — 用 objectName 限定样式，避免污染子按钮
+        btn_row = QFrame()
+        btn_row.setObjectName("eulaFooter")
+        btn_row.setStyleSheet(
+            "#eulaFooter { background:#f0f2f5; border-top:1px solid #e4e8f0; }"
+        )
+        bl = QHBoxLayout(btn_row)
+        bl.setContentsMargins(16, 12, 16, 12)
+        bl.addStretch()
+        btn_close = QPushButton("关闭")
+        btn_close.setObjectName("btn_primary")
+        btn_close.setFixedSize(80, 34)
+        btn_close.clicked.connect(self.accept)
+        bl.addWidget(btn_close)
+        L.addWidget(btn_row)
 
 
 class LicenseDialog(QDialog):
@@ -16,7 +75,7 @@ class LicenseDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("智一盈小账 · WiseLedger")
-        self.setFixedSize(440, 380)
+        self.setFixedSize(440, 430)
         # 关闭按钮、标题栏（Windows 兼容）
         self.setWindowFlags(
             Qt.Dialog
@@ -101,6 +160,28 @@ class LicenseDialog(QDialog):
 
         bl.addStretch()
 
+        # ── EULA 同意区（未勾选时激活按钮禁用） ──
+        eula_row = QHBoxLayout(); eula_row.setSpacing(4)
+        self.chk_eula = QCheckBox("我已阅读并同意")
+        self.chk_eula.setStyleSheet("color:#555;font-size:12px;")
+        self.chk_eula.toggled.connect(self._update_activate_button)
+        self.btn_view_eula = QPushButton("《最终用户许可协议》")
+        self.btn_view_eula.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_view_eula.setStyleSheet("""
+            QPushButton {
+                background:transparent; border:none;
+                color:#3d6fdb; padding:0; font-size:12px;
+                text-decoration:underline;
+            }
+            QPushButton:hover { color:#2d5dc8; }
+        """)
+        self.btn_view_eula.clicked.connect(self._show_eula)
+        eula_row.addWidget(self.chk_eula)
+        eula_row.addWidget(self.btn_view_eula)
+        eula_row.addStretch()
+        bl.addLayout(eula_row)
+        bl.addSpacing(10)
+
         # 按钮区
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
@@ -119,6 +200,7 @@ class LicenseDialog(QDialog):
 
         self.btn_activate = QPushButton("激  活")
         self.btn_activate.setFixedHeight(38)
+        self.btn_activate.setEnabled(False)  # 未同意协议前禁用
         self.btn_activate.setStyleSheet("""
             QPushButton {
                 background:#3d6fdb; color:#fff; border:none;
@@ -153,6 +235,15 @@ class LicenseDialog(QDialog):
             self.f_code.setText(normalized)
             self.f_code.setCursorPosition(cursor_pos)
             self.f_code.blockSignals(False)
+
+    def _update_activate_button(self):
+        """勾选协议才启用激活按钮"""
+        self.btn_activate.setEnabled(self.chk_eula.isChecked())
+
+    def _show_eula(self):
+        """弹出协议查看窗口"""
+        dlg = EulaViewerDialog(self)
+        dlg.exec()
 
     def _set_status(self, text: str, error: bool = True):
         color = "#ff4d4f" if error else "#52c41a"
