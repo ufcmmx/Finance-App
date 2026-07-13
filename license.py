@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 # ─── 嵌入式常量（不敏感，公开即可） ─────────────────────────────────
-WORKERS_URL = "https://wiseledger-license.ufcmmx.workers.dev"
+WORKERS_URL = "https://license.wisdompluscn.com"
 
 # Ed25519 公钥（base64 编码的 32 字节裸密钥）— 仅能验签，不能签名
 ED25519_PUBLIC_KEY_B64 = "mQlP5F1dYSjWWR7+QoL/jO1v9n2/S4AiIiyQeBfScQ0="
