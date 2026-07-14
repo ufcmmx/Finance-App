@@ -133,6 +133,7 @@ jobs:
 
           **系统要求：** Windows 10/11 64位
           **下载：** `${{ steps.version.outputs.APP_NAME }}.zip`
+          **国内高速下载：** https://download.wisdompluscn.com/wiseledger/latest.zip
 
           需要激活码请联系客服。
         draft: false
@@ -140,3 +141,28 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # ─── 上传到 Cloudflare R2（客户实际下载源，国内加速） ───
+    - name: 上传到 Cloudflare R2
+      if: steps.version.outputs.IS_RELEASE == 'true'
+      shell: bash
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: auto
+        R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        ZIP_FILE: ${{ steps.version.outputs.APP_NAME }}.zip
+        BUCKET: wiseledger-releases
+      run: |
+        # 上传带版本号的一份（保留历史）
+        aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/${ZIP_FILE}" \
+          --endpoint-url "$R2_ENDPOINT" \
+          --checksum-algorithm CRC32
+        # 覆盖 latest.zip（客户宣传链接永远指向它）
+        aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/latest.zip" \
+          --endpoint-url "$R2_ENDPOINT" \
+          --checksum-algorithm CRC32
+        echo ""
+        echo "✅ R2 上传完成："
+        echo "   带版本：https://download.wisdompluscn.com/wiseledger/${ZIP_FILE}"
+        echo "   最新版：https://download.wisdompluscn.com/wiseledger/latest.zip"
