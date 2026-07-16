@@ -114,7 +114,13 @@ function errorResponse(message, status = 400) {
 // ────────────────────────────────────────────────────────────────
 // 接口 1：POST /admin/generate
 // 生成新激活码，由你卖货时手动调用
+// 支持类型：annual (¥99/年 订阅版) | permanent (¥399 永久版)
 // ────────────────────────────────────────────────────────────────
+const VALID_TYPES = ['annual', 'permanent'];
+const ANNUAL_DAYS = 365;
+const GRACE_DAYS = 7;
+const TRIAL_DAYS = 7;
+
 async function handleAdminGenerate(request, env) {
   // 鉴权
   const providedKey = request.headers.get('X-Admin-Key');
@@ -123,7 +129,16 @@ async function handleAdminGenerate(request, env) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const { customer_email = '', price = 0, note = '' } = body;
+  const {
+    customer_email = '',
+    price = 0,
+    note = '',
+    type = 'permanent',      // 默认永久版
+  } = body;
+
+  if (!VALID_TYPES.includes(type)) {
+    return errorResponse(`Invalid type: ${type}. Must be one of: ${VALID_TYPES.join(', ')}`);
+  }
 
   // 生成激活码（重试直到唯一）
   let code;
@@ -137,10 +152,12 @@ async function handleAdminGenerate(request, env) {
     customer_email,
     price,
     note,
+    type,                       // annual | permanent
     sold_at: new Date().toISOString(),
     activated_at: null,
     machine_id: null,
-    status: 'unused',          // unused | active | revoked
+    expires_at: null,           // 激活时才计算
+    status: 'unused',           // unused | active | revoked
     unbind_count_this_year: 0,
     unbind_year: new Date().getUTCFullYear(),
   };
@@ -150,6 +167,7 @@ async function handleAdminGenerate(request, env) {
   return jsonResponse({
     license_code: code,
     customer_email,
+    type,
     sold_at: record.sold_at,
   });
 }
@@ -160,6 +178,12 @@ async function handleAdminGenerate(request, env) {
 // 请求：{ "code": "WL-...", "machine_id": "<sha256 hex>" }
 // 返回：{ "token": { "payload_b64": "...", "signature_b64": "..." } }
 // ────────────────────────────────────────────────────────────────
+function addDays(iso, days) {
+  const d = new Date(iso);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString();
+}
+
 async function handleActivate(request, env) {
   const body = await request.json().catch(() => ({}));
   const { code, machine_id } = body;
@@ -181,10 +205,13 @@ async function handleActivate(request, env) {
     return errorResponse('License has been revoked', 403);
   }
 
+  // 兼容旧记录（没有 type 字段）
+  const licType = record.type || 'permanent';
+
   // 已激活过的情况
   if (record.status === 'active') {
     if (record.machine_id === machine_id) {
-      // 同一台机器重激活 → 重新签发 token
+      // 同一台机器重激活 → 重新签发 token（不重置 expires_at 和 activated_at）
     } else {
       // 不同机器 → 检查解绑配额
       const currentYear = new Date().getUTCFullYear();
@@ -200,12 +227,19 @@ async function handleActivate(request, env) {
       }
       record.unbind_count_this_year += 1;
       record.machine_id = machine_id;
+      // 注意：换机不重置 activated_at 和 expires_at
     }
   } else {
     // 首次激活
     record.status = 'active';
     record.activated_at = new Date().toISOString();
     record.machine_id = machine_id;
+    // 订阅版计算到期时间
+    if (licType === 'annual') {
+      record.expires_at = addDays(record.activated_at, ANNUAL_DAYS);
+    } else {
+      record.expires_at = null;   // 永久版
+    }
   }
 
   await env.LICENSES.put(code, JSON.stringify(record));
@@ -215,13 +249,75 @@ async function handleActivate(request, env) {
   const payload = {
     license_code: code,
     machine_id,
+    type: licType,
     activated_at: record.activated_at,
-    type: 'permanent',
+    expires_at: record.expires_at,        // null 表示永久
+    grace_days: licType === 'annual' ? GRACE_DAYS : 0,
     issued_at: new Date().toISOString(),
   };
   const token = await signToken(payload, privKey);
 
-  return jsonResponse({ token, license_status: record.status });
+  return jsonResponse({ token, license_status: record.status, type: licType });
+}
+
+// ────────────────────────────────────────────────────────────────
+// 接口 4：POST /trial
+// 客户端申请免费试用 7 天
+// 请求：{ "machine_id": "<sha256 hex>" }
+// 返回：签名 token（type: trial, expires_at: now + 7 天）
+// 每台机器仅可试用一次（用 KV key "trial:<machine_id>" 记录）
+// ────────────────────────────────────────────────────────────────
+async function handleTrial(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const { machine_id } = body;
+
+  if (!machine_id) {
+    return errorResponse('Missing machine_id');
+  }
+
+  const trialKey = `trial:${machine_id}`;
+  const existing = await env.LICENSES.get(trialKey);
+  if (existing) {
+    const prev = JSON.parse(existing);
+    return errorResponse(
+      `Trial already used (started at ${prev.started_at})`,
+      403
+    );
+  }
+
+  const startedAt = new Date().toISOString();
+  const expiresAt = addDays(startedAt, TRIAL_DAYS);
+
+  // 生成一个仅用于展示的伪激活码（不写入 LICENSES 主表）
+  const displayCode = `WL-TRIAL-${machine_id.slice(0, 4).toUpperCase()}-${machine_id.slice(4, 8).toUpperCase()}`;
+
+  const trialRecord = {
+    machine_id,
+    started_at: startedAt,
+    expires_at: expiresAt,
+    display_code: displayCode,
+  };
+  await env.LICENSES.put(trialKey, JSON.stringify(trialRecord));
+
+  // 生成签名 token
+  const privKey = await importPrivateKey(env.ED25519_PRIVATE_KEY_B64);
+  const payload = {
+    license_code: displayCode,
+    machine_id,
+    type: 'trial',
+    activated_at: startedAt,
+    expires_at: expiresAt,
+    grace_days: 0,               // 试用无宽限期
+    issued_at: startedAt,
+  };
+  const token = await signToken(payload, privKey);
+
+  return jsonResponse({
+    token,
+    license_status: 'trial',
+    type: 'trial',
+    expires_at: expiresAt,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -298,6 +394,9 @@ export default {
       }
       if (url.pathname === '/activate') {
         return await handleActivate(request, env);
+      }
+      if (url.pathname === '/trial') {
+        return await handleTrial(request, env);
       }
       if (url.pathname === '/update-data') {
         return await handleUpdateData(request, env);

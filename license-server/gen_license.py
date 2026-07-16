@@ -3,8 +3,8 @@
 gen_license.py — 调用 Workers 后台生成激活码
 
 用法：
-    python gen_license.py --email customer@example.com --price 399
-    python gen_license.py --email user@test.com --price 399 --note "微信渠道"
+    python gen_license.py --email customer@example.com --price 199 --type annual
+    python gen_license.py --email user@test.com --price 499 --type permanent
 
 需要先在 .env 里配置：
     ADMIN_KEY=...
@@ -40,6 +40,10 @@ def main():
     parser.add_argument("--email", required=True, help="客户邮箱")
     parser.add_argument("--price", type=float, default=0, help="售价")
     parser.add_argument("--note", default="", help="备注（如渠道、套餐）")
+    parser.add_argument(
+        "--type", choices=["annual", "permanent"], default="permanent",
+        help="激活码类型：annual (¥199/年 订阅，原价 ¥398) | permanent (¥499 永久，原价 ¥998，默认)",
+    )
     args = parser.parse_args()
 
     admin_key = os.environ.get("ADMIN_KEY")
@@ -55,6 +59,7 @@ def main():
         "customer_email": args.email,
         "price": args.price,
         "note": args.note,
+        "type": args.type,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -81,8 +86,14 @@ def main():
         sys.exit(1)
 
     code = result["license_code"]
+    lic_type = result.get("type", args.type)
+    type_zh = {
+        "annual":    "订阅版（¥199/年 活动价，原 ¥398）",
+        "permanent": "永久版（¥499 买断 活动价，原 ¥998）",
+    }[lic_type]
     print()
     print(f"✓ 激活码已生成：{code}")
+    print(f"  类型：{type_zh}")
     print(f"  客户邮箱：{result['customer_email']}")
     print(f"  生成时间：{result['sold_at']}")
     print()
@@ -92,11 +103,19 @@ def main():
     print()
     print(f"您的智一盈小账 (WiseLedger) 激活码：")
     print(f"  {code}")
+    print(f"  类型：{type_zh}")
     print()
     print(f"使用说明：")
-    print(f"  1. 打开软件 → 提示输入激活码")
-    print(f"  2. 输入上述激活码 → 联网验证 → 永久使用")
-    print(f"  3. 激活码绑定首次使用的电脑，更换电脑请联系客服")
+    print(f"  1. 下载软件：https://download.wisdompluscn.com/wiseledger/latest.zip")
+    print(f"  2. 打开软件 → 弹出激活窗 → 勾选同意协议")
+    print(f"  3. 输入上述激活码 → 联网验证成功即可使用")
+    if lic_type == "annual":
+        print(f"  4. 订阅版有效期 1 年，到期前 30 天软件会开始提示续费")
+        print(f"     · 到期后 7 天宽限期照常使用")
+        print(f"     · 超过宽限期进入只读模式（仍可查看历史数据）")
+    else:
+        print(f"  4. 永久版无到期时间，激活一次终身使用")
+    print(f"  5. 激活码绑定首次使用的电脑，每年可换机 2 次")
     print()
 
 

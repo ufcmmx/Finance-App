@@ -75,7 +75,7 @@ class LicenseDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("智一盈小账 · WiseLedger")
-        self.setFixedSize(440, 430)
+        self.setFixedSize(440, 520)
         # 关闭按钮、标题栏（Windows 兼容）
         self.setWindowFlags(
             Qt.Dialog
@@ -164,7 +164,7 @@ class LicenseDialog(QDialog):
         eula_row = QHBoxLayout(); eula_row.setSpacing(4)
         self.chk_eula = QCheckBox("我已阅读并同意")
         self.chk_eula.setStyleSheet("color:#555;font-size:12px;")
-        self.chk_eula.toggled.connect(self._update_activate_button)
+        self.chk_eula.toggled.connect(self._on_eula_toggled)
         self.btn_view_eula = QPushButton("《最终用户许可协议》")
         self.btn_view_eula.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_view_eula.setStyleSheet("""
@@ -182,7 +182,7 @@ class LicenseDialog(QDialog):
         bl.addLayout(eula_row)
         bl.addSpacing(10)
 
-        # 按钮区
+        # 按钮区（激活 + 取消）
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
@@ -200,20 +200,46 @@ class LicenseDialog(QDialog):
 
         self.btn_activate = QPushButton("激  活")
         self.btn_activate.setFixedHeight(38)
-        self.btn_activate.setEnabled(False)  # 未同意协议前禁用
         self.btn_activate.setStyleSheet("""
             QPushButton {
                 background:#3d6fdb; color:#fff; border:none;
                 border-radius:6px; font-size:14px; font-weight:bold;
             }
             QPushButton:hover { background:#2d5dc8; }
-            QPushButton:disabled { background:#b0bec5; }
         """)
         self.btn_activate.clicked.connect(self._do_activate)
 
         btn_row.addWidget(self.btn_cancel, 1)
         btn_row.addWidget(self.btn_activate, 2)
         bl.addLayout(btn_row)
+
+        # 分隔线 + 免费试用按钮
+        bl.addSpacing(14)
+        sep_row = QHBoxLayout()
+        line_l = QFrame(); line_l.setFrameShape(QFrame.HLine)
+        line_l.setStyleSheet("background:#dcdfe6;")
+        line_l.setFixedHeight(1)
+        line_r = QFrame(); line_r.setFrameShape(QFrame.HLine)
+        line_r.setStyleSheet("background:#dcdfe6;")
+        line_r.setFixedHeight(1)
+        or_lbl = QLabel("还没购买？")
+        or_lbl.setStyleSheet("color:#888;font-size:11px;padding:0 8px;")
+        sep_row.addWidget(line_l, 1); sep_row.addWidget(or_lbl); sep_row.addWidget(line_r, 1)
+        bl.addLayout(sep_row)
+        bl.addSpacing(8)
+
+        self.btn_trial = QPushButton("🎁  免费试用 7 天")
+        self.btn_trial.setFixedHeight(36)
+        self.btn_trial.setStyleSheet("""
+            QPushButton {
+                background:transparent; color:#ff8c00;
+                border:1.5px dashed #ff8c00; border-radius:6px;
+                font-size:13px; font-weight:bold;
+            }
+            QPushButton:hover { background:#fff5e6; }
+        """)
+        self.btn_trial.clicked.connect(self._do_trial)
+        bl.addWidget(self.btn_trial)
 
         # 客服提示
         hint = QLabel("如有问题，请联系客服微信：xxx-xxx-xxx")
@@ -236,14 +262,54 @@ class LicenseDialog(QDialog):
             self.f_code.setCursorPosition(cursor_pos)
             self.f_code.blockSignals(False)
 
-    def _update_activate_button(self):
-        """勾选协议才启用激活按钮"""
-        self.btn_activate.setEnabled(self.chk_eula.isChecked())
+    def _on_eula_toggled(self):
+        """勾选协议后，如果之前有"请勾选"错误提示，隐藏它"""
+        if self.chk_eula.isChecked() and self.status_lbl.isVisible():
+            # 只在错误消息是"请先同意协议"时才隐藏（避免误消其他状态）
+            if "同意" in self.status_lbl.text():
+                self.status_lbl.setVisible(False)
+
+    def _require_eula_or_prompt(self) -> bool:
+        """检查是否已勾选协议；未勾选则提示 + 高亮 checkbox 后返回 False"""
+        if self.chk_eula.isChecked():
+            return True
+        self._set_status("请先勾选下方【我已阅读并同意《最终用户许可协议》】")
+        # 让 checkbox 短暂闪一下红色以吸引注意
+        self.chk_eula.setStyleSheet(
+            "color:#ff4d4f;font-size:12px;font-weight:bold;"
+        )
+        QTimer.singleShot(1500, lambda: self.chk_eula.setStyleSheet(
+            "color:#555;font-size:12px;"
+        ))
+        return False
 
     def _show_eula(self):
         """弹出协议查看窗口"""
         dlg = EulaViewerDialog(self)
         dlg.exec()
+
+    def _do_trial(self):
+        """申请免费试用"""
+        if not self._require_eula_or_prompt():
+            return
+
+        self.btn_trial.setEnabled(False)
+        self.btn_trial.setText("申请中…")
+        self.btn_trial.repaint()
+
+        try:
+            ok, msg = lic.request_trial()
+        except Exception as e:
+            ok, msg = False, f"未预期错误：{e}"
+
+        self.btn_trial.setEnabled(True)
+        self.btn_trial.setText("🎁  免费试用 7 天")
+
+        if ok:
+            self._set_status(msg + "（试用 7 天开始）", error=False)
+            QTimer.singleShot(700, self.accept)
+        else:
+            self._set_status(msg)
 
     def _set_status(self, text: str, error: bool = True):
         color = "#ff4d4f" if error else "#52c41a"
@@ -254,6 +320,8 @@ class LicenseDialog(QDialog):
         self.status_lbl.setVisible(True)
 
     def _do_activate(self):
+        if not self._require_eula_or_prompt():
+            return
         code = self.f_code.text().strip()
         if not code:
             self._set_status("请输入激活码")

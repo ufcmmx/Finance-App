@@ -41,9 +41,41 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WiseLedger/1.0"
 CURRENT_DATA_PACK_VERSION = "2026.01"
 
 
+# ─── License 状态常量 ────────────────────────────────────────────
+# is_activated() 返回的 status 枚举
+STATUS_ACTIVE       = "active"        # 正常使用中
+STATUS_TRIAL        = "trial"         # 试用中
+STATUS_GRACE        = "grace"         # 订阅已过期但在宽限期
+STATUS_READONLY     = "readonly"      # 订阅已过期且超过宽限期（只读）
+STATUS_EXPIRED      = "expired"       # 试用/订阅已过期（无宽限期）
+STATUS_NOT_ACTIVE   = "not_activated" # 未激活
+
+
 # ─── 工具：错误码 ─────────────────────────────────────────────────
 class LicenseError(Exception):
     """激活相关错误的基类，msg 中应包含用户可读说明"""
+
+
+# ─── 工具：ISO 时间处理 ─────────────────────────────────────────
+def _parse_iso(s: str):
+    """把 ISO 8601 字符串解析成 datetime（UTC 时区）"""
+    from datetime import datetime, timezone
+    if not s:
+        return None
+    # Python 3.11+ 支持 Z 后缀，3.10 及以下要替换
+    s = s.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _now_utc():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
 
 
 # ─── 1. 机器特征码 ─────────────────────────────────────────────────
@@ -164,25 +196,113 @@ def _parse_and_verify_token(envelope: dict) -> dict | None:
 
 
 # ─── 4. 激活状态检查 ──────────────────────────────────────────────
-def is_activated() -> tuple[bool, str]:
-    """检查本地激活状态。
+def get_license_status() -> dict:
+    """完整版本的授权状态查询，返回所有 UI 决策所需信息。
 
-    返回 (是否激活, 描述消息)。描述用于 UI 显示原因。
+    返回 dict 字段：
+      status:            STATUS_* 常量之一
+      message:           人类可读描述
+      type:              None | 'trial' | 'annual' | 'permanent'
+      license_code:      激活码（或 trial display code）
+      expires_at:        ISO 时间字符串 或 None（永久）
+      activated_at:      ISO 时间字符串
+      days_remaining:    到期前剩余天数（负值表示已过期，None 表示永久）
+      grace_days_left:   宽限期剩余天数（仅 annual 到期后有意义）
+      readonly:          bool 是否只读模式
     """
+    empty = {
+        "status": STATUS_NOT_ACTIVE, "message": "未激活",
+        "type": None, "license_code": None,
+        "expires_at": None, "activated_at": None,
+        "days_remaining": None, "grace_days_left": 0,
+        "readonly": False,
+    }
+
     envelope = load_local_token()
     if not envelope:
-        return False, "未激活"
+        return empty
 
     payload = _parse_and_verify_token(envelope)
     if not payload:
-        return False, "本地激活信息已损坏或被篡改"
+        return {**empty, "message": "本地激活信息已损坏或被篡改"}
 
     # 机器码匹配
-    current_machine = get_machine_id()
-    if payload.get("machine_id") != current_machine:
-        return False, "激活信息与当前电脑不匹配（可能更换了硬件或复制了软件）"
+    if payload.get("machine_id") != get_machine_id():
+        return {**empty,
+                "message": "激活信息与当前电脑不匹配（可能更换了硬件或复制了软件）"}
 
-    return True, f"已激活：{payload.get('license_code', '')}"
+    lic_type = payload.get("type", "permanent")
+    expires_at_str = payload.get("expires_at")
+    grace_days = int(payload.get("grace_days", 0))
+    code = payload.get("license_code", "")
+
+    base = {
+        "type": lic_type,
+        "license_code": code,
+        "activated_at": payload.get("activated_at"),
+        "expires_at": expires_at_str,
+        "grace_days_left": 0,
+        "readonly": False,
+    }
+
+    # 永久版：永远有效
+    if lic_type == "permanent" or expires_at_str is None:
+        return {**base, "status": STATUS_ACTIVE, "days_remaining": None,
+                "message": f"永久版：{code}"}
+
+    # trial / annual：需要判断是否过期
+    expires_at = _parse_iso(expires_at_str)
+    if expires_at is None:
+        return {**base, "status": STATUS_ACTIVE, "days_remaining": None,
+                "message": f"已激活：{code}"}
+
+    now = _now_utc()
+    delta_days = (expires_at - now).total_seconds() / 86400
+
+    if delta_days > 0:
+        # 未到期
+        status = STATUS_TRIAL if lic_type == "trial" else STATUS_ACTIVE
+        msg_prefix = "试用中" if lic_type == "trial" else "订阅版"
+        return {**base, "status": status, "days_remaining": int(delta_days),
+                "message": f"{msg_prefix}：剩余 {int(delta_days)} 天"}
+
+    # 已到期
+    if lic_type == "trial":
+        # 试用无宽限
+        return {**base, "status": STATUS_EXPIRED, "days_remaining": int(delta_days),
+                "readonly": True,
+                "message": f"试用已到期（{-int(delta_days)} 天前）"}
+
+    # 订阅到期 —— 检查宽限期
+    grace_ends_days = delta_days + grace_days
+    if grace_ends_days > 0:
+        # 在宽限期内
+        return {**base, "status": STATUS_GRACE,
+                "days_remaining": int(delta_days),
+                "grace_days_left": int(grace_ends_days),
+                "message": f"订阅已过期，宽限期剩余 {int(grace_ends_days)} 天"}
+
+    # 宽限期也过 → 只读
+    return {**base, "status": STATUS_READONLY,
+            "days_remaining": int(delta_days),
+            "grace_days_left": 0, "readonly": True,
+            "message": "订阅已过期，进入只读模式"}
+
+
+def is_activated() -> tuple[bool, str]:
+    """向后兼容的简单接口：返回 (是否可正常使用, 描述)。
+
+    宽限期算"可用"，只读算"不可用（需重新激活）"。
+    """
+    s = get_license_status()
+    if s["status"] in (STATUS_ACTIVE, STATUS_TRIAL, STATUS_GRACE):
+        return True, s["message"]
+    return False, s["message"]
+
+
+def is_readonly_mode() -> bool:
+    """便捷函数：当前是否应进入全局只读模式"""
+    return get_license_status()["readonly"]
 
 
 def get_activated_license_code() -> str | None:
@@ -274,6 +394,30 @@ def activate(license_code: str) -> tuple[bool, str]:
     if status == 400:
         return False, f"请求错误：{err_msg}"
     return False, f"服务器返回 HTTP {status}：{err_msg}"
+
+
+# ─── 6.5 免费试用 ─────────────────────────────────────────────────
+def request_trial() -> tuple[bool, str]:
+    """向服务器申请 7 天免费试用。
+
+    返回 (成功?, 消息)。成功时 token 已自动保存到本地。
+    每台电脑仅可申请一次；再次申请会被服务器拒绝。
+    """
+    try:
+        machine_id = get_machine_id()
+    except LicenseError as e:
+        return False, str(e)
+
+    status, body = _post("/trial", {"machine_id": machine_id})
+
+    if status == 200 and "token" in body:
+        save_local_token(body["token"])
+        return True, "试用已激活，有效期 7 天"
+
+    err_msg = body.get("error", "未知错误") if isinstance(body, dict) else str(body)
+    if status == 403 and "already used" in err_msg.lower():
+        return False, "此电脑已使用过试用（每台电脑仅可试用一次），请购买正式激活码"
+    return False, f"申请试用失败：{err_msg}"
 
 
 # ─── 7. 数据包更新 ────────────────────────────────────────────────

@@ -52,11 +52,20 @@ ROLE_LABELS: dict[str, str] = {
 }
 
 
+# ── 只读模式：授权到期时使用，全局屏蔽所有 "写" 权限 ──
+# 凡是不以 .view 结尾的权限，只读模式下都会被拒绝
+_WRITE_PERM_SUFFIXES = (
+    "manage", "create", "edit", "delete", "approve", "export",
+)
+
+
 class AppSession:
     """全局单例：保存当前登录用户信息，提供权限检查方法。"""
 
     _user: dict | None = None   # {"id":1, "username":"admin",
                                 #  "display_name":"超级管理员", "role":"superadmin"}
+    _readonly: bool = False     # 授权到期后由 main.py 设为 True，
+                                # 之后所有写权限查询直接返回 False
 
     # ── 登录 / 登出 ──────────────────────────────────────────
     @classmethod
@@ -66,6 +75,15 @@ class AppSession:
     @classmethod
     def logout(cls) -> None:
         cls._user = None
+
+    # ── 全局只读模式（授权到期用） ──────────────────────────
+    @classmethod
+    def set_readonly(cls, readonly: bool) -> None:
+        cls._readonly = readonly
+
+    @classmethod
+    def is_readonly(cls) -> bool:
+        return cls._readonly
 
     # ── 当前用户信息 ─────────────────────────────────────────
     @classmethod
@@ -91,12 +109,22 @@ class AppSession:
     # ── 权限检查 ─────────────────────────────────────────────
     @classmethod
     def has_perm(cls, perm: str) -> bool:
-        """检查当前用户是否拥有指定权限。未登录返回 False。"""
+        """检查当前用户是否拥有指定权限。未登录返回 False。
+
+        只读模式下（授权过期），所有写权限（manage/create/edit/delete/approve/export）
+        统一返回 False，实现全局只读。查看类权限（.view）不受影响。
+        """
         if not cls._user:
             return False
+        # 只读模式：写权限全部拒绝，查看类保留
+        if cls._readonly:
+            for suffix in _WRITE_PERM_SUFFIXES:
+                if perm.endswith("." + suffix):
+                    return False
         role = cls._user.get("role", "")
         perms = ROLE_PERMISSIONS.get(role, set())
         if "all" in perms:      # superadmin
+            # 只读模式已经在上面拦住写权限，这里 superadmin 也走同样规则
             return True
         return perm in perms
 

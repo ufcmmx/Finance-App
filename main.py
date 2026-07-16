@@ -71,6 +71,18 @@ class MainWindow(QMainWindow):
 
         sl.addStretch()
 
+        # 授权状态提示条（宽限期 / 过期 / 试用即将结束时显示）
+        self._license_banner = QLabel("")
+        self._license_banner.setWordWrap(True)
+        self._license_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._license_banner.setStyleSheet(
+            "background:#7a4a00;color:#ffd88a;font-size:11px;"
+            "padding:8px 12px;margin:4px 12px;border-radius:6px;"
+            "border:1px solid #a86a00;"
+        )
+        self._license_banner.setVisible(False)
+        sl.addWidget(self._license_banner)
+
         # 当前客户信息
         self._client_info = QLabel(""); self._client_info.setWordWrap(True)
         self._client_info.setStyleSheet("color:#556;font-size:11px;padding:6px 16px;")
@@ -139,6 +151,57 @@ class MainWindow(QMainWindow):
         self._nav("客户管理")
         # 登录后检查是否有未完成的月末自动备份（补跑机制）
         auto_backup.check_and_run(self)
+
+    def apply_license_status(self, status: dict):
+        """根据授权状态设置只读模式 + 侧边栏提示条。
+
+        参数 status 来自 license.get_license_status()。
+        由 main() 在登录前调用。
+        """
+        # 1. 只读模式
+        AppSession.set_readonly(bool(status.get("readonly", False)))
+
+        # 2. 侧边栏提示条：什么情况下显示 + 什么颜色
+        s = status.get("status", "")
+        lic_type = status.get("type")
+        days = status.get("days_remaining")
+        grace_left = status.get("grace_days_left", 0)
+
+        text = ""
+        # 底色（深红/暖橙/暖黄）
+        bg, fg, border = "#7a4a00", "#ffd88a", "#a86a00"
+
+        if s == "readonly":
+            text = "⛔ 订阅已过期，软件进入只读模式\n请联系客服续费恢复使用"
+            bg, fg, border = "#5a1a1a", "#ffb0b0", "#8a2a2a"
+        elif s == "grace":
+            text = f"⚠️ 订阅已到期，宽限期剩余 {grace_left} 天\n请尽快联系客服续费"
+            bg, fg, border = "#7a4a00", "#ffd88a", "#a86a00"
+        elif s == "trial":
+            if days is not None and days <= 3:
+                text = f"🎁 试用剩余 {days} 天\n请尽快购买激活码"
+                bg, fg, border = "#7a4a00", "#ffd88a", "#a86a00"
+            elif days is not None:
+                text = f"🎁 试用中，剩余 {days} 天"
+                bg, fg, border = "#1a4a7a", "#a8d0ff", "#2a6aa8"
+        elif s == "active" and lic_type == "annual" and days is not None and days <= 30:
+            # 订阅到期前 30 天开始提示
+            text = f"📅 订阅剩余 {days} 天\n建议及时续费"
+            if days <= 7:
+                bg, fg, border = "#7a4a00", "#ffd88a", "#a86a00"
+            else:
+                bg, fg, border = "#1a4a7a", "#a8d0ff", "#2a6aa8"
+
+        if text:
+            self._license_banner.setStyleSheet(
+                f"background:{bg};color:{fg};font-size:11px;"
+                f"padding:8px 12px;margin:4px 12px;border-radius:6px;"
+                f"border:1px solid {border};"
+            )
+            self._license_banner.setText(text)
+            self._license_banner.setVisible(True)
+        else:
+            self._license_banner.setVisible(False)
 
     def _on_carryforward_done(self):
         self.pg_vouchers._switch_tab("查凭证")
@@ -322,15 +385,23 @@ def main():
         # ── 激活授权检查（在主窗口之前）──
         _wlog("step 3.5: license check")
         import license as _lic
-        _activated, _lic_msg = _lic.is_activated()
-        _wlog(f"license status: {_lic_msg}")
-        if not _activated:
+        _lic_status = _lic.get_license_status()
+        _wlog(f"license status: {_lic_status['status']} — {_lic_status['message']}")
+
+        # 未激活 / token 损坏 / 机器码不匹配 / 试用已过期 → 弹激活窗
+        # 试用中 / 订阅中 / 宽限期 / 只读模式 都视为"有 token"，直接进主程序
+        _need_activation = _lic_status["status"] in (
+            _lic.STATUS_NOT_ACTIVE, _lic.STATUS_EXPIRED
+        )
+        if _need_activation:
             splash.close()   # 关掉启动画面再弹激活窗
             from license_dialog import LicenseDialog
             lic_dlg = LicenseDialog()
             if lic_dlg.exec() != QDialog.Accepted:
                 _wlog("用户取消激活，退出")
                 sys.exit(0)
+            # 激活/试用成功后重新查一次状态（拿到新 token 的类型/到期等信息）
+            _lic_status = _lic.get_license_status()
 
         # ── 关键启动顺序：先建主窗口并 show()，Windows 一次性注册所有 HWND ──
         _wlog("step 4: MainWindow()")
@@ -339,8 +410,11 @@ def main():
         _wlog("step 5: w.show()")
         w.show()
         app.processEvents()   # 确保所有 HWND 注册完毕
-        if _activated:
+        if not _need_activation:
             splash.finish(w)  # 主窗口就绪后关闭启动画面（未激活时已关）
+
+        # 应用授权状态：只读模式 + 侧边栏提示条
+        w.apply_license_status(_lic_status)
 
         # ── 再弹登录框（此时主窗口已稳定）──
         _wlog("step 6: LoginDialog")

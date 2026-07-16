@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智一盈小账 · WiseLedger — 1 分钟上手的智能财务软件</title>
+  <meta name="description" content="给个体户、小微企业、代账会计的极简记账工具。订阅 ¥199/年（原价 ¥398），永久买断 ¥499（原价 ¥998）。全场半价活动中。">
+  <link rel="icon" href="assets/logo-256.png" type="image/png">
+
+  <!-- Tailwind CSS via Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'wl-navy': '#1c2340',
+            'wl-blue': '#3d6fdb',
+            'wl-blue-hover': '#2d5dc8',
+            'wl-orange': '#ff8c00',
+            'wl-bg': '#f5f7fa',
+          },
+          fontFamily: {
+            sans: ['"PingFang SC"', '"Microsoft YaHei"', '"Hiragino Sans GB"', 'Helvetica', 'Arial', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    .gradient-text {
+      background: linear-gradient(90deg, #3d6fdb 0%, #ff8c00 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .card-hover { transition: transform .2s ease, box-shadow .2s ease; }
+    .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(28,35,64,.12); }
+    .screenshot-shadow { box-shadow: 0 20px 60px rgba(28,35,64,.18), 0 2px 8px rgba(28,35,64,.06); }
+  </style>
+</head>
+
+<body class="font-sans text-slate-800 bg-white">
+
+  <!-- ── Nav ── -->
+  <nav class="fixed top-0 left-0 right-0 z-50 backdrop-blur bg-white/85 border-b border-slate-100">
+    <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-3">
+        <img src="assets/logo-256.png" alt="WiseLedger" class="w-9 h-9">
+        <div>
+          <div class="text-base font-bold text-wl-navy leading-tight">智一盈小账</div>
+          <div class="text-xs text-wl-orange leading-tight font-semibold">WiseLedger</div>
+        </div>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm text-slate-600">
+        <a href="#features" class="hover:text-wl-blue transition">功能</a>
+        <a href="#screenshots" class="hover:text-wl-blue transition">截图</a>
+        <a href="#pricing" class="hover:text-wl-blue transition">价格</a>
+        <a href="#faq" class="hover:text-wl-blue transition">常见问题</a>
+        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+           class="bg-wl-blue text-white px-4 py-2 rounded-lg hover:bg-wl-blue-hover transition font-medium">
+          下载
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Hero ── -->
+  <section class="pt-32 pb-20 px-6 bg-gradient-to-br from-wl-navy via-slate-900 to-wl-navy text-white overflow-hidden">
+    <div class="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+      <div>
+        <div class="flex flex-wrap gap-2 mb-6">
+          <div class="inline-block px-3 py-1 rounded-full bg-wl-orange/20 text-wl-orange text-xs font-semibold">
+            🎁 免费试用 7 天
+          </div>
+          <div class="inline-block px-3 py-1 rounded-full bg-white/10 text-slate-300 text-xs font-semibold">
+            v1.0 正式版
+          </div>
+        </div>
+        <h1 class="text-5xl md:text-6xl font-bold leading-tight mb-6">
+          1 分钟上手的<br>
+          <span class="gradient-text">智能财务软件</span>
+        </h1>
+        <p class="text-lg text-slate-300 mb-8 leading-relaxed">
+          给<strong class="text-white">个体户、小微企业、代账会计</strong>的极简记账工具。<br>
+          无需培训，装完即用；先试用后付费。
+        </p>
+        <div class="flex flex-wrap gap-4 mb-4">
+          <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+             class="bg-wl-blue hover:bg-wl-blue-hover text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2 transition shadow-lg shadow-wl-blue/30">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            立即下载 (Windows)
+          </a>
+          <a href="#pricing"
+             class="border border-slate-600 hover:border-wl-orange hover:text-wl-orange text-slate-200 px-8 py-4 rounded-xl font-semibold transition">
+            查看价格
+          </a>
+        </div>
+        <p class="text-xs text-slate-500 mb-8">💡 下载后启动，即可免费试用 7 天，无需付费</p>
+        <div class="flex flex-wrap items-center gap-6 text-sm text-slate-400">
+          <div class="flex items-center gap-2">
+            <span class="text-green-400">✓</span> 订阅 <span class="text-wl-orange">¥199</span> <span class="line-through text-slate-500">¥398</span>/年
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-green-400">✓</span> 永久 <span class="text-wl-orange">¥499</span> <span class="line-through text-slate-500">¥998</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-green-400">✓</span> Windows 10 / 11
+          </div>
+        </div>
+      </div>
+
+      <div class="relative">
+        <div class="absolute inset-0 bg-gradient-to-tr from-wl-blue/30 to-wl-orange/20 blur-3xl -z-10"></div>
+        <img src="assets/ui/02-vouchers.png"
+             alt="智一盈小账凭证列表"
+             class="rounded-xl screenshot-shadow border border-slate-700">
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Target Users ── -->
+  <section class="py-20 px-6 bg-wl-bg">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-wl-navy text-center mb-4">为你而生</h2>
+      <p class="text-center text-slate-500 mb-14">如果你符合以下任一情况，这个软件就是给你做的</p>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl p-8 card-hover border border-slate-100">
+          <div class="w-14 h-14 rounded-xl bg-blue-100 flex items-center justify-center mb-5">
+            <span class="text-3xl">🏪</span>
+          </div>
+          <h3 class="text-xl font-bold text-wl-navy mb-3">个体工商户</h3>
+          <p class="text-slate-600 leading-relaxed">
+            开一家小店，不想花太多钱请代账，又搞不清复杂的财务软件？
+            <strong class="text-wl-blue">开箱即用</strong>，自己录凭证、看利润，一目了然。
+          </p>
+        </div>
+        <div class="bg-white rounded-2xl p-8 card-hover border border-slate-100">
+          <div class="w-14 h-14 rounded-xl bg-orange-100 flex items-center justify-center mb-5">
+            <span class="text-3xl">🏢</span>
+          </div>
+          <h3 class="text-xl font-bold text-wl-navy mb-3">小微企业老板</h3>
+          <p class="text-slate-600 leading-relaxed">
+            公司规模不大，会计外包又贵、又不放心数据泄露？
+            用户友好的界面 + <strong class="text-wl-blue">本地数据存储</strong>，账目在自己电脑里安心。
+          </p>
+        </div>
+        <div class="bg-white rounded-2xl p-8 card-hover border border-slate-100">
+          <div class="w-14 h-14 rounded-xl bg-green-100 flex items-center justify-center mb-5">
+            <span class="text-3xl">📊</span>
+          </div>
+          <h3 class="text-xl font-bold text-wl-navy mb-3">代账会计</h3>
+          <p class="text-slate-600 leading-relaxed">
+            手头 10 家、20 家客户账套要维护，大厂的财务系统太重？
+            <strong class="text-wl-blue">多客户账套隔离</strong>，切换一秒到位，同一软件搞定所有客户。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features ── -->
+  <section id="features" class="py-20 px-6">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-wl-navy text-center mb-4">六大核心功能</h2>
+      <p class="text-center text-slate-500 mb-14">从建账到出报表，一个软件搞定完整会计流程</p>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">👥</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">多客户账套管理</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            无限个账套，每个客户独立数据。支持一般纳税人 / 小规模纳税人，企业准则 / 小企业准则。
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">📝</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">凭证快速录入</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            23 个内置常用凭证模板（工资、采购、销售、税费等），一键套用；借贷自动平衡校验。
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">📈</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">财务报表自动生成</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            资产负债表、利润表、所有者权益变动表、现金流量表——审核完凭证自动汇总，支持 Excel/PDF 导出。
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">🔐</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">数据加密备份</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            AES-256-GCM 军级加密备份文件，月末自动备份；备份密码独立于登录密码，安全隔离。
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">📋</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">全流程审计日志</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            凭证新增/审核/删除、封账反结账、数据导入 —— 27 种操作全程留痕，符合《财会 2024 12 号》要求。
+          </p>
+        </div>
+
+        <div class="p-6 rounded-2xl bg-white border border-slate-100 card-hover">
+          <div class="text-4xl mb-4">🔄</div>
+          <h3 class="font-bold text-lg text-wl-navy mb-2">通用账套导入</h3>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            支持主流财务软件（用友 / 金蝶等）的 XLS/XLSX 导出文件迁移。科目 + 期初 + 凭证一键导入，无需重录。
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Screenshots ── -->
+  <section id="screenshots" class="py-20 px-6 bg-wl-bg">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-wl-navy text-center mb-4">产品截图</h2>
+      <p class="text-center text-slate-500 mb-14">简洁清晰的界面，会计人员一看就会</p>
+
+      <div class="grid md:grid-cols-2 gap-8">
+        <figure>
+          <img src="assets/ui/02-vouchers.png" alt="凭证列表"
+               class="rounded-xl screenshot-shadow border border-slate-200">
+          <figcaption class="text-center text-slate-600 mt-4">
+            <strong class="text-wl-navy">凭证录入与审核</strong> · 待审 / 已审 / 已拒绝三态清晰
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="assets/ui/03-report.png" alt="利润表"
+               class="rounded-xl screenshot-shadow border border-slate-200">
+          <figcaption class="text-center text-slate-600 mt-4">
+            <strong class="text-wl-navy">财务报表</strong> · 4 张标准报表实时汇总
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="assets/ui/04-audit.png" alt="审计日志"
+               class="rounded-xl screenshot-shadow border border-slate-200">
+          <figcaption class="text-center text-slate-600 mt-4">
+            <strong class="text-wl-navy">审计日志</strong> · 全操作留痕，可导出 Excel 审计报告
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="assets/ui/05-backup.png" alt="数据备份"
+               class="rounded-xl screenshot-shadow border border-slate-200">
+          <figcaption class="text-center text-slate-600 mt-4">
+            <strong class="text-wl-navy">数据加密备份</strong> · 每月自动备份，账目安全无忧
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Pricing ── -->
+  <section id="pricing" class="py-20 px-6">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-wl-navy text-center mb-4">灵活付费，先试后买</h2>
+      <p class="text-center text-slate-500 mb-14">
+        免费试用 7 天 · 满意再付 · 两种付费方式任选
+      </p>
+
+      <div class="grid md:grid-cols-2 gap-6 items-stretch">
+
+        <!-- 订阅版 -->
+        <div class="bg-white rounded-3xl p-8 md:p-10 border-2 border-slate-200 relative flex flex-col card-hover">
+          <div class="text-center mb-6">
+            <div class="inline-block px-3 py-1 rounded-full bg-orange-50 text-wl-orange text-xs font-semibold mb-4">
+              🔥 半价活动 · 低门槛
+            </div>
+            <h3 class="text-2xl font-bold text-wl-navy mb-2">订阅版</h3>
+            <div class="text-slate-500 text-sm mb-6">按年付费，灵活试水</div>
+            <div class="flex items-baseline justify-center gap-2">
+              <span class="text-5xl font-bold text-wl-navy">¥199</span>
+              <span class="text-slate-400 line-through text-xl">¥398</span>
+              <span class="text-slate-500">/年</span>
+            </div>
+            <div class="text-xs text-wl-orange font-semibold mt-2">≈ ¥16.6/月（活动价，限时半价）</div>
+          </div>
+
+          <ul class="space-y-3 mb-8 text-sm flex-grow">
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>与永久版<strong>功能完全一致</strong></span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>激活一台电脑，1 年内自由使用</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>到期前 30 天内软件自动提示续费</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>过期后 7 天宽限期，仍可正常使用</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>宽限期后进入<strong>只读模式</strong>，不影响查旧账</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>免费获取所有软件更新</span>
+            </li>
+          </ul>
+
+          <a href="#contact"
+             class="block text-center bg-white hover:bg-slate-50 text-wl-blue border-2 border-wl-blue px-6 py-3 rounded-xl font-bold transition">
+            微信联系订阅
+          </a>
+          <p class="text-xs text-slate-400 text-center mt-3">
+            适合：小微起步 / 试水 / 短期项目
+          </p>
+        </div>
+
+        <!-- 永久版（推荐） -->
+        <div class="bg-gradient-to-br from-white to-blue-50 rounded-3xl p-8 md:p-10 border-2 border-wl-blue relative flex flex-col card-hover shadow-xl shadow-wl-blue/10">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-wl-orange text-white text-xs font-bold px-4 py-1 rounded-full shadow">
+            🔥 半价活动 · 长期首选
+          </div>
+          <div class="text-center mb-6">
+            <div class="inline-block px-3 py-1 rounded-full bg-orange-50 text-wl-orange text-xs font-semibold mb-4 mt-2">
+              一次付费，永久拥有
+            </div>
+            <h3 class="text-2xl font-bold text-wl-navy mb-2">永久版</h3>
+            <div class="text-slate-500 text-sm mb-6">买断使用权，2.5 年即回本</div>
+            <div class="flex items-baseline justify-center gap-2">
+              <span class="text-5xl font-bold text-wl-navy">¥499</span>
+              <span class="text-slate-400 line-through text-xl">¥998</span>
+              <span class="text-slate-500">/永久</span>
+            </div>
+            <div class="text-xs text-wl-orange font-semibold mt-2">🔥 活动价，限时半价</div>
+          </div>
+
+          <ul class="space-y-3 mb-8 text-sm flex-grow">
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>全部功能，无任何模块限制</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>激活一台电脑，<strong>永久使用</strong>不到期</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>每年 2 次免费换机（联系客服解绑）</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>免费获取所有软件更新</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>微信 / 邮箱优先售后</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-green-500 text-lg leading-none pt-0.5">✓</span>
+              <span>订阅用户可全价升级到永久版</span>
+            </li>
+          </ul>
+
+          <a href="#contact"
+             class="block text-center bg-wl-blue hover:bg-wl-blue-hover text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-wl-blue/30 transition">
+            微信联系购买
+          </a>
+          <p class="text-xs text-slate-400 text-center mt-3">
+            适合：长期使用者 / 追求省钱 / 稳定业务
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Trial CTA -->
+      <div class="mt-10 text-center">
+        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+           class="inline-flex items-center gap-2 text-slate-600 hover:text-wl-blue font-medium transition">
+          <span>🎁</span>
+          先下载免费试用 7 天 →
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ── -->
+  <section id="faq" class="py-20 px-6 bg-wl-bg">
+    <div class="max-w-4xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-wl-navy text-center mb-14">常见问题</h2>
+
+      <div class="space-y-4">
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            可以先试用吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            可以，每台电脑可<strong>免费试用 7 天</strong>，功能与正式版完全相同。
+            下载软件后启动，选择"免费试用"即可，无需付费、无需信用卡。
+            试用期结束后购买激活码即可继续使用。<br>
+            <strong class="text-wl-orange">注意：</strong>每台电脑仅可试用一次。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            订阅版和永久版有什么区别？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            <strong>功能完全一致，只是授权时长不同。</strong><br>
+            · <strong>订阅版 ¥199/年</strong>（活动价，原价 ¥398）：门槛低、灵活，适合刚起步的小微企业或短期项目。<br>
+            · <strong>永久版 ¥499</strong>（活动价，原价 ¥998）：一次付费永久使用，2.5 年即回本，适合长期业务，<strong class="text-wl-orange">强烈推荐</strong>。<br>
+            订阅用户可以随时按<strong>永久版活动价 ¥499</strong>升级为永久用户。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            订阅到期不续费会怎样？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            · 到期前 30 天：软件内会开始提示续费<br>
+            · 到期后 <strong>7 天宽限期</strong>：仍可正常使用<br>
+            · 宽限期结束：软件进入<strong>只读模式</strong>——依然可以查看/导出全部历史账目和报表，但无法新增或编辑<br>
+            · 随时续费即可恢复正常使用<br><br>
+            <strong>你的数据永远属于你，不会因为不续费而丢失。</strong>
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            我不懂会计，能用吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            可以。软件内置 23 种常用凭证模板（收入、支出、工资、税费等），套用模板即可。
+            借贷金额输入错会自动提示。但如果完全没有会计基础，建议先了解基本的借贷记账原理。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            数据存在哪里？会不会泄露？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            数据 <strong>100% 存在你自己的电脑</strong>（`%APPDATA%/WiseLedger/`），不上传任何云端。
+            只有在激活时会向服务器发一次机器特征码（SHA256 哈希，不含个人信息）。备份文件采用 AES-256-GCM 加密。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            激活码可以在几台电脑上用？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            一个激活码绑定一台电脑。更换电脑（硬件升级、重装系统换主板等）时可以解绑迁移，
+            每年最多 2 次。超过次数联系客服协助处理。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            软件启动时 Windows 弹"未识别应用"警告是病毒吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            <strong>不是病毒。</strong>因为暂未购买CA签名证书，
+            Windows 对未签名的新软件都会弹这个提示。点【更多信息】→【仍要运行】即可正常安装。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            以后升级新版本要重新买吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            不用。所有版本更新<strong>免费</strong>，激活信息自动延续，不需要重新输激活码或购买。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            支持 Mac 或 Linux 吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            目前仅支持 Windows 10 / 11 64 位。Mac 版本正在评估中。
+          </p>
+        </details>
+
+        <details class="bg-white rounded-xl p-6 border border-slate-100 group">
+          <summary class="font-semibold text-wl-navy cursor-pointer flex items-center justify-between">
+            可以退款吗？
+            <span class="text-wl-blue group-open:rotate-45 transition-transform text-2xl">+</span>
+          </summary>
+          <p class="mt-4 text-slate-600 leading-relaxed">
+            因软件提供<strong>7 天免费试用</strong>，您可以在购买前充分体验所有功能，
+            因此激活后原则上不予退款。<br>
+            如软件存在重大缺陷且开发者无法在合理期限内修复，可申请退款。
+            详见<a href="#" class="text-wl-blue underline">《最终用户许可协议》</a>。
+          </p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Contact / Footer ── -->
+  <footer id="contact" class="bg-wl-navy text-slate-300 py-16 px-6">
+    <div class="max-w-6xl mx-auto grid md:grid-cols-3 gap-12">
+      <div>
+        <div class="flex items-center gap-3 mb-4">
+          <img src="assets/logo-256.png" alt="" class="w-10 h-10">
+          <div>
+            <div class="text-white font-bold">智一盈小账</div>
+            <div class="text-wl-orange text-sm font-semibold">WiseLedger</div>
+          </div>
+        </div>
+        <p class="text-sm text-slate-400 leading-relaxed">
+          给个体户、小微企业、代账会计的极简记账工具。<br>
+          1 分钟上手，一次买断，永久使用。
+        </p>
+      </div>
+
+      <div>
+        <h4 class="text-white font-semibold mb-4">联系我们</h4>
+        <ul class="space-y-3 text-sm">
+          <li class="flex items-start gap-3">
+            <span class="text-wl-orange">✉</span>
+            <a href="mailto:2928314561@qq.com" class="hover:text-white transition">
+              2928314561@qq.com
+            </a>
+          </li>
+          <li class="flex items-start gap-3">
+            <span class="text-wl-orange">💬</span>
+            <span>客服微信：（联系时提供）</span>
+          </li>
+        </ul>
+      </div>
+
+      <div>
+        <h4 class="text-white font-semibold mb-4">下载与链接</h4>
+        <ul class="space-y-3 text-sm">
+          <li>
+            <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+               class="hover:text-white transition inline-flex items-center gap-2">
+              ⬇ 最新版下载
+            </a>
+          </li>
+          <li>
+            <a href="https://github.com/ufcmmx/Finance-App/releases"
+               class="hover:text-white transition">历史版本 (GitHub)</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto mt-12 pt-8 border-t border-slate-700 text-center text-sm text-slate-500">
+      © 2026 WisdomPlus · 智一盈小账 (WiseLedger) 是 智一咨询（WisdomPlus） 旗下产品
+    </div>
+  </footer>
+
+</body>
+</html>
