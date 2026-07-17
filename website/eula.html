@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>最终用户许可协议 (EULA) — 智一盈小账 · WiseLedger</title>
+  <meta name="description" content="智一盈小账 · WiseLedger 最终用户许可协议 v1.0。授权范围、免责条款、责任限制、退款政策等详细说明。">
+  <link rel="icon" href="assets/logo-256.png" type="image/png">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'wl-navy': '#1c2340',
+            'wl-blue': '#3d6fdb',
+            'wl-blue-hover': '#2d5dc8',
+            'wl-orange': '#ff8c00',
+            'wl-bg': '#f5f7fa',
+          },
+          fontFamily: {
+            sans: ['"PingFang SC"', '"Microsoft YaHei"', '"Hiragino Sans GB"', 'Helvetica', 'Arial', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+
+    /* 法律文档专用排版 */
+    .legal-content h2 {
+      font-size: 1.5rem; font-weight: 700; color: #1c2340;
+      margin: 2.5rem 0 1rem; padding-bottom: 0.5rem;
+      border-bottom: 2px solid #e4e8f0;
+    }
+    .legal-content h2:first-child { margin-top: 0; }
+    .legal-content p { margin: 1rem 0; line-height: 1.9; color: #334155; }
+    .legal-content ol, .legal-content ul {
+      margin: 1rem 0 1rem 1.5rem; line-height: 1.9; color: #334155;
+    }
+    .legal-content ol > li { margin: 0.5rem 0; padding-left: 0.5rem; list-style: decimal; }
+    .legal-content ul > li { margin: 0.4rem 0; padding-left: 0.3rem; list-style: disc; }
+    .legal-content ol ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
+    .legal-content strong { color: #1c2340; font-weight: 700; }
+    .legal-content hr { margin: 2.5rem 0; border-color: #e4e8f0; }
+    .legal-content .warn {
+      background: #fff5e6; border-left: 4px solid #ff8c00;
+      padding: 12px 16px; margin: 1.5rem 0; border-radius: 4px;
+      color: #7a4a00;
+    }
+    .legal-content .warn strong { color: #7a4a00; }
+
+    /* 打印样式 */
+    @media print {
+      nav, footer, .no-print { display: none !important; }
+      .legal-content { font-size: 11pt; }
+      .legal-content h2 { page-break-after: avoid; }
+    }
+  </style>
+</head>
+
+<body class="font-sans text-slate-800 bg-white">
+
+  <!-- ── Nav ── -->
+  <nav class="fixed top-0 left-0 right-0 z-50 backdrop-blur bg-white/90 border-b border-slate-100 no-print">
+    <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+      <a href="index.html" class="flex items-center gap-3">
+        <img src="assets/logo-256.png" alt="WiseLedger" class="w-9 h-9">
+        <div>
+          <div class="text-base font-bold text-wl-navy leading-tight">智一盈小账</div>
+          <div class="text-xs text-wl-orange leading-tight font-semibold">WiseLedger</div>
+        </div>
+      </a>
+      <div class="flex items-center gap-4 text-sm">
+        <a href="index.html" class="text-slate-600 hover:text-wl-blue transition">← 返回首页</a>
+        <button onclick="window.print()"
+                class="hidden md:inline-block border border-slate-300 hover:border-wl-blue hover:text-wl-blue text-slate-600 px-4 py-1.5 rounded-lg text-sm transition">
+          🖨 打印
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Header ── -->
+  <header class="pt-28 pb-8 px-6 bg-gradient-to-br from-wl-navy via-slate-900 to-wl-navy text-white">
+    <div class="max-w-4xl mx-auto">
+      <div class="inline-block px-3 py-1 rounded-full bg-white/10 text-slate-300 text-xs font-semibold mb-4">
+        法律文档
+      </div>
+      <h1 class="text-3xl md:text-4xl font-bold mb-2">最终用户许可协议</h1>
+      <p class="text-slate-400 text-sm">End User License Agreement (EULA) · 版本 v1.0 · 生效日期 2026-06-25</p>
+    </div>
+  </header>
+
+  <!-- ── Content ── -->
+  <main class="py-12 px-6">
+    <div class="max-w-4xl mx-auto">
+
+      <div class="warn mb-8">
+        <strong>⚠ 请仔细阅读本协议。</strong>
+        激活并使用本软件即表示您已阅读、理解并同意本协议全部条款。
+        如不同意，请勿激活或使用本软件。
+      </div>
+
+      <div class="legal-content">
+
+        <p><strong>引言：</strong>本《最终用户许可协议》（以下简称"本协议"）是您（以下简称"用户"或"您"）与智一盈小账 · WiseLedger 软件开发者（以下简称"开发者"或"我们"）之间就使用智一盈小账 · WiseLedger 软件（以下简称"本软件"）订立的法律协议。</p>
+
+        <h2>一、定义</h2>
+        <ol>
+          <li><strong>"本软件"</strong> 指智一盈小账 · WiseLedger 的可执行文件、随附文档、数据包及任何官方发布的更新版本。</li>
+          <li><strong>"用户"</strong> 指购买激活码或使用免费试用并使用本软件的自然人、个体工商户或法人组织。</li>
+          <li><strong>"激活码"</strong> 指开发者向用户提供的、用于解锁软件使用权的唯一字符串（格式 <code>WL-XXXX-XXXX-XXXX</code>）。</li>
+          <li><strong>"授权机器"</strong> 指用户通过激活码或试用申请激活本软件的硬件设备。</li>
+          <li><strong>"订阅版"</strong> 指按年付费的授权版本，到期后进入宽限期或只读模式。</li>
+          <li><strong>"永久版"</strong> 指一次性买断、无到期时间的授权版本。</li>
+          <li><strong>"试用版"</strong> 指为期 7 天的免费试用授权，每台电脑仅可申请一次。</li>
+        </ol>
+
+        <h2>二、授权范围</h2>
+        <ol>
+          <li>用户支付授权费用并完成激活后，开发者授予用户 <strong>非独占、不可转让</strong> 的使用本软件的权利。授权时长取决于用户选择的版本：
+            <ul>
+              <li><strong>试用版：</strong>激活后 7 日内有效。</li>
+              <li><strong>订阅版：</strong>激活后 1 年内有效；到期后 7 天宽限期照常使用；宽限期结束后进入只读模式，仍可查看和导出历史数据，但无法新增或编辑。</li>
+              <li><strong>永久版：</strong>激活后永久有效。</li>
+            </ul>
+          </li>
+          <li>单个激活码仅可绑定 <strong>1 台</strong>授权机器使用。</li>
+          <li>用户每年最多可申请 <strong>2 次</strong>机器变更（解绑迁移），超过此次数需联系客服处理。</li>
+          <li>订阅版用户可以随时按永久版全价升级为永久用户。</li>
+          <li>本协议授予的是<strong>使用权</strong>而非<strong>所有权</strong>。</li>
+        </ol>
+
+        <h2>三、使用限制</h2>
+        <p>用户<strong>不得</strong>：</p>
+        <ol>
+          <li>反编译、反汇编、逆向工程本软件，或试图获取其源代码；</li>
+          <li>移除、修改本软件的版权声明、激活验证机制、商标或任何标识；</li>
+          <li>复制激活码并向他人提供，或在多台未授权机器上使用同一激活码；</li>
+          <li>将本软件用于任何违反中华人民共和国法律法规的目的；</li>
+          <li>利用本软件协助第三方实施会计造假、税务欺诈或其他不正当行为；</li>
+          <li>出租、出售、转让本软件或将其作为服务对外提供（除非取得开发者书面许可）；</li>
+          <li>移除、绕过或干扰本软件的任何安全、防破解或激活验证机制。</li>
+        </ol>
+        <p><strong>违反上述任一限制的，开发者有权立即终止用户的授权、吊销激活码，且不予退款；情节严重的，开发者保留追究法律责任的权利。</strong></p>
+
+        <h2>四、知识产权</h2>
+        <ol>
+          <li>本软件及其所有相关材料（包括但不限于代码、文档、图标、用户界面、商标"智一盈小账"和"WiseLedger"）的著作权、商标权及其他知识产权均归开发者所有。</li>
+          <li>本协议仅授予用户<strong>使用权</strong>，不构成对任何知识产权的转让或授权用户进行二次开发。</li>
+        </ol>
+
+        <h2>五、数据准确性与用户责任</h2>
+        <div class="warn">
+          <strong>⚠ 重要：</strong>本软件为辅助记账工具，<strong>不构成专业会计、税务或法律建议</strong>。
+        </div>
+        <ol>
+          <li>用户应<strong>自行核对</strong>本软件输出的所有数据，包括但不限于：
+            <ul>
+              <li>凭证金额、科目编码、税率计算结果</li>
+              <li>财务报表（资产负债表、利润表、现金流量表等）数据</li>
+              <li>期末结账结果</li>
+              <li>期初余额</li>
+            </ul>
+          </li>
+          <li>用户<strong>自行负责</strong>：
+            <ul>
+              <li>输入数据的真实性、准确性、完整性</li>
+              <li>选择正确的会计科目、核算方式、会计准则</li>
+              <li>关注国家税法、会计准则、行业规范的最新变化</li>
+              <li>在涉及重大业务决策时咨询专业会计师或税务师</li>
+            </ul>
+          </li>
+          <li>用户对其在本软件中创建、输入、保存、导出的所有数据承担全部责任。</li>
+        </ol>
+
+        <h2>六、数据备份责任</h2>
+        <ol>
+          <li><strong>用户自行负责</strong>对本软件中的账套数据进行定期备份。</li>
+          <li>开发者<strong>不承担</strong>因下列情况导致的数据损失：
+            <ul>
+              <li>用户硬件故障（硬盘损坏、主板烧毁等）</li>
+              <li>用户未备份或备份未成功</li>
+              <li>用户误操作（删除客户、覆盖数据、清空账套等）</li>
+              <li>操作系统崩溃、重装、升级</li>
+              <li>病毒、恶意软件、勒索软件</li>
+              <li>不可抗力事件（火灾、地震、停电等）</li>
+              <li>第三方备份介质（U 盘、移动硬盘、云盘）的故障</li>
+            </ul>
+          </li>
+        </ol>
+        <p><strong>建议用户至少每月备份一次账套数据，并保留多份历史版本。</strong></p>
+
+        <h2>七、免责声明</h2>
+        <ol>
+          <li><strong>本软件按"现状"提供。</strong>开发者不就以下事项作任何明示或暗示的保证：
+            <ul>
+              <li>软件无错误、无中断、无故障</li>
+              <li>软件能满足用户所有特定需求</li>
+              <li>软件计算结果适用于所有税务/会计场景或所有行业</li>
+              <li>软件与所有操作系统版本、硬件配置、第三方软件兼容</li>
+              <li>软件能持续获得更新、维护或技术支持</li>
+            </ul>
+          </li>
+          <li><strong>本软件输出的报表、数据、计算结果仅供参考。</strong>正式税务申报、财务披露、对外提供的报表，应以税务机关、审计机构、有关部门的最终认定为准。</li>
+          <li>开发者<strong>不对</strong>下列情况承担任何责任：
+            <ul>
+              <li>用户使用本软件输出的结果进行税务申报或财务披露后被税务机关、监管部门追缴、处罚、罚款</li>
+              <li>软件缺陷（bug）导致的间接经济损失、商业利润损失</li>
+              <li>用户的业务决策依赖本软件输出而产生的不利后果</li>
+              <li>数据丢失、损坏、泄露、被篡改（用户负责备份和数据安全）</li>
+              <li>因网络中断、激活服务器故障导致的暂时无法激活</li>
+              <li>用户违反法律法规使用本软件产生的法律后果</li>
+            </ul>
+          </li>
+          <li>本软件<strong>不构成</strong>任何会计、税务、法律、投资或商业建议。用户在重大决策前应咨询有资质的专业人士。</li>
+        </ol>
+
+        <h2>八、责任限制</h2>
+        <ol>
+          <li><strong>无论何种情况，开发者就本软件向用户承担的全部责任上限为用户支付的本软件购买价格。</strong>试用版用户支付金额为零，开发者对试用版用户不承担任何金钱赔偿责任。</li>
+          <li>开发者<strong>不承担</strong>任何间接损失、衍生损失、商业利润损失、数据损失补偿、商誉损失或惩罚性赔偿，即使开发者事先已被告知此类损失发生的可能性。</li>
+          <li>上述责任限制在中华人民共和国法律允许的最大范围内生效。如适用法律强制要求开发者承担更高责任的，以法律规定为准。</li>
+        </ol>
+
+        <h2>九、更新与服务</h2>
+        <ol>
+          <li>开发者<strong>可能</strong>（但不保证）通过版本升级、补丁、数据包等形式提供功能增强、bug 修复、税率/科目更新。</li>
+          <li>开发者<strong>可能</strong>提供有限的技术支持，具体形式（微信、邮件、电话等）和范围由开发者自行决定。</li>
+          <li>开发者<strong>有权</strong>根据法律法规变化、税法调整、运营需要修改本软件功能，无需事先单独通知每位用户。</li>
+          <li>开发者<strong>不保证</strong>长期持续维护本软件。如开发者决定终止本软件的维护，将通过软件公告或购买记录联系方式提前 30 日通知用户。</li>
+        </ol>
+
+        <h2>十、激活机制</h2>
+        <ol>
+          <li>本软件采用<strong>激活码 + 机器绑定</strong>的方式授权。激活码与首次激活的硬件设备（基于 CPU、主板、硬盘的特征码 SHA256 哈希值）绑定。</li>
+          <li>激活过程需要联网验证。激活成功后，日常使用<strong>无需联网</strong>。</li>
+          <li>更换硬件需要重新激活，<strong>每年限 2 次</strong>。超过次数请联系客服。</li>
+          <li>开发者<strong>有权</strong>在下列情况下吊销激活码：
+            <ul>
+              <li>用户违反本协议任何条款</li>
+              <li>激活码异常使用（如同一码在短时间内被大量不同机器尝试激活，提示存在泄露或非法分发）</li>
+              <li>用户已申请退款并退款成功</li>
+              <li>接到行政、司法机关的合法要求</li>
+            </ul>
+          </li>
+          <li>激活信息（包括激活时间、机器特征码的 SHA256 哈希值、IP 地址）的收集仅用于授权验证、滥用检测和服务统计，<strong>不包含</strong>用户的个人身份信息或账套业务数据。详见随附的《隐私声明》。</li>
+        </ol>
+
+        <h2>十一、退款政策</h2>
+        <ol>
+          <li>因本软件提供 <strong>7 天免费试用</strong>，用户可以在购买前充分体验所有功能。因此激活后原则上<strong>不予退款</strong>。</li>
+          <li>本软件存在<strong>重大缺陷</strong>且开发者无法在合理期限内修复的，用户可申请退款，金额上限为用户实际支付的购买价格。</li>
+          <li>因用户违反本协议被开发者终止授权的，<strong>不予退款</strong>。</li>
+        </ol>
+
+        <h2>十二、协议终止</h2>
+        <p>下列任一情况发生时，本协议自动终止：</p>
+        <ol>
+          <li>用户违反本协议任何条款；</li>
+          <li>用户主动停止使用本软件；</li>
+          <li>用户主动申请退款并退款成功；</li>
+          <li>开发者决定终止本软件的运营（将提前 30 日通知）。</li>
+        </ol>
+        <p><strong>协议终止后：</strong></p>
+        <ul>
+          <li>用户应<strong>立即停止使用</strong>本软件并删除所有副本（包括激活信息、账套数据）；</li>
+          <li>第五条（数据准确性）、第六条（数据备份）、第七条（免责声明）、第八条（责任限制）、第四条（知识产权）的内容<strong>在协议终止后继续有效</strong>。</li>
+        </ul>
+
+        <h2>十三、适用法律与争议解决</h2>
+        <ol>
+          <li>本协议的订立、生效、履行、解释及争议解决均<strong>适用中华人民共和国法律</strong>（不含香港、澳门特别行政区及台湾地区法律）。</li>
+          <li>因本协议或本软件使用产生的任何争议，双方应首先<strong>友好协商</strong>解决。</li>
+          <li>协商不成的，任何一方均有权将争议提交<strong>开发者所在地</strong>有管辖权的人民法院诉讼解决。</li>
+        </ol>
+
+        <h2>十四、协议变更</h2>
+        <ol>
+          <li>开发者<strong>有权</strong>根据法律法规变化、运营需要修改本协议。</li>
+          <li>修改后的协议自新版本软件发布之日起生效，并通过软件内提示、官网公告等方式通知用户。</li>
+          <li>用户<strong>继续使用</strong>新版本软件即视为接受修改后的协议；如不接受修改，应停止使用本软件并可在 30 日内申请按比例退款（仅限激活后不足一年的情形，且限订阅版用户）。</li>
+        </ol>
+
+        <h2>十五、完整协议与可分性</h2>
+        <ol>
+          <li>本协议构成用户与开发者之间关于本软件的<strong>完整协议</strong>，取代之前所有口头或书面的协议、声明、承诺。</li>
+          <li>本协议任何条款被法院认定为无效或不可执行的，<strong>不影响</strong>其他条款的效力。无效条款应在适用法律允许的范围内被理解为最接近原意的有效条款。</li>
+        </ol>
+
+        <h2>十六、联系方式</h2>
+        <p>如对本协议或本软件有任何疑问、投诉或建议，请通过以下方式联系开发者：</p>
+        <ul>
+          <li><strong>客服邮箱：</strong><a href="mailto:230777647@qq.com" class="text-wl-blue underline">230777647@qq.com</a></li>
+          <li><strong>客服微信：</strong>请通过<a href="index.html#pricing" class="text-wl-blue underline">官网价格页</a>点击"微信联系购买"扫码添加</li>
+          <li><strong>软件官网：</strong><a href="https://wisdompluscn.com" class="text-wl-blue underline">https://wisdompluscn.com</a></li>
+        </ul>
+
+        <hr>
+
+        <p class="text-center text-slate-700 font-bold my-8">
+          用户激活并使用本软件即视为已仔细阅读、充分理解并同意本协议全部条款。
+        </p>
+
+        <p class="text-center text-xs text-slate-400 mt-8">
+          <em>开发者保留对本协议的最终解释权。</em>
+        </p>
+
+      </div>
+
+      <!-- 返回首页 CTA -->
+      <div class="mt-16 pt-8 border-t border-slate-200 flex flex-wrap gap-4 justify-between items-center no-print">
+        <a href="index.html"
+           class="inline-flex items-center gap-2 text-wl-blue hover:text-wl-blue-hover font-medium">
+          ← 返回首页
+        </a>
+        <button onclick="window.print()"
+                class="text-slate-500 hover:text-wl-blue text-sm transition">
+          🖨 打印此页保存
+        </button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ── Footer ── -->
+  <footer class="bg-wl-navy text-slate-300 py-8 px-6 no-print">
+    <div class="max-w-6xl mx-auto text-center text-sm text-slate-400">
+      © 2026 WisdomPlus · 智一盈小账 (WiseLedger) 是 智一咨询（WisdomPlus） 旗下产品<br>
+      <a href="index.html" class="hover:text-white transition">官网</a> ·
+      <a href="mailto:230777647@qq.com" class="hover:text-white transition">邮件</a>
+    </div>
+  </footer>
+
+</body>
+</html>
