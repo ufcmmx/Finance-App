@@ -39,6 +39,19 @@
     .card-hover { transition: transform .2s ease, box-shadow .2s ease; }
     .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(28,35,64,.12); }
     .screenshot-shadow { box-shadow: 0 20px 60px rgba(28,35,64,.18), 0 2px 8px rgba(28,35,64,.06); }
+
+    /* 微信二维码弹窗 */
+    .wechat-modal { position:fixed; inset:0; z-index:100; display:none;
+      align-items:center; justify-content:center;
+      background:rgba(28,35,64,.75); backdrop-filter: blur(6px); }
+    .wechat-modal.open { display:flex; }
+    .wechat-modal-content { background:#fff; border-radius:20px; padding:32px 36px;
+      max-width:400px; margin:20px; text-align:center;
+      box-shadow:0 30px 80px rgba(0,0,0,.4); animation:pop .25s ease; }
+    @keyframes pop {
+      from { transform:scale(.9); opacity:0; }
+      to   { transform:scale(1); opacity:1; }
+    }
   </style>
 </head>
 
@@ -59,7 +72,7 @@
         <a href="#screenshots" class="hover:text-wl-blue transition">截图</a>
         <a href="#pricing" class="hover:text-wl-blue transition">价格</a>
         <a href="#faq" class="hover:text-wl-blue transition">常见问题</a>
-        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip" download="WiseLedger.zip"
            class="bg-wl-blue text-white px-4 py-2 rounded-lg hover:bg-wl-blue-hover transition font-medium">
           下载
         </a>
@@ -88,7 +101,7 @@
           无需培训，装完即用；先试用后付费。
         </p>
         <div class="flex flex-wrap gap-4 mb-4">
-          <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+          <a href="https://download.wisdompluscn.com/wiseledger/latest.zip" download="WiseLedger.zip"
              class="bg-wl-blue hover:bg-wl-blue-hover text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2 transition shadow-lg shadow-wl-blue/30">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -319,7 +332,7 @@
             </li>
           </ul>
 
-          <a href="#contact"
+          <a href="#" onclick="event.preventDefault();openWechatModal();"
              class="block text-center bg-white hover:bg-slate-50 text-wl-blue border-2 border-wl-blue px-6 py-3 rounded-xl font-bold transition">
             微信联系订阅
           </a>
@@ -374,7 +387,7 @@
             </li>
           </ul>
 
-          <a href="#contact"
+          <a href="#" onclick="event.preventDefault();openWechatModal();"
              class="block text-center bg-wl-blue hover:bg-wl-blue-hover text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-wl-blue/30 transition">
             微信联系购买
           </a>
@@ -387,7 +400,7 @@
 
       <!-- Trial CTA -->
       <div class="mt-10 text-center">
-        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip" download="WiseLedger.zip"
            class="inline-flex items-center gap-2 text-slate-600 hover:text-wl-blue font-medium transition">
           <span>🎁</span>
           先下载免费试用 7 天 →
@@ -522,6 +535,55 @@
     </div>
   </section>
 
+  <!-- ── 微信二维码弹窗 ── -->
+  <div id="wechatModal" class="wechat-modal" onclick="if(event.target===this)closeWechatModal();">
+    <div class="wechat-modal-content">
+      <div class="text-2xl font-bold text-wl-navy mb-2">微信联系购买</div>
+      <div class="text-sm text-slate-500 mb-6">
+        长按识别或截图上传微信 → 加好友获取激活码
+      </div>
+      <div class="mb-4">
+        <img src="assets/wechat-qr.jpg" alt="微信二维码"
+             class="w-64 h-64 mx-auto rounded-xl border border-slate-200 shadow"
+             onerror="this.style.display='none';document.getElementById('qrPlaceholder').style.display='block';">
+        <div id="qrPlaceholder" style="display:none;"
+             class="w-64 h-64 mx-auto rounded-xl border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-sm">
+          二维码图片待上传<br>
+          assets/wechat-qr.jpg
+        </div>
+      </div>
+      <div class="text-xs text-slate-500 mb-6">
+        或发送邮件：<a href="mailto:2928314561@qq.com" class="text-wl-blue hover:underline">2928314561@qq.com</a>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="closeWechatModal()"
+                class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-medium transition">
+          关闭
+        </button>
+        <a href="https://download.wisdompluscn.com/wiseledger/latest.zip" download="WiseLedger.zip"
+           onclick="closeWechatModal()"
+           class="flex-1 bg-wl-blue hover:bg-wl-blue-hover text-white py-3 rounded-xl font-bold transition text-center">
+          先下载试用
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function openWechatModal() {
+      document.getElementById('wechatModal').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeWechatModal() {
+      document.getElementById('wechatModal').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+    // ESC 关闭
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') closeWechatModal();
+    });
+  </script>
+
   <!-- ── Contact / Footer ── -->
   <footer id="contact" class="bg-wl-navy text-slate-300 py-16 px-6">
     <div class="max-w-6xl mx-auto grid md:grid-cols-3 gap-12">
@@ -559,7 +621,7 @@
         <h4 class="text-white font-semibold mb-4">下载与链接</h4>
         <ul class="space-y-3 text-sm">
           <li>
-            <a href="https://download.wisdompluscn.com/wiseledger/latest.zip"
+            <a href="https://download.wisdompluscn.com/wiseledger/latest.zip" download="WiseLedger.zip"
                class="hover:text-white transition inline-flex items-center gap-2">
               ⬇ 最新版下载
             </a>
