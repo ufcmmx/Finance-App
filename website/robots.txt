@@ -1,0 +1,18 @@
+# 允许所有搜索引擎爬取
+User-agent: *
+Allow: /
+
+# 百度爬虫（显式声明，便于百度识别）
+User-agent: Baiduspider
+Allow: /
+
+# Google
+User-agent: Googlebot
+Allow: /
+
+# 必应
+User-agent: bingbot
+Allow: /
+
+# Sitemap 位置
+Sitemap: https://www.wisdompluscn.com/sitemap.xml
