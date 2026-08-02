@@ -1,15 +1,23 @@
 /**
  * WiseLedger License Server — Cloudflare Workers
  *
- * 三个接口：
+ * 接口：
  *   POST /admin/generate   生成新激活码（需 X-Admin-Key header）
  *   POST /activate         客户端首次激活，返回签名 token
+ *   POST /trial            申请 7 天试用
  *   POST /update-data      检查/下载年度数据包（税率/科目库）
+ *   POST /download-log     网站下载按钮点击埋点（KV 计数 + D1 日志）
+ *   GET  /stats            聚合统计（需 X-Admin-Key header）
  *
  * 存储：
  *   Cloudflare KV (binding: LICENSES)
- *   key: 激活码 (e.g., "WL-A3F2-B891-K7H3")
- *   val: JSON { customer, machine_id, sold_at, activated_at, status, ... }
+ *     key: 激活码 (e.g., "WL-A3F2-B891-K7H3")
+ *     val: JSON { customer, machine_id, sold_at, activated_at, status, ... }
+ *   Cloudflare KV (同一 binding)
+ *     key: "download:total"       val: "123"                累计总数
+ *     key: "download:YYYY-MM-DD"  val: "17"                 每日计数
+ *   Cloudflare D1 (binding: STATS)
+ *     table: downloads(id, created_at)  每次点击一行
  *
  * 密钥：
  *   ADMIN_KEY                环境变量 (Workers Secret)
@@ -321,6 +329,105 @@ async function handleTrial(request, env) {
 }
 
 // ────────────────────────────────────────────────────────────────
+// 接口 5：POST /download-log
+// 网站下载按钮点击埋点。只记聚合数，不记 IP/UA。
+// 请求：{} （空 body 即可，也可选传 { source: "hero" } 标记来源）
+// 返回：{ ok: true }
+// ────────────────────────────────────────────────────────────────
+async function handleDownloadLog(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const source = typeof body.source === 'string' ? body.source.slice(0, 32) : '';
+
+  const now = new Date();
+  const dayKey = `download:${now.toISOString().slice(0, 10)}`;   // YYYY-MM-DD
+  const totalKey = 'download:total';
+
+  // KV 计数（原子性差，但埋点场景够用；并发极高时可切 D1 SUM）
+  const [dayVal, totalVal] = await Promise.all([
+    env.LICENSES.get(dayKey),
+    env.LICENSES.get(totalKey),
+  ]);
+  const nextDay = (parseInt(dayVal || '0', 10) + 1).toString();
+  const nextTotal = (parseInt(totalVal || '0', 10) + 1).toString();
+
+  const kvWrites = [
+    env.LICENSES.put(dayKey, nextDay),
+    env.LICENSES.put(totalKey, nextTotal),
+  ];
+
+  // D1 详细日志（如果绑定了）
+  if (env.STATS) {
+    kvWrites.push(
+      env.STATS.prepare('INSERT INTO downloads (created_at, source) VALUES (?, ?)')
+        .bind(now.toISOString(), source)
+        .run()
+        .catch(err => console.error('D1 insert failed:', err))
+    );
+  }
+
+  await Promise.all(kvWrites);
+
+  return jsonResponse({ ok: true });
+}
+
+// ────────────────────────────────────────────────────────────────
+// 接口 6：GET /stats
+// 聚合统计（下载数 + 试用数 + 激活数），需 X-Admin-Key 鉴权
+// 返回 JSON，浏览器直接打开即可看
+// ────────────────────────────────────────────────────────────────
+async function handleStats(request, env) {
+  const providedKey = request.headers.get('X-Admin-Key') || new URL(request.url).searchParams.get('key');
+  if (providedKey !== env.ADMIN_KEY) {
+    return errorResponse('Unauthorized', 401);
+  }
+
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+
+  // 累计总数（KV）
+  const total = parseInt((await env.LICENSES.get('download:total')) || '0', 10);
+  const todayCount = parseInt((await env.LICENSES.get(`download:${todayStr}`)) || '0', 10);
+
+  // 最近 7 天 / 30 天
+  const dailyKeys = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    dailyKeys.push(`download:${d.toISOString().slice(0, 10)}`);
+  }
+  const dailyVals = await Promise.all(dailyKeys.map(k => env.LICENSES.get(k)));
+  const daily = dailyKeys.map((k, i) => ({
+    date: k.slice('download:'.length),
+    count: parseInt(dailyVals[i] || '0', 10),
+  }));
+  const last7 = daily.slice(0, 7).reduce((s, d) => s + d.count, 0);
+  const last30 = daily.reduce((s, d) => s + d.count, 0);
+
+  // D1 详细（如果有）
+  let d1_total = null;
+  if (env.STATS) {
+    try {
+      const r = await env.STATS.prepare('SELECT COUNT(*) AS n FROM downloads').first();
+      d1_total = r?.n ?? null;
+    } catch (err) {
+      d1_total = `error: ${err.message}`;
+    }
+  }
+
+  return jsonResponse({
+    generated_at: new Date().toISOString(),
+    downloads: {
+      total,           // KV 累计
+      today: todayCount,
+      last_7_days: last7,
+      last_30_days: last30,
+      d1_total,        // D1 累计（可与 KV 对账）
+      daily,           // 最近 30 天每日数据
+    },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
 // 接口 3：POST /update-data
 // 年度数据包（税率/科目库）更新
 // 暂时只返回当前可用版本，真正的数据可以放到 R2 或硬编码
@@ -378,17 +485,27 @@ export default {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key',
         },
       });
     }
 
-    if (request.method !== 'POST') {
-      return errorResponse('Method not allowed', 405);
-    }
-
     try {
+      // GET 路由（目前只有 /stats）
+      if (request.method === 'GET') {
+        if (url.pathname === '/stats') {
+          const resp = await handleStats(request, env);
+          resp.headers.set('Access-Control-Allow-Origin', '*');
+          return resp;
+        }
+        return errorResponse('Not found', 404);
+      }
+
+      if (request.method !== 'POST') {
+        return errorResponse('Method not allowed', 405);
+      }
+
       if (url.pathname === '/admin/generate') {
         return await handleAdminGenerate(request, env);
       }
@@ -400,6 +517,11 @@ export default {
       }
       if (url.pathname === '/update-data') {
         return await handleUpdateData(request, env);
+      }
+      if (url.pathname === '/download-log') {
+        const resp = await handleDownloadLog(request, env);
+        resp.headers.set('Access-Control-Allow-Origin', '*');
+        return resp;
       }
       return errorResponse('Not found', 404);
     } catch (err) {

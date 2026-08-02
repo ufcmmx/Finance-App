@@ -7,5 +7,16 @@ compatibility_date = "2026-06-22"
 binding = "LICENSES"
 id = "8e0c713f670643a4b9db5b30edec52b1"
 
+# D1 数据库 — 下载埋点详细日志
+# 首次部署前执行：
+#   wrangler d1 create wiseledger-stats
+# 把返回的 database_id 填进下面的 database_id
+# 然后执行建表：
+#   wrangler d1 execute wiseledger-stats --remote --file=./schema.sql
+[[d1_databases]]
+binding = "STATS"
+database_name = "wiseledger-stats"
+database_id = "2a6a4799-195f-42d0-8021-a9a809e0be53"
+
 # 敏感变量（ADMIN_KEY / ED25519_PRIVATE_KEY_B64）通过
 # `wrangler secret put` 单独设置，不在这里

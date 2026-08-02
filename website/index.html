@@ -78,6 +78,8 @@
   }
   </script>
 
+  <!-- Web Analytics 由 Cloudflare Pages 自动注入 beacon，无需手动加 script -->
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -851,6 +853,51 @@
       }
       window.addEventListener('scroll', onScroll, { passive: true });
       onScroll();
+    })();
+
+    // ───────────────────────────────────────────────────────────
+    // 下载按钮埋点
+    // 拦截所有指向 latest.zip 的 <a> 点击，异步发送到 /download-log
+    // 用 sendBeacon 保证跳转/下载后请求仍能发出；失败静默，不影响下载
+    // source 从最近的 <section id> 或 <nav>/<footer> 推断
+    // ───────────────────────────────────────────────────────────
+    (function () {
+      const ENDPOINT = 'https://license.wisdompluscn.com/download-log';
+
+      function inferSource(link) {
+        const nav = link.closest('nav');
+        if (nav) return 'nav';
+        const footer = link.closest('footer');
+        if (footer) return 'footer';
+        const section = link.closest('section[id]');
+        if (section) return section.id;
+        return 'other';
+      }
+
+      function logDownload(source) {
+        const payload = JSON.stringify({ source });
+        try {
+          if (navigator.sendBeacon) {
+            const blob = new Blob([payload], { type: 'application/json' });
+            navigator.sendBeacon(ENDPOINT, blob);
+            return;
+          }
+        } catch (_) { /* fall through */ }
+        // Fallback: fetch keepalive
+        fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+          mode: 'cors',
+        }).catch(() => {});
+      }
+
+      document.addEventListener('click', function (e) {
+        const link = e.target.closest('a[href*="latest.zip"]');
+        if (!link) return;
+        logDownload(inferSource(link));
+      }, true);
     })();
   </script>
 </body>
