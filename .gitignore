@@ -23,6 +23,7 @@ license-server/.wrangler/
 license-server/wrangler-account.json
 license-server/ADMIN_GUIDE.md
 license-server/kv-backups/
+license-server/sales.csv
 
 # 忽略本地数据库文件（避免把你的测试数据也传到网上）
 *.db

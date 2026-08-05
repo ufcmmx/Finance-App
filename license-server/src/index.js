@@ -474,19 +474,52 @@ async function handleUpdateData(request, env) {
 }
 
 // ────────────────────────────────────────────────────────────────
+// CORS 帮助函数
+// sendBeacon 强制 credentials=include，不允许通配 *，必须回显具体 Origin
+// ────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  'https://www.wisdompluscn.com',
+  'https://wisdompluscn.com',
+  'https://wiseledger-site.pages.dev',
+];
+
+function corsHeadersFor(request) {
+  const origin = request.headers.get('Origin') || '';
+  const headers = {};
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Vary'] = 'Origin';
+  } else if (origin.endsWith('.wiseledger-site.pages.dev')) {
+    // CF Pages 预览部署域名（如 abc123.wiseledger-site.pages.dev）
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Vary'] = 'Origin';
+  }
+  return headers;
+}
+
+function withCors(resp, request) {
+  const cors = corsHeadersFor(request);
+  for (const [k, v] of Object.entries(cors)) resp.headers.set(k, v);
+  return resp;
+}
+
+// ────────────────────────────────────────────────────────────────
 // 路由
 // ────────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS 简单处理（开发期间方便测试）
+    // CORS 预检
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': '*',
+          ...corsHeadersFor(request),
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key',
+          'Access-Control-Max-Age': '86400',
         },
       });
     }
@@ -495,9 +528,7 @@ export default {
       // GET 路由（目前只有 /stats）
       if (request.method === 'GET') {
         if (url.pathname === '/stats') {
-          const resp = await handleStats(request, env);
-          resp.headers.set('Access-Control-Allow-Origin', '*');
-          return resp;
+          return withCors(await handleStats(request, env), request);
         }
         return errorResponse('Not found', 404);
       }
@@ -519,9 +550,7 @@ export default {
         return await handleUpdateData(request, env);
       }
       if (url.pathname === '/download-log') {
-        const resp = await handleDownloadLog(request, env);
-        resp.headers.set('Access-Control-Allow-Origin', '*');
-        return resp;
+        return withCors(await handleDownloadLog(request, env), request);
       }
       return errorResponse('Not found', 404);
     } catch (err) {
