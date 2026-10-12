@@ -477,6 +477,7 @@ class ReportPage(QWidget):
 
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
+        st_invest = bal(["1101"]) if is_small else 0.0   # 短期投资（仅小企业会计制度）
         notes_rec = bal(["1121"])
         # ── 重分类（应收↔预收、预付↔应付、其他应收↔其他应付）──
         _ar_raw   = bal(["1122"]); _ad_raw   = bal(["2203"])
@@ -500,6 +501,7 @@ class ReportPage(QWidget):
         int_rec_y   = bal_ys(["1132"])
         div_rec_y   = bal_ys(["1131"])
         cash_y      = bal_ys(["1001","1002","1012"])
+        st_invest_y = bal_ys(["1101"]) if is_small else 0.0   # 短期投资年初（仅小企业）
         inventory_y = (bal_ys(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
                       - abs(bal_ys(["1471","1472"])))
         prepd_exp_y = bal_ys(["1901"])
@@ -525,7 +527,7 @@ class ReportPage(QWidget):
         oth_cur_asset_y = prepd_exp_y + bal_ys(["1461"]) + vat_to_asset_y
         # 其他流动负债（年初）= 待转销项税额
         oth_cur_liab_y  = vat_to_liab_y
-        cur_asset_y  = (cash_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y
+        cur_asset_y  = (cash_y+st_invest_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y
                         +oth_rec_y+inventory_y+oth_cur_asset_y)
         cur_liab_y  = (st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y
                        +int_pay_y+div_pay_y+oth_pay_y+oth_cur_liab_y)
@@ -577,7 +579,7 @@ class ReportPage(QWidget):
         oth_cur_asset = prepd_exp + bal(["1461"]) + vat_to_asset
         # 其他流动负债 = 待转销项税额（应交税费下贷方余额重分类）
         oth_cur_liab  = vat_to_liab
-        cur_asset = (cash+notes_rec+acct_rec+prepay+int_rec+div_rec
+        cur_asset = (cash+st_invest+notes_rec+acct_rec+prepay+int_rec+div_rec
                      +oth_rec+inventory+oth_cur_asset)
         cur_liab  = (st_loan+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay
                      +int_pay+div_pay+oth_pay+oth_cur_liab)
@@ -631,13 +633,27 @@ class ReportPage(QWidget):
               left_ys=cash_y,        right_ys=st_loan_y,
               left_formula ="借方余额合计 | 1001 库存现金 + 1002 银行存款 + 1012 其他货币资金",
               right_formula="贷方余额 | 2001 短期借款"),
-            R("以公允价值计量且其变动\n计入当期损益的金融资产","2",0,
-              "以公允价值计量且其变动\n计入当期损益的金融负债","35",0,
-              left_formula ="借方余额 | 1101 交易性金融资产",
-              right_formula="贷方余额 | 2101 交易性金融负债"),
-            R("衍生金融资产","3",0,            "衍生金融负债","36",0,
-              left_formula ="借方余额 | 1103 衍生工具（资产方向）",
-              right_formula="贷方余额 | 2103 衍生工具（负债方向）"),
+            # 行次2：小企业→短期投资(1101)；企业准则→交易性金融资产(1101)
+            R("短期投资" if is_small else "以公允价值计量且其变动\n计入当期损益的金融资产",
+              "2",
+              st_invest if is_small else 0,
+              "以公允价值计量且其变动\n计入当期损益的金融负债" if not is_small else "",
+              "35" if not is_small else "",
+              0 if not is_small else None,
+              left_ys =st_invest_y if is_small else None,
+              right_ys=None,
+              left_formula ="借方余额 | 1101 短期投资" if is_small
+                            else "借方余额 | 1101 交易性金融资产",
+              right_formula="" if is_small else "贷方余额 | 2101 交易性金融负债"),
+            # 行次3：小企业无此项目，留空占位保持行次对齐
+            R("" if is_small else "衍生金融资产",
+              "" if is_small else "3",
+              None if is_small else 0,
+              "" if is_small else "衍生金融负债",
+              "" if is_small else "36",
+              None,
+              left_formula ="" if is_small else "借方余额 | 1103 衍生工具（资产方向）",
+              right_formula="" if is_small else "贷方余额 | 2103 衍生工具（负债方向）"),
             R("应收票据","4",notes_rec,        "应付票据","37",notes_pay,
               left_ys=notes_rec_y,   right_ys=notes_pay_y,
               left_formula ="借方余额 | 1121 应收票据",
@@ -2083,4 +2099,3 @@ class ReportPage(QWidget):
                 "请在终端运行：\n  pip install reportlab\n\n安装后重启程序。",
             )
             return False
-
