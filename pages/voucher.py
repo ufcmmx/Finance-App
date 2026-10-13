@@ -854,30 +854,106 @@ class VoucherPage(QWidget):
     def _export_balance(self):
         if not self.client_id: return
         import openpyxl
-        from openpyxl.styles import Font as XFont, Alignment, PatternFill, Border, Side
+        from openpyxl.styles import Font as XFont, Alignment, PatternFill
 
-        path,_ = QFileDialog.getSaveFileName(self,"保存",f"科目余额表_{self.period}.xlsx","Excel(*.xlsx)")
+        # ── 与界面完全一致：使用用户选择的起止期间 ──
+        start_period = self.bal_start_period.currentData()
+        end_period   = self.bal_end_period.currentData()
+        if not start_period or not end_period: return
+
+        path,_ = QFileDialog.getSaveFileName(
+            self, "保存", f"科目余额表_{start_period}_{end_period}.xlsx", "Excel(*.xlsx)")
         if not path: return
+
         conn = get_db(); c = conn.cursor()
-        c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code",(self.client_id,))
-        accts = {r['code']:dict(r) for r in c.fetchall()}
-        c.execute("""SELECT e.account_code,SUM(e.debit),SUM(e.credit)
+        c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
+        accts = {r['code']: dict(r) for r in c.fetchall()}
+
+        # ── 与 _load_balance 完全一致：按期间范围汇总 ──
+        c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period=? GROUP BY e.account_code""",
-                  (self.client_id,self.period))
-        activity = {r[0]:(r[1] or 0,r[2] or 0) for r in c.fetchall()}
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ?
+            GROUP BY e.account_code""",
+                  (self.client_id, start_period, end_period))
+        leaf_activity = {r['account_code']: (r['td'] or 0, r['tc'] or 0)
+                         for r in c.fetchall()}
         conn.close()
-        wb = openpyxl.Workbook(); ws = wb.active; ws.title="科目余额表"
+
+        all_codes  = set(accts.keys())
+        leaf_codes = {code for code in all_codes
+                      if not any(o != code and o.startswith(code + '.') for o in all_codes)}
+
+        # ── 父级汇总（与 _load_balance 完全一致）──
+        open_d = {code: accts[code]['opening_debit']  or 0 for code in all_codes}
+        open_c = {code: accts[code]['opening_credit'] or 0 for code in all_codes}
+        act_d  = {code: leaf_activity.get(code, (0, 0))[0] for code in all_codes}
+        act_c  = {code: leaf_activity.get(code, (0, 0))[1] for code in all_codes}
+
+        for code in all_codes - leaf_codes:
+            open_d[code] = open_c[code] = 0.0
+            act_d[code]  = act_c[code]  = 0.0
+        for code in sorted(leaf_codes, reverse=True):
+            parts = code.split('.')
+            for depth in range(1, len(parts)):
+                parent = '.'.join(parts[:depth])
+                if parent in all_codes:
+                    open_d[parent] += open_d[code]
+                    open_c[parent] += open_c[code]
+                    act_d[parent]  += act_d[code]
+                    act_c[parent]  += act_c[code]
+
+        # ── 写 Excel ──
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "科目余额表"
+        period_label = start_period if start_period == end_period else f"{start_period} ~ {end_period}"
+        ws.cell(1, 1, f"科目余额表  {period_label}").font = XFont(bold=True, size=13)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
+
         hdrs = ["科目编号","科目名称","期初借方","期初贷方","本期借方","本期贷方","期末借方","期末贷方"]
-        fill = PatternFill("solid",fgColor="1C2340")
-        for ci,h in enumerate(hdrs,1):
-            cell = ws.cell(1,ci,h); cell.font=XFont(bold=True,color="FFFFFF")
-            cell.fill=fill; cell.alignment=Alignment(horizontal="center")
-        for code,a in sorted(accts.items()):
-            od=a['opening_debit'] or 0; oc=a['opening_credit'] or 0
-            td,tc=activity.get(code,(0,0))
-            if a['direction']=='借': end_d=max(0,od+td-tc); end_c=0
-            else: end_c=max(0,oc+tc-td); end_d=0
-            ws.append([code,a['name'],od,oc,td,tc,end_d,end_c])
-        for col in ws.columns: ws.column_dimensions[col[0].column_letter].width=14
-        wb.save(path); QMessageBox.information(self,"成功",f"已导出:\n{path}")
+        fill_hdr  = PatternFill("solid", fgColor="1C2340")
+        fill_par  = PatternFill("solid", fgColor="F5F7FA")
+        fill_tot  = PatternFill("solid", fgColor="E8ECF5")
+        for ci, h in enumerate(hdrs, 1):
+            cell = ws.cell(2, ci, h)
+            cell.font = XFont(bold=True, color="FFFFFF")
+            cell.fill = fill_hdr
+            cell.alignment = Alignment(horizontal="center")
+
+        leaf_totals = [0.0] * 6
+        for code, a in sorted(accts.items()):
+            is_leaf = code in leaf_codes
+            od, oc = open_d[code], open_c[code]
+            td, tc = act_d[code],  act_c[code]
+            direction = a['direction']
+            if direction == '借':
+                end_d = od + td - tc; end_c = 0
+                if end_d < 0: end_c = -end_d; end_d = 0
+            else:
+                end_c = oc + tc - td; end_d = 0
+                if end_c < 0: end_d = -end_c; end_c = 0
+
+            row = ws.max_row + 1
+            ws.append([code, a['name'], od, oc, td, tc, end_d, end_c])
+            if not is_leaf:
+                for ci in range(1, 9):
+                    ws.cell(row, ci).fill = fill_par
+                    ws.cell(row, ci).font = XFont(bold=True)
+            if is_leaf:
+                for i, v in enumerate([od, oc, td, tc, end_d, end_c]):
+                    leaf_totals[i] += v
+
+        # 合计行
+        tot_row = ws.max_row + 1
+        ws.cell(tot_row, 1, "").fill = fill_tot
+        ws.cell(tot_row, 2, "合计（末级合计）").fill = fill_tot
+        ws.cell(tot_row, 2).font = XFont(bold=True)
+        ws.cell(tot_row, 2).alignment = Alignment(horizontal="center")
+        for ci, v in enumerate(leaf_totals, 3):
+            cell = ws.cell(tot_row, ci, v)
+            cell.fill = fill_tot; cell.font = XFont(bold=True)
+
+        col_widths = [14, 28, 14, 14, 14, 14, 14, 14]
+        for ci, w in enumerate(col_widths, 1):
+            ws.column_dimensions[ws.cell(1, ci).column_letter].width = w
+
+        wb.save(path)
+        QMessageBox.information(self, "成功", f"已导出：\n{path}")
