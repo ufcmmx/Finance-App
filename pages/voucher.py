@@ -115,6 +115,7 @@ class VoucherPage(QWidget):
             FROM vouchers v WHERE v.client_id=? AND v.period=? ORDER BY v.voucher_no""",
                   (self.client_id, self.period))
         rows = c.fetchall(); conn.close()
+        self.is_locked = is_closed   # 供行循环及其他方法引用
         # Update period lock indicator in toolbar
         if hasattr(self, 'lock_lbl'):
             if is_closed:
@@ -162,14 +163,20 @@ class VoucherPage(QWidget):
                 b_un = QPushButton("↩ 撤销审核"); b_un.setObjectName("btn_gray"); b_un.setFixedSize(111,30)
                 b_un.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_un)
-            if can_edit:
-                b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,30)
-                b_edit.clicked.connect(lambda _,rid=r['id']:self._edit_voucher(rid))
-                bl.addWidget(b_edit)
-            if can_delete:
-                b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,30)
-                b_del.clicked.connect(lambda _,rid=r['id']:self._del_voucher(rid))
-                bl.addWidget(b_del)
+            if self.is_locked:
+                # 封账期间：只显示「查看」按钮，不显示任何编辑/删除操作
+                b_view = QPushButton("查看"); b_view.setObjectName("btn_outline"); b_view.setFixedSize(68,30)
+                b_view.clicked.connect(lambda _,rid=r['id']:self._view_voucher(rid))
+                bl.addWidget(b_view)
+            else:
+                if can_edit:
+                    b_edit = QPushButton("编辑"); b_edit.setObjectName("btn_outline"); b_edit.setFixedSize(68,30)
+                    b_edit.clicked.connect(lambda _,rid=r['id']:self._edit_voucher(rid))
+                    bl.addWidget(b_edit)
+                if can_delete:
+                    b_del = QPushButton("删除"); b_del.setObjectName("btn_red"); b_del.setFixedSize(60,30)
+                    b_del.clicked.connect(lambda _,rid=r['id']:self._del_voucher(rid))
+                    bl.addWidget(b_del)
             bl.addStretch()
             self.v_tbl.setCellWidget(i,6,bw)
 
@@ -219,6 +226,11 @@ class VoucherPage(QWidget):
             QMessageBox.warning(self,"期间已封账","该期间已结账封账，禁止修改凭证。\n如需修改请到【期末结账】页面执行反结账。"); return
         d = VoucherDialog(self, self.client_id, self.period, vid)
         if d.exec(): self._load_vouchers()
+
+    def _view_voucher(self, vid):
+        """以只读模式打开凭证，用于封账期间查看。"""
+        d = VoucherDialog(self, self.client_id, self.period, vid, readonly=True)
+        d.exec()
 
     def _renumber_period_vouchers(self, conn, period):
         """删除凭证后按 id 升序对期间内凭证重新连续编号，并写审计日志。

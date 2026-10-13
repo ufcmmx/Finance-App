@@ -76,10 +76,11 @@ class HoverTipButton(QToolButton):
 
 class VoucherDialog(QDialog):
     """新增/编辑凭证 — 智一会计风格"""
-    def __init__(self, parent=None, client_id=None, period=None, voucher_id=None):
+    def __init__(self, parent=None, client_id=None, period=None, voucher_id=None, readonly=False):
         super().__init__(parent)
         self.client_id = client_id; self.period = period; self.voucher_id = voucher_id
-        self.setWindowTitle("编辑凭证" if voucher_id else "新增凭证")
+        self.readonly = readonly
+        self.setWindowTitle("查看凭证" if readonly else ("编辑凭证" if voucher_id else "新增凭证"))
         self.setMinimumSize(860, 580)
         self._accounts = self._fetch_accounts()
         self._templates = VOUCHER_TEMPLATES
@@ -150,14 +151,18 @@ class VoucherDialog(QDialog):
         hdr.addWidget(lbl("  制单：")); hdr.addWidget(self.preparer_lbl)
         hdr.addWidget(lbl("  附单据")); hdr.addWidget(self.attach_spin)
         hdr.addStretch()
-        # Template button
-        tpl_btn = QPushButton("凭证模板 ▼"); tpl_btn.setObjectName("btn_outline")
-        tpl_btn.clicked.connect(self._show_template_menu)
-        b_save_new = QPushButton("保存并新增"); b_save_new.setObjectName("btn_primary")
-        b_save_new.clicked.connect(lambda: self._save(and_new=True))
-        b_save = QPushButton("保 存"); b_save.setObjectName("btn_primary")
-        b_save.clicked.connect(lambda: self._save(and_new=False))
-        hdr.addWidget(tpl_btn); hdr.addWidget(b_save_new); hdr.addWidget(b_save)
+        if not self.readonly:
+            tpl_btn = QPushButton("凭证模板 ▼"); tpl_btn.setObjectName("btn_outline")
+            tpl_btn.clicked.connect(self._show_template_menu)
+            b_save_new = QPushButton("保存并新增"); b_save_new.setObjectName("btn_primary")
+            b_save_new.clicked.connect(lambda: self._save(and_new=True))
+            b_save = QPushButton("保 存"); b_save.setObjectName("btn_primary")
+            b_save.clicked.connect(lambda: self._save(and_new=False))
+            hdr.addWidget(tpl_btn); hdr.addWidget(b_save_new); hdr.addWidget(b_save)
+        else:
+            readonly_lbl = QLabel("  🔒 只读 · 封账期间")
+            readonly_lbl.setStyleSheet("color:#fa8c16;font-size:12px;")
+            hdr.addWidget(readonly_lbl)
         L.addLayout(hdr)
         L.addWidget(sep())
 
@@ -173,14 +178,15 @@ class VoucherDialog(QDialog):
         self.table.setMinimumHeight(280)
         L.addWidget(self.table)
 
-        # Add/del row buttons
-        row_btns = QHBoxLayout()
-        b_add = QPushButton("＋ 增行"); b_add.setObjectName("btn_outline")
-        b_add.clicked.connect(lambda: self._add_row())
-        b_del = QPushButton("－ 删行"); b_del.setObjectName("btn_gray")
-        b_del.clicked.connect(lambda: self._del_row())
-        row_btns.addWidget(b_add); row_btns.addWidget(b_del); row_btns.addStretch()
-        L.addLayout(row_btns)
+        # Add/del row buttons（只读模式隐藏）
+        if not self.readonly:
+            row_btns = QHBoxLayout()
+            b_add = QPushButton("＋ 增行"); b_add.setObjectName("btn_outline")
+            b_add.clicked.connect(lambda: self._add_row())
+            b_del = QPushButton("－ 删行"); b_del.setObjectName("btn_gray")
+            b_del.clicked.connect(lambda: self._del_row())
+            row_btns.addWidget(b_add); row_btns.addWidget(b_del); row_btns.addStretch()
+            L.addLayout(row_btns)
         L.addWidget(sep())
 
         # Total row
@@ -500,6 +506,16 @@ class VoucherDialog(QDialog):
             aux_data = aux_by_entry.get(e["id"], None)
             self._add_row(e["summary"] or "", e["account_code"] or "", e["account_name"] or "",
                           e["debit"] or 0, e["credit"] or 0, aux_data=aux_data)
+        # 只读模式：加载完成后禁用所有输入控件
+        if self.readonly:
+            self.date_edit.setEnabled(False)
+            self.attach_spin.setEnabled(False)
+            self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+            for row in range(self.table.rowCount()):
+                for col in range(self.table.columnCount()):
+                    w = self.table.cellWidget(row, col)
+                    if w:
+                        w.setEnabled(False)
 
     def _save(self, and_new=False):
         # Validate
