@@ -9,7 +9,9 @@ on:
       - feature/print-pdf
       - feat/license-activation
     tags:
-      - 'v*.*.*'   # 触发正式发布：打 tag v1.0.0 之类即可
+      - 'v*.*.*'        # 正式版：v1.0.0
+      - 'v*.*.*-beta*'  # 测试版：v1.0.0-beta.1
+      - 'v*.*.*-rc*'    # 候选版：v1.0.0-rc.1
   workflow_dispatch:
 
 env:
@@ -38,26 +40,39 @@ jobs:
       shell: bash
       run: |
         if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-          # Tag 触发 → 正式 release：用 tag 作为版本号（去掉 v 前缀）
+          # Tag 触发 → 正式/测试 release：用 tag 作为版本号（去掉 v 前缀）
           VERSION="${GITHUB_REF#refs/tags/v}"
           IS_RELEASE=true
-          echo "Release build: v${VERSION}"
+          # 判断是否为测试版（含 -beta 或 -rc）
+          if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-rc"* ]]; then
+            IS_PRERELEASE=true
+            echo "Pre-release build: v${VERSION}"
+          else
+            IS_PRERELEASE=false
+            echo "Release build: v${VERSION}"
+          fi
         else
           # 分支触发 → 内部 PR 构建号
           MINOR=$(( ${{ github.run_number }} - ${{ env.APP_VERSION_MINOR_OFFSET }} ))
           if [ $MINOR -lt 0 ]; then MINOR=0; fi
           VERSION="PR.${{ env.APP_VERSION_MAJOR }}.${MINOR}"
           IS_RELEASE=false
+          IS_PRERELEASE=false
           echo "PR build: ${VERSION}"
         fi
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+        echo "VERSION=${VERSION}"           >> $GITHUB_OUTPUT
         echo "APP_NAME=WiseLedger_${VERSION}" >> $GITHUB_OUTPUT
-        echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
+        echo "IS_RELEASE=${IS_RELEASE}"     >> $GITHUB_OUTPUT
+        echo "IS_PRERELEASE=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
 
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
         pip install PySide6 openpyxl pandas xlrd reportlab pyinstaller argon2-cffi cryptography keyring cython
+
+    - name: 清理 __pycache__（避免旧字节码被打包）
+      shell: bash
+      run: find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
     - name: Cython 编译激活模块
       # 把 license.py 编译为 license.pyd 然后删除源 .py，
@@ -92,6 +107,8 @@ jobs:
         --hidden-import=xlrd.biffh
         --hidden-import=openpyxl.styles
         --hidden-import=openpyxl.utils
+        --hidden-import=keyring.backends.Windows
+        --hidden-import=keyring.backends.fail
         --collect-all argon2
         --collect-all cryptography
         --collect-all keyring
@@ -103,14 +120,14 @@ jobs:
         mkdir release
         mv "dist/WiseLedger" "release/智一盈小账"
 
-    - name: 上传程序目录
+    - name: 上传程序目录（Artifacts）
       uses: actions/upload-artifact@v4
       with:
         name: ${{ steps.version.outputs.APP_NAME }}
         path: release/
         retention-days: 30
 
-    # ─── 以下步骤仅在 tag 触发时执行（正式 release）───
+    # ─── 以下步骤仅在 tag 触发时执行 ───────────────────────────────────────
     - name: 打包 release zip
       if: steps.version.outputs.IS_RELEASE == 'true'
       shell: bash
@@ -133,16 +150,17 @@ jobs:
 
           **系统要求：** Windows 10/11 64位
           **下载：** `${{ steps.version.outputs.APP_NAME }}.zip`
-          **国内高速下载：** https://download.wisdompluscn.com/wiseledger/latest.zip
+          **国内高速下载（正式版）：** https://download.wisdompluscn.com/wiseledger/latest.zip
+          **国内高速下载（测试版）：** https://download.wisdompluscn.com/wiseledger/beta/latest.zip
 
           需要激活码请联系客服。
         draft: false
-        prerelease: false
+        prerelease: ${{ steps.version.outputs.IS_PRERELEASE == 'true' }}
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # ─── 上传到 Cloudflare R2（客户实际下载源，国内加速） ───
+    # ─── 上传到 Cloudflare R2 ───────────────────────────────────────────────
     - name: 上传到 Cloudflare R2
       if: steps.version.outputs.IS_RELEASE == 'true'
       shell: bash
@@ -153,16 +171,29 @@ jobs:
         R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
         ZIP_FILE: ${{ steps.version.outputs.APP_NAME }}.zip
         BUCKET: wiseledger-releases
+        VERSION: ${{ steps.version.outputs.VERSION }}
       run: |
         # 上传带版本号的一份（保留历史）
         aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/${ZIP_FILE}" \
           --endpoint-url "$R2_ENDPOINT" \
           --checksum-algorithm CRC32
-        # 覆盖 latest.zip（客户宣传链接永远指向它）
-        aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/latest.zip" \
-          --endpoint-url "$R2_ENDPOINT" \
-          --checksum-algorithm CRC32
-        echo ""
-        echo "✅ R2 上传完成："
-        echo "   带版本：https://download.wisdompluscn.com/wiseledger/${ZIP_FILE}"
-        echo "   最新版：https://download.wisdompluscn.com/wiseledger/latest.zip"
+
+        if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-rc"* ]]; then
+          # 测试版 → 只覆盖 beta/latest.zip，不动正式版
+          aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/beta/latest.zip" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --checksum-algorithm CRC32
+          echo ""
+          echo "✅ 测试版 R2 上传完成："
+          echo "   带版本：https://download.wisdompluscn.com/wiseledger/${ZIP_FILE}"
+          echo "   测试版：https://download.wisdompluscn.com/wiseledger/beta/latest.zip"
+        else
+          # 正式版 → 覆盖 latest.zip
+          aws s3 cp "$ZIP_FILE" "s3://${BUCKET}/wiseledger/latest.zip" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --checksum-algorithm CRC32
+          echo ""
+          echo "✅ 正式版 R2 上传完成："
+          echo "   带版本：https://download.wisdomplyscn.com/wiseledger/${ZIP_FILE}"
+          echo "   最新版：https://download.wisdompluscn.com/wiseledger/latest.zip"
+        fi
