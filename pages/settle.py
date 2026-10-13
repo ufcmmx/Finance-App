@@ -595,14 +595,17 @@ class SettlePage(QWidget):
 
         generated = []
         # Income carry: debit income accounts, credit 本年利润
+        # 注意：收入科目（如投资收益）可能出现借方余额（亏损），
+        # 此时 net < 0，需反向处理（贷方记科目，借方记本年利润），
+        # 统一用 net 的正负决定借贷方向。
         if self.card_income._cb.isChecked() and abs(self._income_amt) > 0.005:
-            # Collect all income account balances for this period
+            # 取所有收入科目本期净额（不过滤正负，只过滤绝对值极小的噪音）
             c.execute("""SELECT e.account_code,e.account_name,
                 SUM(e.credit)-SUM(e.debit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
                 AND e.account_code >= ? AND e.account_code < ?
-                GROUP BY e.account_code,e.account_name HAVING net>0.005""",
+                GROUP BY e.account_code,e.account_name HAVING ABS(net)>0.005""",
                 (self.client_id, self.period, inc_lo, inc_hi))
             income_rows = c.fetchall()
             if income_rows:
@@ -612,21 +615,29 @@ class SettlePage(QWidget):
                           (self.client_id,self.period,vno,date,"已审核","结转收入"))
                 vid = c.lastrowid
                 for ln,(code,name,net) in enumerate(income_rows,1):
+                    # net>0：正常收入，借方记科目；net<0：亏损，贷方记科目（取绝对值）
+                    debit_amt  = net  if net > 0 else 0
+                    credit_amt = -net if net < 0 else 0
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                              (vid,ln,"结转本期损益",code,name,net,0))
+                              (vid,ln,"结转本期损益",code,name,debit_amt,credit_amt))
                 total_income = sum(r[2] for r in income_rows)
+                # 本年利润：净收入>0贷方，净收入<0借方
+                profit_debit  = -total_income if total_income < 0 else 0
+                profit_credit =  total_income if total_income > 0 else 0
                 c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                          (vid,len(income_rows)+1,"结转本期损益",profit_code,profit_name,0,total_income))
+                          (vid,len(income_rows)+1,"结转本期损益",profit_code,profit_name,profit_debit,profit_credit))
                 generated.append(f"{vno}（结转收入 {total_income:,.2f}）")
 
         # Expense carry: credit expense accounts, debit 本年利润
+        # 注意：费用科目可能出现贷方余额（如费用冲回），
+        # 此时 net < 0，需反向处理，统一用 net 的正负决定借贷方向。
         if self.card_expense._cb.isChecked() and abs(self._expense_amt) > 0.005:
             c.execute("""SELECT e.account_code,e.account_name,
                 SUM(e.debit)-SUM(e.credit) AS net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
                 WHERE v.client_id=? AND v.period=?
                 AND e.account_code >= ? AND e.account_code < ?
-                GROUP BY e.account_code,e.account_name HAVING net>0.005""",
+                GROUP BY e.account_code,e.account_name HAVING ABS(net)>0.005""",
                 (self.client_id, self.period, exp_lo, exp_hi))
             expense_rows = c.fetchall()
             if expense_rows:
@@ -636,11 +647,17 @@ class SettlePage(QWidget):
                           (self.client_id,self.period,vno,date,"已审核","结转费用"))
                 vid = c.lastrowid
                 total_expense = sum(r[2] for r in expense_rows)
+                # 本年利润：净费用>0借方，净费用<0贷方（费用冲回场景）
+                profit_debit  =  total_expense if total_expense > 0 else 0
+                profit_credit = -total_expense if total_expense < 0 else 0
                 c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                          (vid,1,"结转本期损益",profit_code,profit_name,total_expense,0))
+                          (vid,1,"结转本期损益",profit_code,profit_name,profit_debit,profit_credit))
                 for ln,(code,name,net) in enumerate(expense_rows,2):
+                    # net>0：正常费用，贷方记科目；net<0：冲回，借方记科目
+                    debit_amt  = -net if net < 0 else 0
+                    credit_amt =  net if net > 0 else 0
                     c.execute("INSERT INTO voucher_entries(voucher_id,line_no,summary,account_code,account_name,debit,credit) VALUES(?,?,?,?,?,?,?)",
-                              (vid,ln,"结转本期损益",code,name,0,net))
+                              (vid,ln,"结转本期损益",code,name,debit_amt,credit_amt))
                 generated.append(f"{vno}（结转费用 {total_expense:,.2f}）")
 
         if generated:
