@@ -310,11 +310,30 @@ class VoucherPage(QWidget):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
         accts = {r['code']: dict(r) for r in c.fetchall()}
-        # Aggregate voucher entries for period range
+
+        # 读取会计制度，决定结转凭证排除范围
+        c.execute("SELECT accounting_std FROM clients WHERE id=?", (self.client_id,))
+        std_row = c.fetchone()
+        is_small = (std_row["accounting_std"] == "小企业会计制度") if std_row else False
+        carry_profit = "3103" if is_small else "4103"
+        carry_lo     = "5001" if is_small else "6001"
+        carry_hi     = "6000" if is_small else "7000"
+
+        # 科目余额表本期发生额：排除结转凭证，与利润表口径一致
         c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
-            WHERE v.client_id=? AND v.period >= ? AND v.period <= ? GROUP BY e.account_code""",
-                  (self.client_id, start_period, end_period))
+            WHERE v.client_id=? AND v.period >= ? AND v.period <= ?
+            AND v.id NOT IN (
+                SELECT ve.voucher_id FROM voucher_entries ve
+                WHERE ve.account_code=?
+                AND EXISTS (
+                    SELECT 1 FROM voucher_entries ve2
+                    WHERE ve2.voucher_id=ve.voucher_id
+                    AND ve2.account_code >= ? AND ve2.account_code < ?
+                )
+            )
+            GROUP BY e.account_code""",
+            (self.client_id, start_period, end_period, carry_profit, carry_lo, carry_hi))
         leaf_activity = {r['account_code']: (r['td'] or 0, r['tc'] or 0)
                          for r in c.fetchall()}
         conn.close()
@@ -869,12 +888,28 @@ class VoucherPage(QWidget):
         c.execute("SELECT * FROM accounts WHERE client_id=? ORDER BY code", (self.client_id,))
         accts = {r['code']: dict(r) for r in c.fetchall()}
 
-        # ── 与 _load_balance 完全一致：按期间范围汇总 ──
+        # ── 与 _load_balance 完全一致：按期间范围汇总，排除结转凭证 ──
+        c.execute("SELECT accounting_std FROM clients WHERE id=?", (self.client_id,))
+        std_row = c.fetchone()
+        is_small     = (std_row["accounting_std"] == "小企业会计制度") if std_row else False
+        carry_profit = "3103" if is_small else "4103"
+        carry_lo     = "5001" if is_small else "6001"
+        carry_hi     = "6000" if is_small else "7000"
+
         c.execute("""SELECT e.account_code, SUM(e.debit) td, SUM(e.credit) tc
             FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
             WHERE v.client_id=? AND v.period >= ? AND v.period <= ?
+            AND v.id NOT IN (
+                SELECT ve.voucher_id FROM voucher_entries ve
+                WHERE ve.account_code=?
+                AND EXISTS (
+                    SELECT 1 FROM voucher_entries ve2
+                    WHERE ve2.voucher_id=ve.voucher_id
+                    AND ve2.account_code >= ? AND ve2.account_code < ?
+                )
+            )
             GROUP BY e.account_code""",
-                  (self.client_id, start_period, end_period))
+            (self.client_id, start_period, end_period, carry_profit, carry_lo, carry_hi))
         leaf_activity = {r['account_code']: (r['td'] or 0, r['tc'] or 0)
                          for r in c.fetchall()}
         conn.close()
