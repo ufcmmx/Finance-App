@@ -854,6 +854,10 @@ class ReportPage(QWidget):
         use_6xxx = (row["accounting_std"] == "企业会计准则" if row else True)
         self._log(f"_load_income: use_6xxx={use_6xxx} (std={row['accounting_std'] if row else 'NOT FOUND'})")
 
+        # 结转凭证排除：企业准则结转含 4103+6xxx，小企业含 3103+5xxx
+        carry_lo = "6001" if use_6xxx else "5001"
+        carry_hi = "7000" if use_6xxx else "6000"
+
         def fetch_period(p_start, p_end):
             c.execute("""SELECT e.account_code, SUM(e.credit)-SUM(e.debit) net
                 FROM voucher_entries e JOIN vouchers v ON v.id=e.voucher_id
@@ -865,10 +869,11 @@ class ReportPage(QWidget):
                     AND EXISTS (
                         SELECT 1 FROM voucher_entries ve2
                         WHERE ve2.voucher_id = ve.voucher_id
-                        AND ve2.account_code >= '6001' AND ve2.account_code < '7000'
+                        AND ve2.account_code >= ? AND ve2.account_code < ?
                     )
                 )
-                GROUP BY e.account_code""", (self.client_id, p_start, p_end))
+                GROUP BY e.account_code""",
+                (self.client_id, p_start, p_end, carry_lo, carry_hi))
             return {r[0]: r[1] or 0 for r in c.fetchall()}
 
         # 本期：start_period ~ end_period
@@ -1007,49 +1012,71 @@ class ReportPage(QWidget):
             _f_noi    = "贷方净额 | 5301 营业外收入"
             _f_noe    = "借方净额（取负）| 5601 营业外支出"
             _f_te     = "借方净额（取负）| 5701 所得税费用"
-        _f_op  = "营业收入 + 其他收益 + 投资收益 ± 公允价值变动 ± 资产处置\n− 营业成本 − 税金 − 三费 − 资产减值"
         _f_tp  = "营业利润 + 营业外收入 − 营业外支出"
         _f_np  = "利润总额 − 所得税费用"
 
-        rows_data = [
-            ("一、营业收入",                                   "1",  rev,          rev_y,      True,  _f_rev),
-            ("减：营业成本",                                   "2",  cost_n,       cost_y,     False, _f_cost),
-            ("    税金及附加",                                 "3",  tax,          tax_y_al,   False, _f_tax),
-            ("    销售费用",                                   "4",  sell,         sell_y,     False, _f_sell),
-            ("    管理费用",                                   "5",  mgmt,         mgmt_y,     False, _f_mgmt),
-            ("    研发费用",                                   "6",  rnd,          rnd_y,      False, _f_rnd),
-            ("    财务费用",                                   "7",  fin_exp,      fin_exp_y,  False, _f_fin),
-            ("    其中：利息费用",                             "8",  0,            0,          False, ""),
-            ("          利息收入",                             "9",  0,            0,          False, ""),
-            ("    资产减值损失",                               "10", impair,       impair_y,   False, _f_imp),
-            ("加：其他收益",                                   "11", oth_inc,      oth_inc_y,  False, _f_oinc),
-            ("    投资收益（损失以\"-\"号填列）",              "12", inv_g,        inv_y,      False, _f_inv),
-            ("    其中：对联营企业和合营企业的投资收益",        "13", 0,            0,          False, ""),
-            ("    公允价值变动收益（损失以\"-\"号填列）",      "14", fv_g,         fv_y,       False, _f_fv),
-            ("    资产处置收益（损失以\"-\"号填列）",          "15", asset_d,      asset_d_y,  False, _f_adisp),
-            ("二、营业利润（亏损以\"-\"号填列）",              "16", op_profit,    op_y,       True,  _f_op),
-            ("加：营业外收入",                                 "17", nop_inc,      nop_y,      False, _f_noi),
-            ("减：营业外支出",                                 "18", nop_exp,      nopx_y,     False, _f_noe),
-            ("三、利润总额（亏损总额以\"-\"号填列）",          "19", total_profit, total_y,    True,  _f_tp),
-            ("减：所得税费用",                                 "20", tax_exp,      tax_y,      False, _f_te),
-            ("四、净利润（净亏损以\"-\"号填列）",              "21", net_profit,   net_y,      True,  _f_np),
-            ("（一）持续经营净利润（净亏损以\"-\"号填列）",    "22", net_profit,   net_y,      False, _f_np),
-            ("（二）终止经营净利润（净亏损以\"-\"号填列）",    "23", 0,            0,          False, ""),
-            ("五、其他综合收益的税后净额",                     "24", 0,            0,          True,  ""),
-            ("（一）以后不能重分类进损益的其他综合收益",       "25", 0,            0,          False, ""),
-            ("    1.重新计量设定受益计划净负债或净资产的变动", "26", 0,            0,          False, ""),
-            ("    2.权益法下在被投资单位不能重分类进损益的\n其他综合收益中享有的份额", "27", 0, 0, False, ""),
-            ("（二）以后将重分类进损益的其他综合收益",         "28", 0,            0,          False, ""),
-            ("    1.权益法下在被投资单位以后将重分类进损益的\n其他综合收益中享有的份额", "29", 0, 0, False, ""),
-            ("    2.可供出售金融资产公允价值变动损益",         "30", 0,            0,          False, ""),
-            ("    3.持有至到期投资重分类为可供出售金融资产损益","31", 0,            0,          False, ""),
-            ("    4.现金流量套期损益的有效部分",               "32", 0,            0,          False, ""),
-            ("    5.外币财务报表折算差额",                     "33", 0,            0,          False, ""),
-            ("六、综合收益总额",                               "34", net_profit,   net_y,      True,  _f_np),
-            ("七、每股收益",                                   "35", "",           "",         True,  ""),
-            ("（一）基本每股收益",                             "36", 0,            0,          False, ""),
-            ("（二）稀释每股收益",                             "37", 0,            0,          False, ""),
-        ]
+        if use_6xxx:
+            # ── 企业会计准则利润表（37行）──
+            _f_op = ("营业收入 + 其他收益 + 投资收益 ± 公允价值变动 ± 资产处置\n"
+                     "− 营业成本 − 税金 − 三费 − 资产减值")
+            rows_data = [
+                ("一、营业收入",                                   "1",  rev,          rev_y,      True,  _f_rev),
+                ("减：营业成本",                                   "2",  cost_n,       cost_y,     False, _f_cost),
+                ("    税金及附加",                                 "3",  tax,          tax_y_al,   False, _f_tax),
+                ("    销售费用",                                   "4",  sell,         sell_y,     False, _f_sell),
+                ("    管理费用",                                   "5",  mgmt,         mgmt_y,     False, _f_mgmt),
+                ("    研发费用",                                   "6",  rnd,          rnd_y,      False, _f_rnd),
+                ("    财务费用",                                   "7",  fin_exp,      fin_exp_y,  False, _f_fin),
+                ("    其中：利息费用",                             "8",  0,            0,          False, ""),
+                ("          利息收入",                             "9",  0,            0,          False, ""),
+                ("    资产减值损失",                               "10", impair,       impair_y,   False, _f_imp),
+                ("加：其他收益",                                   "11", oth_inc,      oth_inc_y,  False, _f_oinc),
+                ("    投资收益（损失以\"-\"号填列）",              "12", inv_g,        inv_y,      False, _f_inv),
+                ("    其中：对联营企业和合营企业的投资收益",        "13", 0,            0,          False, ""),
+                ("    公允价值变动收益（损失以\"-\"号填列）",      "14", fv_g,         fv_y,       False, _f_fv),
+                ("    资产处置收益（损失以\"-\"号填列）",          "15", asset_d,      asset_d_y,  False, _f_adisp),
+                ("二、营业利润（亏损以\"-\"号填列）",              "16", op_profit,    op_y,       True,  _f_op),
+                ("加：营业外收入",                                 "17", nop_inc,      nop_y,      False, _f_noi),
+                ("减：营业外支出",                                 "18", nop_exp,      nopx_y,     False, _f_noe),
+                ("三、利润总额（亏损总额以\"-\"号填列）",          "19", total_profit, total_y,    True,  _f_tp),
+                ("减：所得税费用",                                 "20", tax_exp,      tax_y,      False, _f_te),
+                ("四、净利润（净亏损以\"-\"号填列）",              "21", net_profit,   net_y,      True,  _f_np),
+                ("（一）持续经营净利润（净亏损以\"-\"号填列）",    "22", net_profit,   net_y,      False, _f_np),
+                ("（二）终止经营净利润（净亏损以\"-\"号填列）",    "23", 0,            0,          False, ""),
+                ("五、其他综合收益的税后净额",                     "24", 0,            0,          True,  ""),
+                ("（一）以后不能重分类进损益的其他综合收益",       "25", 0,            0,          False, ""),
+                ("    1.重新计量设定受益计划净负债或净资产的变动", "26", 0,            0,          False, ""),
+                ("    2.权益法下在被投资单位不能重分类进损益的\n其他综合收益中享有的份额", "27", 0, 0, False, ""),
+                ("（二）以后将重分类进损益的其他综合收益",         "28", 0,            0,          False, ""),
+                ("    1.权益法下在被投资单位以后将重分类进损益的\n其他综合收益中享有的份额", "29", 0, 0, False, ""),
+                ("    2.可供出售金融资产公允价值变动损益",         "30", 0,            0,          False, ""),
+                ("    3.持有至到期投资重分类为可供出售金融资产损益","31", 0,            0,          False, ""),
+                ("    4.现金流量套期损益的有效部分",               "32", 0,            0,          False, ""),
+                ("    5.外币财务报表折算差额",                     "33", 0,            0,          False, ""),
+                ("六、综合收益总额",                               "34", net_profit,   net_y,      True,  _f_np),
+                ("七、每股收益",                                   "35", "",           "",         True,  ""),
+                ("（一）基本每股收益",                             "36", 0,            0,          False, ""),
+                ("（二）稀释每股收益",                             "37", 0,            0,          False, ""),
+            ]
+        else:
+            # ── 小企业会计制度利润表（13行）──
+            _f_op = ("营业收入 + 投资收益\n"
+                     "− 营业成本 − 营业税金及附加 − 销售费用 − 管理费用 − 财务费用")
+            rows_data = [
+                ("一、营业收入",                              "1",  rev,          rev_y,     True,  _f_rev),
+                ("减：营业成本",                              "2",  cost_n,       cost_y,    False, _f_cost),
+                ("    营业税金及附加",                        "3",  tax,          tax_y_al,  False, _f_tax),
+                ("    销售费用",                              "4",  sell,         sell_y,    False, _f_sell),
+                ("    管理费用",                              "5",  mgmt,         mgmt_y,    False, _f_mgmt),
+                ("    财务费用",                              "6",  fin_exp,      fin_exp_y, False, _f_fin),
+                ("加：投资收益（损失以\"-\"号填列）",         "7",  inv_g,        inv_y,     False, _f_inv),
+                ("二、营业利润（亏损以\"-\"号填列）",         "8",  op_profit,    op_y,      True,  _f_op),
+                ("加：营业外收入",                            "9",  nop_inc,      nop_y,     False, _f_noi),
+                ("减：营业外支出",                            "10", nop_exp,      nopx_y,    False, _f_noe),
+                ("三、利润总额（亏损总额以\"-\"号填列）",     "11", total_profit, total_y,   True,  _f_tp),
+                ("减：所得税费用",                            "12", tax_exp,      tax_y,     False, _f_te),
+                ("四、净利润（净亏损以\"-\"号填列）",         "13", net_profit,   net_y,     True,  _f_np),
+            ]
 
         self.inc_tbl.setRowCount(len(rows_data))
         self._log(f"_load_income: rendering {len(rows_data)} rows, rev={rev:,.2f}, cost={cost_n:,.2f}, op_profit={op_profit:,.2f}, net={net_profit:,.2f}")
