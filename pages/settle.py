@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
-from db import get_db, log_action
+from db import get_db, log_action, get_client_start_period
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
 from session import AppSession
 
@@ -168,23 +168,41 @@ class SettlePage(QWidget):
             self.period_combo.blockSignals(False)
             return
 
-        periods = set()
+        conn = get_db()
+        sp = get_client_start_period(conn, self.client_id)
         now = datetime.now()
-        year, month = now.year, now.month
-        while year > 2018 or (year == 2018 and month >= 1):
-            periods.add(f"{year}-{month:02d}")
-            month -= 1
-            if month == 0:
-                year -= 1
-                month = 12
+        cur_p = f"{now.year}-{now.month:02d}"
 
-        conn = get_db(); c = conn.cursor()
+        c = conn.cursor()
         c.execute("""SELECT period FROM vouchers WHERE client_id=?
                      UNION
                      SELECT period FROM periods WHERE client_id=?""",
                   (self.client_id, self.client_id))
-        periods.update(row["period"] for row in c.fetchall() if row["period"])
+        db_periods = [row["period"] for row in c.fetchall() if row["period"]]
         conn.close()
+
+        min_v = min(db_periods) if db_periods else None
+        max_v = max(db_periods) if db_periods else None
+        min_p = min(sp, min_v) if min_v else sp
+        max_p = max(cur_p, max_v) if max_v else cur_p
+
+        try:
+            min_y, min_m = map(int, min_p.split('-'))
+        except Exception:
+            min_y, min_m = now.year, now.month
+        try:
+            max_y, max_m = map(int, max_p.split('-'))
+        except Exception:
+            max_y, max_m = now.year, now.month
+
+        periods = set(db_periods)
+        y, m = max_y, max_m
+        while (y > min_y) or (y == min_y and m >= min_m):
+            periods.add(f"{y}-{m:02d}")
+            m -= 1
+            if m == 0:
+                y -= 1
+                m = 12
 
         target = selected_period or self.period
         if target:

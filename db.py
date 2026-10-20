@@ -1,4 +1,5 @@
 import sqlite3, os, sys
+from datetime import datetime
 
 # 数据库存放在程序同目录（开发时在脚本旁，打包后在 exe 旁）
 if getattr(sys, 'frozen', False):
@@ -27,6 +28,7 @@ def init_db():
         client_type TEXT DEFAULT '小规模纳税人',
         accounting_std TEXT DEFAULT '企业会计准则',
         contact TEXT, phone TEXT, email TEXT,
+        start_period TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS accounts (
@@ -199,6 +201,27 @@ def _migrate_db(conn):
     if 'accounting_std' not in client_cols:
         c.execute("ALTER TABLE clients ADD COLUMN accounting_std TEXT DEFAULT '企业会计准则'")
         conn.commit()
+    if 'start_period' not in client_cols:
+        c.execute("ALTER TABLE clients ADD COLUMN start_period TEXT")
+        conn.commit()
+    # ── 对旧账套平滑回填 start_period（三级回填：最早凭证期间 -> 创建年月 -> 当前年月）──
+    c.execute("""
+        UPDATE clients SET start_period = (
+            SELECT MIN(period) FROM vouchers WHERE vouchers.client_id = clients.id
+        ) WHERE (start_period IS NULL OR start_period = '')
+        AND EXISTS (SELECT 1 FROM vouchers WHERE vouchers.client_id = clients.id)
+    """)
+    c.execute("""
+        UPDATE clients SET start_period = substr(created_at, 1, 7)
+        WHERE (start_period IS NULL OR start_period = '')
+        AND created_at IS NOT NULL AND length(created_at) >= 7
+    """)
+    now_p = datetime.now().strftime('%Y-%m')
+    c.execute("""
+        UPDATE clients SET start_period = ?
+        WHERE (start_period IS NULL OR start_period = '')
+    """, (now_p,))
+    conn.commit()
     # Add bank_statements table if missing (for existing databases)
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bank_statements'")
     if not c.fetchone():
@@ -1027,6 +1050,36 @@ def set_setting(key: str, value: str) -> None:
         conn.commit(); conn.close()
     except Exception:
         pass
+
+
+def get_client_start_period(conn, client_id: int) -> str:
+    """获取账套启用年月，自带三级安全兜底：
+    1. clients.start_period
+    2. 最早凭证期间 MIN(vouchers.period)
+    3. 系统当前年月 YYYY-MM
+    返回格式统一为 'YYYY-MM' 字符串，永不返回 None 或空字符串。
+    """
+    now_p = datetime.now().strftime("%Y-%m")
+    if not client_id:
+        return now_p
+    try:
+        c = conn.cursor()
+        c.execute("SELECT start_period FROM clients WHERE id=?", (client_id,))
+        row = c.fetchone()
+        if row and "start_period" in row.keys() and row["start_period"]:
+            sp = str(row["start_period"]).strip()
+            if len(sp) == 7 and sp[4] == '-':
+                return sp
+        # 兜底1：最早凭证期间
+        c.execute("SELECT MIN(period) FROM vouchers WHERE client_id=?", (client_id,))
+        vrow = c.fetchone()
+        if vrow and vrow[0]:
+            vp = str(vrow[0]).strip()
+            if len(vp) == 7 and vp[4] == '-':
+                return vp
+    except Exception:
+        pass
+    return now_p
 
 
 def seed_client_accounts(client_id, conn=None, accounting_std="企业会计准则"):

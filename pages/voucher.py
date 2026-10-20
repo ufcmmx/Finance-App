@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
-from db import get_db, log_action
+from db import get_db, log_action, get_client_start_period
 from utils import lbl, sep, card, fmt_amt, cn_amount, make_export_button, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import VoucherDialog, AccountInitDialog, AuxPage
 from session import AppSession
@@ -525,59 +525,107 @@ class VoucherPage(QWidget):
         row = c.fetchone(); conn.close()
         return bool(row and row["is_closed"])
 
+    def _build_client_periods(self):
+        """根据当前账套的启用年月（start_period）与凭证/当前时间，动态计算期间列表。
+        下限：start_period 与已存凭证的最早期间取较早者（保证历史凭证可见、可补录，同时不超出建账前）
+        上限：当前年月与已存凭证的最大期间取较晚者
+        """
+        now = datetime.now()
+        cur_p = f"{now.year}-{now.month:02d}"
+        if not self.client_id:
+            min_y, min_m = now.year - 2, 1
+            max_y, max_m = now.year, 12
+        else:
+            conn = get_db()
+            sp = get_client_start_period(conn, self.client_id)
+            c = conn.cursor()
+            c.execute("SELECT MIN(period), MAX(period) FROM vouchers WHERE client_id=?", (self.client_id,))
+            row = c.fetchone()
+            conn.close()
+            min_v = row[0] if row and row[0] else None
+            max_v = row[1] if row and row[1] else None
+
+            min_p = min(sp, min_v) if min_v else sp
+            max_p = max(cur_p, max_v) if max_v else cur_p
+            try:
+                min_y, min_m = map(int, min_p.split('-'))
+            except Exception:
+                min_y, min_m = now.year, now.month
+            try:
+                max_y, max_m = map(int, max_p.split('-'))
+            except Exception:
+                max_y, max_m = now.year, now.month
+
+        periods = []
+        y, m = max_y, max_m
+        while (y > min_y) or (y == min_y and m >= min_m):
+            period_str = f"{y}-{m:02d}"
+            display_str = f"{y}年{m:02d}期"
+            periods.append((period_str, display_str))
+            m -= 1
+            if m == 0:
+                y -= 1
+                m = 12
+        return periods
+
     def _refresh_periods(self):
         self.period_combo.blockSignals(True)
         self.period_combo.clear()
-        now = datetime.now()
-        for y in range(now.year, 2018-1, -1):
-            for m in range(12,0,-1):
-                self.period_combo.addItem(f"{y}年{m:02d}期", f"{y}-{m:02d}")
-        # Select current
-        target = f"{now.year}-{now.month:02d}"
-        for i in range(self.period_combo.count()):
-            if self.period_combo.itemData(i)==target:
-                self.period_combo.setCurrentIndex(i); break
-        self.period = target
+        periods = self._build_client_periods()
+        for period_str, display_str in periods:
+            self.period_combo.addItem(display_str, period_str)
+
+        # 优先选中之前选中的 period，若不存在则选当前月或最新的第一期
+        target = self.period or f"{datetime.now().year}-{datetime.now().month:02d}"
+        idx = self.period_combo.findData(target)
+        if idx < 0 and self.period_combo.count():
+            idx = 0
+        if idx >= 0:
+            self.period_combo.setCurrentIndex(idx)
+            self.period = self.period_combo.itemData(idx)
         self.period_combo.blockSignals(False)
 
     def _init_period_ranges(self):
         """Initialize period range selectors for balance and ledger pages"""
+        periods = self._build_client_periods()
+
         # Balance page periods
+        self.bal_start_period.blockSignals(True)
+        self.bal_end_period.blockSignals(True)
         self.bal_start_period.clear()
         self.bal_end_period.clear()
-        now = datetime.now()
-        periods = []
-        for y in range(now.year, 2018-1, -1):
-            for m in range(12,0,-1):
-                period_str = f"{y}-{m:02d}"
-                display_str = f"{y}年{m:02d}期"
-                periods.append((period_str, display_str))
-
         for period_str, display_str in periods:
             self.bal_start_period.addItem(display_str, period_str)
             self.bal_end_period.addItem(display_str, period_str)
 
-        # Set default to current period
+        now = datetime.now()
         current_period = f"{now.year}-{now.month:02d}"
-        for i in range(self.bal_start_period.count()):
-            if self.bal_start_period.itemData(i) == current_period:
-                self.bal_start_period.setCurrentIndex(i)
-                self.bal_end_period.setCurrentIndex(i)
-                break
+        idx = self.bal_start_period.findData(current_period)
+        if idx < 0 and self.bal_start_period.count():
+            idx = 0
+        if idx >= 0:
+            self.bal_start_period.setCurrentIndex(idx)
+            self.bal_end_period.setCurrentIndex(idx)
+        self.bal_start_period.blockSignals(False)
+        self.bal_end_period.blockSignals(False)
 
         # Ledger page periods
+        self.ldg_start_period.blockSignals(True)
+        self.ldg_end_period.blockSignals(True)
         self.ldg_start_period.clear()
         self.ldg_end_period.clear()
         for period_str, display_str in periods:
             self.ldg_start_period.addItem(display_str, period_str)
             self.ldg_end_period.addItem(display_str, period_str)
 
-        # Set default to current period
-        for i in range(self.ldg_start_period.count()):
-            if self.ldg_start_period.itemData(i) == current_period:
-                self.ldg_start_period.setCurrentIndex(i)
-                self.ldg_end_period.setCurrentIndex(i)
-                break
+        idx_l = self.ldg_start_period.findData(current_period)
+        if idx_l < 0 and self.ldg_start_period.count():
+            idx_l = 0
+        if idx_l >= 0:
+            self.ldg_start_period.setCurrentIndex(idx_l)
+            self.ldg_end_period.setCurrentIndex(idx_l)
+        self.ldg_start_period.blockSignals(False)
+        self.ldg_end_period.blockSignals(False)
 
     def _on_period_change(self):
         self.period = self.period_combo.currentData() or self.period

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
-from db import get_db, log_action
+from db import get_db, log_action, get_client_start_period
 from utils import lbl, sep, card, fmt_amt, make_export_button, NoScrollSpinBox, NoScrollDoubleSpinBox
 
 # openpyxl imported lazily inside each export function
@@ -1672,27 +1672,65 @@ class ReportPage(QWidget):
         self.rep_end_period.blockSignals(True)
         self.rep_start_period.clear()
         self.rep_end_period.clear()
-        now = datetime.now()
-        periods = []
-        for y in range(now.year, 2018-1, -1):
-            for m in range(12,0,-1):
-                period_str = f"{y}-{m:02d}"
-                display_str = f"{y}年{m:02d}期"
-                periods.append((period_str, display_str))
+        periods = self._build_client_periods(client_id)
 
         for period_str, display_str in periods:
             self.rep_start_period.addItem(display_str, period_str)
             self.rep_end_period.addItem(display_str, period_str)
 
-        # 默认选最近有数据的期间
-        for i in range(self.rep_start_period.count()):
-            if self.rep_start_period.itemData(i) == latest_period:
-                self.rep_start_period.setCurrentIndex(i)
-                self.rep_end_period.setCurrentIndex(i)
-                break
+        # 默认选最近有数据的期间（若超出范围则选最新第0项）
+        idx = self.rep_start_period.findData(latest_period)
+        if idx < 0 and self.rep_start_period.count():
+            idx = 0
+        if idx >= 0:
+            self.rep_start_period.setCurrentIndex(idx)
+            self.rep_end_period.setCurrentIndex(idx)
 
         self.rep_start_period.blockSignals(False)
         self.rep_end_period.blockSignals(False)
+
+    def _build_client_periods(self, client_id):
+        """根据当前账套的启用年月（start_period）与凭证/当前时间，动态计算期间列表。
+        下限：start_period 与已存凭证的最早期间取较早者
+        上限：当前年月与已存凭证的最大期间取较晚者
+        """
+        now = datetime.now()
+        cur_p = f"{now.year}-{now.month:02d}"
+        if not client_id:
+            min_y, min_m = now.year - 2, 1
+            max_y, max_m = now.year, 12
+        else:
+            conn = get_db()
+            sp = get_client_start_period(conn, client_id)
+            c = conn.cursor()
+            c.execute("SELECT MIN(period), MAX(period) FROM vouchers WHERE client_id=?", (client_id,))
+            row = c.fetchone()
+            conn.close()
+            min_v = row[0] if row and row[0] else None
+            max_v = row[1] if row and row[1] else None
+
+            min_p = min(sp, min_v) if min_v else sp
+            max_p = max(cur_p, max_v) if max_v else cur_p
+            try:
+                min_y, min_m = map(int, min_p.split('-'))
+            except Exception:
+                min_y, min_m = now.year, now.month
+            try:
+                max_y, max_m = map(int, max_p.split('-'))
+            except Exception:
+                max_y, max_m = now.year, now.month
+
+        periods = []
+        y, m = max_y, max_m
+        while (y > min_y) or (y == min_y and m >= min_m):
+            period_str = f"{y}-{m:02d}"
+            display_str = f"{y}年{m:02d}期"
+            periods.append((period_str, display_str))
+            m -= 1
+            if m == 0:
+                y -= 1
+                m = 12
+        return periods
 
         idx = self.stack.currentIndex()
         if idx==0: self._load_balance()

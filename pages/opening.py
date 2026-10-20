@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QBrush, QPalette
 
-from db import get_db, log_action
+from db import get_db, log_action, get_client_start_period
 from utils import lbl, sep, card, fmt_amt, NoScrollSpinBox, NoScrollDoubleSpinBox
 from dialogs import AccountInitDialog
 from session import AppSession
@@ -37,9 +37,9 @@ class OpeningBalancePage(QWidget):
 
         # ── 说明 ──
         hint = QLabel(
-            "  期初余额只允许在以下两种情况下录入：\n"
-            "  ① 账套建立的起始期间（首次建账）\n"
-            "  ② 每年的第一个期间（1月，用于年初结转）")
+            "  期初余额录入说明：\n"
+            "  ① 首次建账：默认从当前月开始，您也可以选择任意月份作为建账起始期初\n"
+            "  ② 日常维护：每年的第一个期间（1月）可用于年初结转")
         hint.setStyleSheet(
             "background:#f6f8ff;color:#444;border-radius:6px;"
             "padding:10px 14px;font-size:12px;")
@@ -101,15 +101,26 @@ class OpeningBalancePage(QWidget):
         can_manage = AppSession.has_perm("opening.manage")
         self.edit_btn.setVisible(can_manage)
         self._refresh_periods()
-        # Try to select the passed period if allowed, else first allowed
+
+        # 默认选中逻辑：优先选中账套 start_period（自带最早凭证及当前月兜底）
+        conn = get_db()
+        target_period = get_client_start_period(conn, self.client_id) if self.client_id else (period or datetime.now().strftime("%Y-%m"))
+        conn.close()
+
         found = False
         for i in range(self.period_combo.count()):
-            if self.period_combo.itemData(i) == period:
+            if self.period_combo.itemData(i) == target_period:
                 self.period_combo.setCurrentIndex(i)
                 found = True
                 break
         if not found and self.period_combo.count():
-            self.period_combo.setCurrentIndex(0)
+            for i in range(self.period_combo.count()):
+                if self.period_combo.itemData(i) == period:
+                    self.period_combo.setCurrentIndex(i)
+                    found = True
+                    break
+            if not found:
+                self.period_combo.setCurrentIndex(0)
         self._load_preview()
 
     def _allowed_periods(self):
@@ -125,25 +136,35 @@ class OpeningBalancePage(QWidget):
             (self.client_id,))
         row = c.fetchone()
         earliest_voucher = row[0] if row and row[0] else None
-
-        # 找到 accounts 创建时间 — 用 clients 表的 created_at 推断起始期间
-        c.execute("SELECT created_at FROM clients WHERE id=?", (self.client_id,))
-        row = c.fetchone()
+        start_period = get_client_start_period(conn, self.client_id)
         conn.close()
 
         allowed = set()
         now = datetime.now()
+        min_year = min(2018, int(start_period[:4])) if (start_period and len(start_period) >= 4) else 2018
 
-        # 规则1：每年1月
-        for y in range(2018, now.year + 2):
+        # 规则1：每年1月（年初结转期间）
+        for y in range(min_year, now.year + 2):
             allowed.add(f"{y}-01")
 
-        # 规则2：账套起始期间（最早凭证所在期间或当前期间）
+        # 规则2：建账期初
         if earliest_voucher:
+            # 已录入凭证：允许设定的建账期、最早凭证期以及最早凭证期之前的所有月份
             allowed.add(earliest_voucher)
+            if start_period:
+                allowed.add(start_period)
+            ey, em = int(earliest_voucher[:4]), int(earliest_voucher[5:7])
+            for y in range(min_year, ey + 1):
+                max_m = em if y == ey else 12
+                for m in range(1, max_m + 1):
+                    allowed.add(f"{y}-{m:02d}")
         else:
-            # 无凭证时，允许当前期间（新账套）
-            allowed.add(f"{now.year}-{now.month:02d}")
+            # 无凭证时（新账套）：允许任意月份作为期初余额开始月份
+            for y in range(min_year, now.year + 2):
+                for m in range(1, 13):
+                    allowed.add(f"{y}-{m:02d}")
+            if start_period:
+                allowed.add(start_period)
 
         return sorted(allowed, reverse=True)
 
@@ -151,13 +172,29 @@ class OpeningBalancePage(QWidget):
         self.period_combo.blockSignals(True)
         self.period_combo.clear()
         periods = self._allowed_periods()
+
+        # 获取当前账套设定的 start_period
+        start_period = None
+        if self.client_id:
+            conn = get_db()
+            start_period = get_client_start_period(conn, self.client_id)
+            conn.close()
+
+        now = datetime.now()
+        cur_p = f"{now.year}-{now.month:02d}"
+
         for p in periods:
             y, m = p.split('-')
             label = f"{y}年{m}期"
+            tags = []
+            if p == cur_p:
+                tags.append("当前月")
             if m == "01":
-                label += "（年初）"
-            elif p == periods[-1] if periods else False:
-                label += "（建账期）"
+                tags.append("年初")
+            if start_period and p == start_period and "当前月" not in tags and "年初" not in tags:
+                tags.append("建账期")
+            if tags:
+                label += f"（{'/'.join(tags)}）"
             self.period_combo.addItem(label, p)
         self.period_combo.blockSignals(False)
         self._set_ui_enabled(bool(periods))
@@ -285,9 +322,13 @@ class OpeningBalancePage(QWidget):
                 self, "不允许操作",
                 f"期间【{period}】不允许录入期初余额。\n\n"
                 "只有以下期间允许录入：\n"
-                "· 账套建立的起始期间\n"
-                "· 每年1月（年初期间）")
+                "· 账套建账起始期间\n"
+                "· 每年1月（年初结转期间）")
             return
         d = AccountInitDialog(self, self.client_id, period)
         d.exec()
+        self._refresh_periods()
+        idx = self.period_combo.findData(period)
+        if idx >= 0:
+            self.period_combo.setCurrentIndex(idx)
         self._load_preview()

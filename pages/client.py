@@ -175,6 +175,7 @@ class ClientPage(QWidget):
                 conn.execute("DELETE FROM vouchers WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM accounts WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM clients WHERE id=?", (client_id,))
+                log_action(conn, 0, "删除客户", "client", client_id, f"删除客户【{r['name']}】（ID={client_id}）及其所有账务数据")
                 conn.commit()
             except Exception:
                 conn.rollback()

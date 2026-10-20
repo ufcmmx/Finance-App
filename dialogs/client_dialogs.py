@@ -28,10 +28,25 @@ class ClientDialog(QDialog):
         self.code = QLineEdit(); self.code.setPlaceholderText("如 ZY")
         self.typ = QComboBox(); self.typ.addItems(["小规模纳税人","一般纳税人","其他"])
         self.std = QComboBox(); self.std.addItems(["企业会计准则","小企业会计制度"])
+        self.start_period = QComboBox()
+        now = datetime.now()
+        cur_p = f"{now.year}-{now.month:02d}"
+        for y in range(now.year + 1, 2018 - 1, -1):
+            for m in range(12, 0, -1):
+                p = f"{y}-{m:02d}"
+                lbl_text = f"{y}年{m:02d}期"
+                if p == cur_p:
+                    lbl_text += "（当前月）"
+                self.start_period.addItem(lbl_text, p)
+        for i in range(self.start_period.count()):
+            if self.start_period.itemData(i) == cur_p:
+                self.start_period.setCurrentIndex(i)
+                break
         self.taxid = QLineEdit(); self.taxid.setPlaceholderText("统一社会信用代码")
         self.contact = QLineEdit(); self.phone = QLineEdit()
         F.addRow("公司名称 *", self.name); F.addRow("助记码", self.code)
         F.addRow("客户类型", self.typ);   F.addRow("会计制度", self.std)
+        F.addRow("启用年月", self.start_period)
         F.addRow("税号", self.taxid)
         F.addRow("联系人", self.contact); F.addRow("电话", self.phone)
         L.addLayout(F)
@@ -52,21 +67,38 @@ class ClientDialog(QDialog):
             self.std.setCurrentIndex(max(0, idx2))
         except Exception:
             pass
+        try:
+            if "start_period" in c.keys() and c["start_period"]:
+                idx_sp = self.start_period.findData(c["start_period"])
+                if idx_sp >= 0:
+                    self.start_period.setCurrentIndex(idx_sp)
+        except Exception:
+            pass
 
     def _save(self):
         n = self.name.text().strip()
         if not n: QMessageBox.warning(self,"提示","公司名称不能为空"); return
         conn = get_db(); c = conn.cursor()
         std = self.std.currentText()
+        sp = self.start_period.currentData()
         d = (n, self.code.text().strip(), self.typ.currentText(), std,
-             self.taxid.text().strip(), self.contact.text().strip(), self.phone.text().strip())
+             self.taxid.text().strip(), self.contact.text().strip(), self.phone.text().strip(), sp)
         if self.client:
-            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=? WHERE id=?",
-                      d+(self.client["id"],))
+            old_sp = self.client["start_period"] if "start_period" in self.client.keys() else None
+            cid = self.client["id"]
+            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=?,start_period=? WHERE id=?",
+                      d+(cid,))
+            if old_sp and old_sp != sp:
+                detail = f"客户【{n}】信息更新。启用年月由【{old_sp}】变更为【{sp}】"
+            else:
+                detail = f"客户【{n}】信息更新。启用年月: {sp}, 会计制度: {std}"
+            log_action(conn, cid, "编辑客户", "client", cid, detail)
         else:
-            c.execute("INSERT INTO clients(name,short_code,client_type,accounting_std,tax_id,contact,phone) VALUES(?,?,?,?,?,?,?)",d)
+            c.execute("INSERT INTO clients(name,short_code,client_type,accounting_std,tax_id,contact,phone,start_period) VALUES(?,?,?,?,?,?,?,?)",d)
             cid = c.lastrowid
             seed_client_accounts(cid, conn, accounting_std=std)
+            log_action(conn, cid, "新建客户", "client", cid,
+                       f"新建客户【{n}】，启用年月: {sp}, 会计制度: {std}")
         conn.commit(); conn.close(); self.accept()
 
 
@@ -287,5 +319,10 @@ class AccountInitDialog(QDialog):
             cr = cw.value() if cw else 0
             c.execute("UPDATE accounts SET opening_debit=?,opening_credit=? WHERE id=?",
                       (d, cr, aid))
+        if self.period:
+            c.execute("UPDATE clients SET start_period=? WHERE id=?",
+                      (self.period, self.client_id))
+        log_action(conn, self.client_id, "保存期初余额", "client", self.client_id,
+                   f"期间: {self.period}, 录入/修改科目期初余额")
         conn.commit(); conn.close()
         QMessageBox.information(self, "成功", "期初余额已保存（末级科目已自动汇总到上级）")
