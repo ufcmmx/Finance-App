@@ -1,7 +1,7 @@
 """dialogs/client_dialogs.py — 客户相关对话框"""
 from datetime import datetime
 from PySide6.QtWidgets import *
-from PySide6.QtCore import Qt, QDate, QTimer
+from PySide6.QtCore import Qt, QDate, QTimer, QEvent
 from PySide6.QtGui import QColor, QFont, QPalette
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES, STANDARD_ACCOUNTS_SMALL
@@ -102,6 +102,59 @@ class ClientDialog(QDialog):
         conn.commit(); conn.close(); self.accept()
 
 
+class AccountOpeningSpinBox(NoScrollDoubleSpinBox):
+    """专用于科目期初余额录入的金额微调框：
+    1. 彻底解决输入数字不显示：当用户点击或聚焦时自动全选文本，避免光标落在末尾被QDoubleSpinBox的小数位规则拦截
+    2. 彻底解决10倍扩散问题：当数值为0时输入数字，直接替换整个文本，绝不在个位后面残留原有的'0'变成220或100
+    3. 清空支持：按退格/Delete清空时自动安全归零
+    4. 显式锁定高对比度深浅色模式样式（白底深色字、高亮边框），杜绝macOS深色模式下白底白字导致看不见的问题
+    """
+    def __init__(self, editable=True, parent=None):
+        super().__init__(parent)
+        self.setRange(0, 9999999999)
+        self.setDecimals(2)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.setMinimumHeight(32)
+        self.setMinimumWidth(140)
+        if editable:
+            self.setStyleSheet(
+                "QDoubleSpinBox { background:#ffffff; color:#1e2130; "
+                "border:1px solid #d9d9d9; border-radius:4px; "
+                "padding:4px 8px; font-size:13px; font-weight:500; } "
+                "QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }"
+            )
+            self.lineEdit().installEventFilter(self)
+            self.lineEdit().textChanged.connect(self._on_text_changed)
+        else:
+            self.setReadOnly(True)
+            self.setStyleSheet(
+                "QDoubleSpinBox { background:#f5f7fa; color:#8c93a0; "
+                "border:1px solid #e8ecf2; border-radius:4px; "
+                "padding:4px 8px; font-size:13px; font-weight:bold; }"
+            )
+
+    def _on_text_changed(self, text):
+        if text.strip() == "":
+            if self.value() != 0.0:
+                self.setValue(0.0)
+
+    def eventFilter(self, obj, event):
+        if obj == self.lineEdit():
+            if event.type() in (QEvent.FocusIn, QEvent.MouseButtonPress):
+                QTimer.singleShot(0, self.selectAll)
+            elif event.type() == QEvent.KeyPress:
+                txt = event.text()
+                if txt and txt in "0123456789.":
+                    # 仅当框内是「未编辑过的零值文本」（如 "0.00"）且没有选中内容时，
+                    # 才整体替换。输入过程中的中间态（"0"、"0."、"."）此时 value() 仍为 0，
+                    # 若按 value()==0 判断会反复全选，导致 0.5 变成 5、0.05 变成 5。
+                    le = self.lineEdit()
+                    if (not le.hasSelectedText()
+                            and le.text() == self.textFromValue(0.0)):
+                        le.selectAll()
+        return super().eventFilter(obj, event)
+
+
 class AccountInitDialog(QDialog):
     """科目期初设置 — 只允许编辑末级科目，保存后自动汇总到上级科目"""
     def __init__(self, parent, client_id, period):
@@ -196,25 +249,10 @@ class AccountInitDialog(QDialog):
             self.table.setItem(i, 0, code_it)
             self.table.setItem(i, 1, name_it)
 
-            def make_spin(val, editable):
-                sp = NoScrollDoubleSpinBox()
-                sp.setRange(0, 9999999999)
-                sp.setDecimals(2)
-                sp.setValue(val or 0)
-                sp.setMinimumHeight(32)
-                sp.setMinimumWidth(140)
-                sp.setAlignment(Qt.AlignmentFlag.AlignRight)
-                if editable:
-                    sp.setStyleSheet("QDoubleSpinBox{padding:4px 8px;font-size:13px;}")
-                else:
-                    sp.setReadOnly(True)
-                    sp.setStyleSheet(
-                        "QDoubleSpinBox{padding:4px 8px;font-size:13px;"
-                        "background:#f5f7fa;color:#aaa;border:1px solid #e8ecf2;}")
-                return sp
-
-            d_spin  = make_spin(r["opening_debit"],  is_leaf)
-            cr_spin = make_spin(r["opening_credit"], is_leaf)
+            d_spin  = AccountOpeningSpinBox(editable=is_leaf)
+            cr_spin = AccountOpeningSpinBox(editable=is_leaf)
+            d_spin.setValue(r["opening_debit"] or 0)
+            cr_spin.setValue(r["opening_credit"] or 0)
 
             # Connect leaf spinboxes to auto-refresh parent totals
             if is_leaf:
@@ -320,8 +358,11 @@ class AccountInitDialog(QDialog):
             c.execute("UPDATE accounts SET opening_debit=?,opening_credit=? WHERE id=?",
                       (d, cr, aid))
         if self.period:
-            c.execute("UPDATE clients SET start_period=? WHERE id=?",
-                      (self.period, self.client_id))
+            # 仅在账套尚未设定启用年月时作为兜底填充，绝不覆盖已有建账期（避免录入年初数或查看期初时把建账期推后）
+            c.execute(
+                "UPDATE clients SET start_period=? WHERE id=? AND (start_period IS NULL OR start_period='')",
+                (self.period, self.client_id)
+            )
         log_action(conn, self.client_id, "保存期初余额", "client", self.client_id,
                    f"期间: {self.period}, 录入/修改科目期初余额")
         conn.commit(); conn.close()

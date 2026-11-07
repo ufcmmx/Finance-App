@@ -531,7 +531,8 @@ class SystemPage(QWidget):
         # 当前用户信息卡片
         info_frame = QFrame()
         info_frame.setStyleSheet(
-            "QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+            ("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}"
+            "QLabel{border:none;background:transparent;}"))
         il = QHBoxLayout(info_frame)
         il.setContentsMargins(20, 16, 20, 16)
         il.setSpacing(20)
@@ -596,7 +597,8 @@ class SystemPage(QWidget):
 
         # ── 备份密码管理 ──────────────────────────────────
         pf = QFrame()
-        pf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        pf.setStyleSheet(("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}"
+            "QLabel{border:none;background:transparent;}"))
         pl = QVBoxLayout(pf)
         pl.setContentsMargins(20, 16, 20, 18)
         pl.setSpacing(10)
@@ -633,7 +635,8 @@ class SystemPage(QWidget):
 
         # ── 月末自动备份 ──────────────────────────────────
         af = QFrame()
-        af.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        af.setStyleSheet(("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}"
+            "QLabel{border:none;background:transparent;}"))
         al = QVBoxLayout(af)
         al.setContentsMargins(20, 16, 20, 18)
         al.setSpacing(10)
@@ -695,7 +698,8 @@ class SystemPage(QWidget):
 
         # ── 立即备份 ──────────────────────────────────────
         bf = QFrame()
-        bf.setStyleSheet("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}")
+        bf.setStyleSheet(("QFrame{background:#fff;border:1px solid #e4e8f0;border-radius:8px;}"
+            "QLabel{border:none;background:transparent;}"))
         bfl = QVBoxLayout(bf)
         bfl.setContentsMargins(20, 16, 20, 18)
         bfl.setSpacing(8)
@@ -718,7 +722,8 @@ class SystemPage(QWidget):
 
         # ── 从备份恢复 ────────────────────────────────────
         rf = QFrame()
-        rf.setStyleSheet("QFrame{background:#fff;border:1px solid #f5c6cb;border-radius:8px;}")
+        rf.setStyleSheet(("QFrame{background:#fff;border:1px solid #f5c6cb;border-radius:8px;}"
+            "QLabel{border:none;background:transparent;}"))
         rfl = QVBoxLayout(rf)
         rfl.setContentsMargins(20, 16, 20, 18)
         rfl.setSpacing(8)

@@ -149,17 +149,17 @@ class VoucherPage(QWidget):
             can_approve = AppSession.has_perm("voucher.approve")
             can_edit    = AppSession.has_perm("voucher.edit")
             can_delete  = AppSession.has_perm("voucher.delete")
-            if status == "待审核" and can_approve:
+            if status == "待审核" and can_approve and not self.is_locked:
                 b_ok = QPushButton("✓ 审核通过"); b_ok.setObjectName("btn_green"); b_ok.setFixedSize(111,30)
                 b_ok.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已审核"))
                 b_no = QPushButton("✗ 拒绝"); b_no.setObjectName("btn_red"); b_no.setFixedSize(73,30)
                 b_no.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"已拒绝"))
                 bl.addWidget(b_ok); bl.addWidget(b_no)
-            elif status == "已拒绝" and can_edit:
+            elif status == "已拒绝" and can_edit and not self.is_locked:
                 b_re = QPushButton("↩ 重新提交"); b_re.setObjectName("btn_outline"); b_re.setFixedSize(111,30)
                 b_re.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_re)
-            elif status == "已审核" and can_approve:
+            elif status == "已审核" and can_approve and not self.is_locked:
                 b_un = QPushButton("↩ 撤销审核"); b_un.setObjectName("btn_gray"); b_un.setFixedSize(111,30)
                 b_un.clicked.connect(lambda _,rid=r['id']:self._set_voucher_status(rid,"待审核"))
                 bl.addWidget(b_un)
@@ -1034,9 +1034,11 @@ class VoucherPage(QWidget):
             cell = ws.cell(tot_row, ci, v)
             cell.fill = fill_tot; cell.font = XFont(bold=True)
 
+        from openpyxl.utils import get_column_letter
         col_widths = [14, 28, 14, 14, 14, 14, 14, 14]
         for ci, w in enumerate(col_widths, 1):
-            ws.column_dimensions[ws.cell(1, ci).column_letter].width = w
+            # 第1行是合并标题行，其单元格是 MergedCell 没有 column_letter，必须用 get_column_letter
+            ws.column_dimensions[get_column_letter(ci)].width = w
 
         wb.save(path)
         QMessageBox.information(self, "成功", f"已导出：\n{path}")

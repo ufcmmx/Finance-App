@@ -477,7 +477,8 @@ class ReportPage(QWidget):
 
         # ── 资产方 ──
         cash      = bal(["1001","1002","1012"])
-        st_invest = bal(["1101"]) if is_small else 0.0   # 短期投资（仅小企业会计制度）
+        st_invest = bal(["1101"])   # 小企业：短期投资；企业准则：交易性金融资产（同为 1101）
+        tfl       = bal(["2101"])   # 交易性金融负债（企业准则；小企业科目表无此科目，恒为 0）
         notes_rec = bal(["1121"])
         # ── 重分类（应收↔预收、预付↔应付、其他应收↔其他应付）──
         _ar_raw   = bal(["1122"]); _ad_raw   = bal(["2203"])
@@ -501,7 +502,8 @@ class ReportPage(QWidget):
         int_rec_y   = bal_ys(["1132"])
         div_rec_y   = bal_ys(["1131"])
         cash_y      = bal_ys(["1001","1002","1012"])
-        st_invest_y = bal_ys(["1101"]) if is_small else 0.0   # 短期投资年初（仅小企业）
+        st_invest_y = bal_ys(["1101"])   # 年初：短期投资 / 交易性金融资产
+        tfl_y       = bal_ys(["2101"])   # 年初：交易性金融负债
         inventory_y = (bal_ys(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
                       - abs(bal_ys(["1471","1472"])))
         prepd_exp_y = bal_ys(["1901"])
@@ -529,7 +531,7 @@ class ReportPage(QWidget):
         oth_cur_liab_y  = vat_to_liab_y
         cur_asset_y  = (cash_y+st_invest_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y
                         +oth_rec_y+inventory_y+oth_cur_asset_y)
-        cur_liab_y  = (st_loan_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y
+        cur_liab_y  = (st_loan_y+tfl_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y
                        +int_pay_y+div_pay_y+oth_pay_y+oth_cur_liab_y)
         total_asset_y  = cur_asset_y + noncur_asset_y
         lt_loan_y   = bal_ys(["2501"]); bonds_pay_y = bal_ys(["2502"])
@@ -581,7 +583,7 @@ class ReportPage(QWidget):
         oth_cur_liab  = vat_to_liab
         cur_asset = (cash+st_invest+notes_rec+acct_rec+prepay+int_rec+div_rec
                      +oth_rec+inventory+oth_cur_asset)
-        cur_liab  = (st_loan+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay
+        cur_liab  = (st_loan+tfl+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay
                      +int_pay+div_pay+oth_pay+oth_cur_liab)
         total_asset = cur_asset + noncur_asset
         lt_loan   = bal(["2501"])
@@ -636,12 +638,12 @@ class ReportPage(QWidget):
             # 行次2：小企业→短期投资(1101)；企业准则→交易性金融资产(1101)
             R("短期投资" if is_small else "以公允价值计量且其变动\n计入当期损益的金融资产",
               "2",
-              st_invest if is_small else 0,
+              st_invest,
               "以公允价值计量且其变动\n计入当期损益的金融负债" if not is_small else "",
               "35" if not is_small else "",
-              0 if not is_small else None,
-              left_ys =st_invest_y if is_small else None,
-              right_ys=None,
+              tfl if not is_small else None,
+              left_ys =st_invest_y,
+              right_ys=tfl_y if not is_small else None,
               left_formula ="借方余额 | 1101 短期投资" if is_small
                             else "借方余额 | 1101 交易性金融资产",
               right_formula="" if is_small else "贷方余额 | 2101 交易性金融负债"),
@@ -917,7 +919,7 @@ class ReportPage(QWidget):
             nop_inc   = g(["6301"])
             nop_exp   = -g(["6711"])
             tax_exp   = -g(["6801"])
-            total_profit = op_profit + nop_inc + nop_exp
+            total_profit = op_profit + nop_inc - nop_exp
             net_profit   = total_profit - tax_exp
             # ── 本年累计 ──
             rev_y     = gy(["6001","6051"])
@@ -937,7 +939,7 @@ class ReportPage(QWidget):
             nop_y     = gy(["6301"])
             nopx_y    = -gy(["6711"])
             tax_y     = -gy(["6801"])
-            total_y   = op_y + nop_y + nopx_y
+            total_y   = op_y + nop_y - nopx_y
             net_y     = total_y - tax_y
         else:
             # ── 小企业会计制度 ──
@@ -957,7 +959,7 @@ class ReportPage(QWidget):
             nop_inc   = g(["5301"])
             nop_exp   = -g(["5601"])
             tax_exp   = -g(["5701"])
-            total_profit = op_profit + nop_inc + nop_exp
+            total_profit = op_profit + nop_inc - nop_exp
             net_profit   = total_profit - tax_exp
             # ── 本年累计 ──
             rev_y     = gy(["5001","5051"])
@@ -976,7 +978,7 @@ class ReportPage(QWidget):
             nop_y     = gy(["5301"])
             nopx_y    = -gy(["5601"])
             tax_y     = -gy(["5701"])
-            total_y   = op_y + nop_y + nopx_y
+            total_y   = op_y + nop_y - nopx_y
             net_y     = total_y - tax_y
 
         # ── 取数公式字符串（按制度区分）──
