@@ -1,7 +1,7 @@
 """dialogs/client_dialogs.py — 客户相关对话框"""
 from datetime import datetime
 from PySide6.QtWidgets import *
-from PySide6.QtCore import Qt, QDate, QTimer, QEvent
+from PySide6.QtCore import Qt, QDate, QTimer, QEvent, Signal
 from PySide6.QtGui import QColor, QFont, QPalette
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES, STANDARD_ACCOUNTS_SMALL
@@ -102,57 +102,126 @@ class ClientDialog(QDialog):
         conn.commit(); conn.close(); self.accept()
 
 
-class AccountOpeningSpinBox(NoScrollDoubleSpinBox):
-    """专用于科目期初余额录入的金额微调框：
-    1. 彻底解决输入数字不显示：当用户点击或聚焦时自动全选文本，避免光标落在末尾被QDoubleSpinBox的小数位规则拦截
-    2. 彻底解决10倍扩散问题：当数值为0时输入数字，直接替换整个文本，绝不在个位后面残留原有的'0'变成220或100
-    3. 清空支持：按退格/Delete清空时自动安全归零
-    4. 显式锁定高对比度深浅色模式样式（白底深色字、高亮边框），杜绝macOS深色模式下白底白字导致看不见的问题
+_FULL_TO_HALF = str.maketrans({
+    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+    '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+    '．': '.', '。': '.', '·': '.', '・': '.', '﹒': '.',
+    '，': ',', '、': ',',
+})
+
+
+class AccountOpeningSpinBox(QLineEdit):
+    """专用于科目期初余额录入的金额输入框（继承 QLineEdit 避免嵌套 QDoubleSpinBox 样式塌陷）：
+    1. 彻底解决文本不可见：直接单层控件，杜绝 Windows 下嵌套内层 QLineEdit padding 叠加导致高度被裁切（0.00 看不见）
+    2. 彻底解决 10 倍扩散问题：点击或聚焦时全选现有文本，输入数字直接覆盖，绝不在原 '0' 前后残留导致 2 变 20 或 22 变 220
+    3. 中文标点与全角清洗：支持中文句号(。)、中圆点(·)、全角点(．)及千分位逗号自动转换并识别为小数点
+    4. 回车/Tab 跳转：按回车键自动完成当前格式化并跳转到下一个可录入科目，非末级科目设为 NoFocus 自动跳过
+    5. 失焦自动补齐：失焦时规范格式化为两位小数（例如 22 -> 22.00，空文本 -> 0.00）
     """
+    valueChanged = Signal(float)
+
     def __init__(self, editable=True, parent=None):
         super().__init__(parent)
-        self.setRange(0, 9999999999)
-        self.setDecimals(2)
+        self._value = 0.0
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.setMinimumHeight(32)
-        self.setMinimumWidth(140)
+        self.setText("0.00")
         if editable:
             self.setStyleSheet(
-                "QDoubleSpinBox { background:#ffffff; color:#1e2130; "
+                "QLineEdit { background:#ffffff; color:#1e2130; "
                 "border:1px solid #d9d9d9; border-radius:4px; "
-                "padding:4px 8px; font-size:13px; font-weight:500; } "
-                "QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }"
+                "padding:2px 8px; font-family:'Microsoft YaHei','PingFang SC',sans-serif; "
+                "font-size:13px; font-weight:500; } "
+                "QLineEdit:focus { border:1.5px solid #3d6fdb; }"
             )
-            self.lineEdit().installEventFilter(self)
-            self.lineEdit().textChanged.connect(self._on_text_changed)
+            self.textEdited.connect(self._on_text_edited)
         else:
             self.setReadOnly(True)
+            self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.setStyleSheet(
-                "QDoubleSpinBox { background:#f5f7fa; color:#8c93a0; "
+                "QLineEdit { background:#f5f7fa; color:#8c93a0; "
                 "border:1px solid #e8ecf2; border-radius:4px; "
-                "padding:4px 8px; font-size:13px; font-weight:bold; }"
+                "padding:2px 8px; font-family:'Microsoft YaHei','PingFang SC',sans-serif; "
+                "font-size:13px; font-weight:bold; }"
             )
 
-    def _on_text_changed(self, text):
-        if text.strip() == "":
-            if self.value() != 0.0:
-                self.setValue(0.0)
+    def setRange(self, a, b):
+        pass
 
-    def eventFilter(self, obj, event):
-        if obj == self.lineEdit():
-            if event.type() in (QEvent.FocusIn, QEvent.MouseButtonPress):
-                QTimer.singleShot(0, self.selectAll)
-            elif event.type() == QEvent.KeyPress:
-                txt = event.text()
-                if txt and txt in "0123456789.":
-                    # 仅当框内是「未编辑过的零值文本」（如 "0.00"）且没有选中内容时，
-                    # 才整体替换。输入过程中的中间态（"0"、"0."、"."）此时 value() 仍为 0，
-                    # 若按 value()==0 判断会反复全选，导致 0.5 变成 5、0.05 变成 5。
-                    le = self.lineEdit()
-                    if (not le.hasSelectedText()
-                            and le.text() == self.textFromValue(0.0)):
-                        le.selectAll()
-        return super().eventFilter(obj, event)
+    def setDecimals(self, d):
+        pass
+
+    def value(self) -> float:
+        return self._value
+
+    def setText(self, t: str):
+        super().setText(t)
+        try:
+            clean = str(t).strip().translate(_FULL_TO_HALF).replace(",", "")
+            self._value = round(float(clean), 2)
+        except ValueError:
+            self._value = 0.0
+
+    def setValue(self, val: float):
+        self._value = round(float(val or 0.0), 2)
+        super().setText(f"{self._value:.2f}")
+
+    def cleanText(self) -> str:
+        return self.text().strip()
+
+    def _on_text_edited(self, text: str):
+        clean = text.translate(_FULL_TO_HALF).replace(",", "")
+        filtered = ""
+        has_dot = False
+        dot_count = 0
+        for ch in clean:
+            if ch.isdigit():
+                if has_dot:
+                    if dot_count < 2:
+                        filtered += ch
+                        dot_count += 1
+                else:
+                    filtered += ch
+            elif ch == "." and not has_dot:
+                filtered += ch
+                has_dot = True
+
+        if filtered != text:
+            pos = self.cursorPosition()
+            super().setText(filtered)
+            self.setCursorPosition(min(pos, len(filtered)))
+            clean = filtered
+
+        try:
+            v = round(float(clean), 2)
+        except ValueError:
+            v = 0.0
+        self._value = v
+        self.valueChanged.emit(v)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.focusNextChild()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def focusInEvent(self, event):
+        if event:
+            super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
+
+    def mousePressEvent(self, event):
+        had_focus = self.hasFocus()
+        if event:
+            super().mousePressEvent(event)
+        if not had_focus:
+            self.selectAll()
+
+    def focusOutEvent(self, event):
+        if event:
+            super().focusOutEvent(event)
+        v = self.value()
+        super().setText(f"{v:.2f}")
 
 
 class AccountInitDialog(QDialog):
@@ -172,6 +241,7 @@ class AccountInitDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["科目编号","科目名称","期初借方","期初贷方"])
+        self.table.setStyleSheet("QTableWidget::item { padding: 1px 2px; }")
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -192,6 +262,7 @@ class AccountInitDialog(QDialog):
         row = QHBoxLayout(); row.addStretch()
         bs = QPushButton("保存期初"); bs.setObjectName("btn_primary")
         bc = QPushButton("关闭"); bc.setObjectName("btn_gray")
+        bs.setAutoDefault(False); bc.setAutoDefault(False)
         bs.clicked.connect(self._save); bc.clicked.connect(self.accept)
         row.addWidget(bc); row.addWidget(bs); L.addLayout(row)
 
@@ -232,7 +303,7 @@ class AccountInitDialog(QDialog):
         self.table.setRowCount(len(rows))
         self._ids = []; self._leaf_flags = []
         for i, r in enumerate(rows):
-            self.table.setRowHeight(i, 40)
+            self.table.setRowHeight(i, 42)
             self._ids.append(r["id"])
             is_leaf = r['code'] in leaf_codes
             self._leaf_flags.append(is_leaf)
@@ -244,7 +315,9 @@ class AccountInitDialog(QDialog):
             else:
                 code_it.setForeground(QColor("#aaa"))
                 name_it.setForeground(QColor("#aaa"))
-                name_it.setFont(QFont("", weight=QFont.Bold))
+                f_bold = self.table.font()
+                f_bold.setBold(True)
+                name_it.setFont(f_bold)
 
             self.table.setItem(i, 0, code_it)
             self.table.setItem(i, 1, name_it)

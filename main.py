@@ -35,10 +35,12 @@ _NAV_ITEMS = [
     ("系统管理",    7, "system.manage"),
 ]
 
+APP_VERSION = "v3.6.2-beta.1"
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("智一盈小账 · WiseLedger")
+        self.setWindowTitle(f"智一盈小账 · WiseLedger ({APP_VERSION})")
         self.setMinimumSize(1150, 720)
         self._cur_client = None; self._cur_name = ""; self._cur_period = ""
         self._build()
@@ -287,6 +289,12 @@ def main():
         # ── 强制使用 Fusion 风格 + 固定浅色调色板，不随系统深色模式改变 ──
         app.setStyle("Fusion")
         from PySide6.QtGui import QPalette, QColor, QPainter, QPixmap, QFont as QF
+        # ── 显式设置应用全局默认字体，杜绝 Windows DirectWrite 回退到古代点阵字体 MS Sans Serif 导致卡顿 ──
+        _app_font = QF()
+        _app_font.setFamilies(["Microsoft YaHei", "PingFang SC", "Segoe UI", "sans-serif"])
+        _app_font.setPointSize(9)
+        _app_font.setStyleHint(QF.StyleHint.SansSerif)
+        app.setFont(_app_font)
         _pal = QPalette()
         _pal.setColor(QPalette.Window,          QColor("#f0f2f5"))
         _pal.setColor(QPalette.WindowText,      QColor("#1e2130"))
