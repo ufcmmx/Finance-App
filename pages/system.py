@@ -990,12 +990,20 @@ class SystemPage(QWidget):
 
         # 解密成功，替换数据库
         try:
-            conn = get_db()
-            log_action(conn, 0, "数据恢复", "system", "0", f"从备份恢复：{src}")
-            conn.commit(); conn.close()
             if os.path.exists(DB_PATH):
                 os.replace(DB_PATH, DB_PATH + ".pre_restore_bak")
             os.replace(tmp_path, DB_PATH)
+            # 在新数据库（已恢复的备份）中写入「数据恢复」日志，
+            # 确保恢复后查审计日志能看到这条记录
+            try:
+                conn = get_db()
+                user = AppSession.get()
+                log_action(conn, 0, "数据恢复", "system", "0",
+                           f"从备份恢复：{src}",
+                           operator=user["username"] if user else "未知")
+                conn.commit(); conn.close()
+            except Exception:
+                pass   # 日志写入失败不影响恢复成功
             QMessageBox.information(
                 self, "恢复成功",
                 "数据库已恢复成功。\n\n"

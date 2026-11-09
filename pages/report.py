@@ -508,16 +508,27 @@ class ReportPage(QWidget):
                       - abs(bal_ys(["1471","1472"])))
         prepd_exp_y = bal_ys(["1901"])
         fa_y        = bal_ys(["1601"]) - abs(bal_ys(["1602"])) - abs(bal_ys(["1603"]))
-        wip_y       = bal_ys(["1604"])
+        wip_y       = bal_ys(["1604"]) - abs(bal_ys(["1608"]))
         intangible_y= bal_ys(["1701"]) - abs(bal_ys(["1702"])) - abs(bal_ys(["1703"]))
         lt_prepaid_y= bal_ys(["1801"])
         deferred_a_y= bal_ys(["1811"])
         avail_sale_y   = bal_ys(["1503"])
-        held_to_mat_y  = bal_ys(["1501"]) - abs(bal_ys(["1502"]))
-        lt_eq_invest_y = bal_ys(["1511"])
+        held_to_mat_y  = bal_ys(["1501"]) - abs(bal_ys(["1502"])) if not is_small else 0.0
+        lt_eq_invest_y = bal_ys(["1511"]) - abs(bal_ys(["1512"])) if not is_small else (bal_ys(["1501"]) - abs(bal_ys(["1502"])))
         invest_prop_y  = bal_ys(["1521"])
         lt_equity_y    = avail_sale_y + held_to_mat_y + lt_eq_invest_y + invest_prop_y
-        noncur_asset_y = fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
+        # 补齐非流动资产遗漏科目（年初）
+        eng_material_y = bal_ys(["1605"]) - abs(bal_ys(["1609"]))
+        fa_disposal_y  = bal_ys(["1606"])
+        bio_asset_y    = bal_ys(["1621"]) - abs(bal_ys(["1622"]))
+        oil_asset_y    = bal_ys(["1631"]) - abs(bal_ys(["1632"]))
+        goodwill_y     = bal_ys(["1711"])
+        lt_recv_y      = bal_ys(["1531"]) - abs(bal_ys(["1532"]))
+        dev_expense_y  = bal_ys(["5301"]) if not is_small else bal_ys(["4301"])  # 资本化部分
+        held_for_sale_a_y = bal_ys(["1481"]) - abs(bal_ys(["1482"]))
+        held_for_sale_l_y = bal_ys(["2245"])
+        noncur_asset_y = (fa_y+wip_y+intangible_y+lt_prepaid_y+lt_equity_y+deferred_a_y
+                          +eng_material_y+fa_disposal_y+bio_asset_y+oil_asset_y+goodwill_y+lt_recv_y+dev_expense_y)
 
         st_loan_y   = bal_ys(["2001"]); notes_pay_y = bal_ys(["2201"])
         acct_pay_y  = max(0.0, _ap_y) + max(0.0, -_pr_y)
@@ -525,47 +536,66 @@ class ReportPage(QWidget):
         emp_pay_y   = bal_ys(["2211"]); tax_pay_y   = tax_pay_net_y
         int_pay_y   = bal_ys(["2231"]); div_pay_y   = bal_ys(["2232"])
         oth_pay_y   = max(0.0, _op_y) + max(0.0, -_or_y)
-        # 其他流动资产（年初）= 待处理财产损溢 + 待摊费用 + 应交税费借方余额重分类
-        oth_cur_asset_y = prepd_exp_y + bal_ys(["1461"]) + vat_to_asset_y
-        # 其他流动负债（年初）= 待转销项税额
-        oth_cur_liab_y  = vat_to_liab_y
+        # 其他流动资产（年初）= 待处理财产损溢 + 待摊费用 + 代理资产 + 应交税费借方余额重分类
+        oth_cur_asset_y = prepd_exp_y + bal_ys(["1461","1321"]) + vat_to_asset_y
+        # 其他流动负债（年初）= 待转销项税额 + 代理/受托负债
+        oth_cur_liab_y  = vat_to_liab_y + bal_ys(["2314","2315"])
+        deferred_rev_y  = bal_ys(["2401"])
         cur_asset_y  = (cash_y+st_invest_y+notes_rec_y+acct_rec_y+prepay_y+int_rec_y+div_rec_y
-                        +oth_rec_y+inventory_y+oth_cur_asset_y)
+                        +oth_rec_y+inventory_y+held_for_sale_a_y+oth_cur_asset_y)
         cur_liab_y  = (st_loan_y+tfl_y+notes_pay_y+acct_pay_y+adv_rec_y+emp_pay_y+tax_pay_y
-                       +int_pay_y+div_pay_y+oth_pay_y+oth_cur_liab_y)
+                       +int_pay_y+div_pay_y+oth_pay_y+held_for_sale_l_y+oth_cur_liab_y)
         total_asset_y  = cur_asset_y + noncur_asset_y
         lt_loan_y   = bal_ys(["2501"]); bonds_pay_y = bal_ys(["2502"])
-        lt_payable_y= bal_ys(["2701"]); est_liab_y  = bal_ys(["2801"])
+        # 小企业长期应付款=2601，企业准则=2701；小企业预计负债=2701，企业准则=2801
+        if is_small:
+            lt_payable_y = bal_ys(["2601"]); est_liab_y = bal_ys(["2701"])
+        else:
+            lt_payable_y = bal_ys(["2701"]) - abs(bal_ys(["2702"])); est_liab_y = bal_ys(["2801"])
+        spec_payable_y = bal_ys(["2711"])
         deferred_l_y= bal_ys(["2901"])
-        noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y
+        noncur_liab_y = lt_loan_y+bonds_pay_y+lt_payable_y+est_liab_y+deferred_l_y+deferred_rev_y+spec_payable_y
         total_liab_y  = cur_liab_y + noncur_liab_y
         if is_small:
             cap_y     = bal_ys(["3001"]); cap_res_y = bal_ys(["3002"])
             surp_res_y= bal_ys(["3101"])
             profit_y  = bal_ys(["3103"]) + bal_ys(["3104"])
-            tsy_y     = 0.0
+            tsy_y     = 0.0; spec_res_y = 0.0
         else:
             cap_y     = bal_ys(["4001"]); cap_res_y = bal_ys(["4002"])
             surp_res_y= bal_ys(["4101"])
             profit_y  = bal_ys(["4103"]) + bal_ys(["4104"])
-            tsy_y     = bal_ys(["4201"])
-        total_equity_y = cap_y + cap_res_y + surp_res_y + profit_y - tsy_y
+            tsy_y     = bal_ys(["4201"]); spec_res_y = bal_ys(["4301"])
+        total_equity_y = cap_y + cap_res_y + surp_res_y + spec_res_y + profit_y - tsy_y
         total_le_y     = total_liab_y + total_equity_y
         # 存货 = 各存货科目合计 - 存货跌价准备 - 消耗性生物资产跌价准备
         inventory = (bal(["1401","1402","1403","1404","1405","1406","1407","1408","1409","1411","1415","1421"])
                      - abs(bal(["1471","1472"])))
         prepd_exp = bal(["1901"])   # 待处理财产损溢
         fa        = bal(["1601"]) - abs(bal(["1602"])) - abs(bal(["1603"]))
-        wip       = bal(["1604"])
+        wip       = bal(["1604"]) - abs(bal(["1608"]))
         intangible= bal(["1701"]) - abs(bal(["1702"])) - abs(bal(["1703"]))
         lt_prepaid= bal(["1801"])   # 长期待摊费用
         deferred_a= bal(["1811"])   # 递延所得税资产
         avail_sale  = bal(["1503"])                    # 可供出售金融资产
-        held_to_mat = bal(["1501"]) - abs(bal(["1502"]))  # 持有至到期投资净额
-        lt_eq_invest= bal(["1511"])                    # 长期股权投资
+        held_to_mat = bal(["1501"]) - abs(bal(["1502"])) if not is_small else 0.0  # 持有至到期投资净额
+        lt_eq_invest= bal(["1511"]) - abs(bal(["1512"])) if not is_small else (bal(["1501"]) - abs(bal(["1502"]))) # 长期股权投资
         invest_prop = bal(["1521"])                    # 投资性房地产
         lt_equity   = avail_sale + held_to_mat + lt_eq_invest + invest_prop
-        noncur_asset = fa+wip+intangible+lt_prepaid+lt_equity+deferred_a
+
+        # 补齐非流动资产遗漏科目（期末）
+        eng_material = bal(["1605"]) - abs(bal(["1609"]))  # 工程物资
+        fa_disposal  = bal(["1606"])                       # 固定资产清理
+        bio_asset    = bal(["1621"]) - abs(bal(["1622"]))  # 生产性生物资产
+        oil_asset    = bal(["1631"]) - abs(bal(["1632"]))  # 油气资产
+        goodwill     = bal(["1711"])                       # 商誉
+        lt_recv      = bal(["1531"]) - abs(bal(["1532"]))  # 长期应收款
+        dev_expense  = bal(["5301"]) if not is_small else bal(["4301"])  # 开发支出/研发支出
+        held_for_sale_a = bal(["1481"]) - abs(bal(["1482"])) # 持有待售资产
+        held_for_sale_l = bal(["2245"])                      # 持有待售负债
+
+        noncur_asset = (fa + wip + intangible + lt_prepaid + lt_equity + deferred_a
+                        + eng_material + fa_disposal + bio_asset + oil_asset + goodwill + lt_recv + dev_expense)
 
         # ── 负债方 ──
         st_loan   = bal(["2001"])
@@ -577,21 +607,27 @@ class ReportPage(QWidget):
         int_pay   = bal(["2231"])
         div_pay   = bal(["2232"])
         oth_pay   = max(0.0, _op_raw) + max(0.0, -_or_raw)
-        # 其他流动资产 = 待处理财产损溢(1901) + 待摊费用(1461) + 应交税费借方余额重分类
-        oth_cur_asset = prepd_exp + bal(["1461"]) + vat_to_asset
-        # 其他流动负债 = 待转销项税额（应交税费下贷方余额重分类）
-        oth_cur_liab  = vat_to_liab
+        # 其他流动资产 = 待处理财产损溢(1901) + 待摊费用(1461) + 代理资产(1321) + 应交税费借方余额重分类
+        oth_cur_asset = prepd_exp + bal(["1461","1321"]) + vat_to_asset
+        # 其他流动负债 = 待转销项税额 + 代理/受托负债
+        oth_cur_liab  = vat_to_liab + bal(["2314","2315"])
         cur_asset = (cash+st_invest+notes_rec+acct_rec+prepay+int_rec+div_rec
-                     +oth_rec+inventory+oth_cur_asset)
+                     +oth_rec+inventory+held_for_sale_a+oth_cur_asset)
         cur_liab  = (st_loan+tfl+notes_pay+acct_pay+adv_rec+emp_pay+tax_pay
-                     +int_pay+div_pay+oth_pay+oth_cur_liab)
+                     +int_pay+div_pay+oth_pay+held_for_sale_l+oth_cur_liab)
         total_asset = cur_asset + noncur_asset
         lt_loan   = bal(["2501"])
         bonds_pay = bal(["2502"])
-        lt_payable= bal(["2701"])   # 长期应付款
-        est_liab  = bal(["2801"])   # 预计负债
+        if is_small:
+            lt_payable = bal(["2601"])
+            est_liab   = bal(["2701"])
+        else:
+            lt_payable = bal(["2701"]) - abs(bal(["2702"]))
+            est_liab   = bal(["2801"])
+        spec_payable = bal(["2711"])
+        deferred_rev = bal(["2401"])
         deferred_l= bal(["2901"])   # 递延所得税负债
-        noncur_liab = lt_loan+bonds_pay+lt_payable+est_liab+deferred_l
+        noncur_liab = lt_loan+bonds_pay+lt_payable+est_liab+deferred_l+deferred_rev+spec_payable
         total_liab = cur_liab + noncur_liab
 
         # ── 所有者权益 ──
@@ -601,13 +637,15 @@ class ReportPage(QWidget):
             surp_res  = bal(["3101"])
             profit    = bal(["3103"]) + bal(["3104"])
             tsy_stock = 0.0
+            spec_res  = 0.0
         else:
             cap       = bal(["4001"])
             cap_res   = bal(["4002"])
             surp_res  = bal(["4101"])
             profit    = bal(["4103"]) + bal(["4104"])
             tsy_stock = bal(["4201"])
-        total_equity = cap + cap_res + surp_res + profit - tsy_stock
+            spec_res  = bal(["4301"])
+        total_equity = cap + cap_res + surp_res + spec_res + profit - tsy_stock
         total_le     = total_liab + total_equity
 
         def R(label, rowno, left_val, right_label="", right_rowno="", right_val=None,
@@ -684,21 +722,22 @@ class ReportPage(QWidget):
               left_ys=inventory_y,   right_ys=div_pay_y,
               left_formula ="1401~1421 合计 − |1471 存货跌价准备| − |1472 消耗性生物资产跌价准备|",
               right_formula="贷方余额 | 2232 应付股利"),
-            R("持有待售资产","11",0,            "其他应付款","44",oth_pay,
-              right_ys=oth_pay_y,
-              left_formula ="重分类项目：将于一年内处置的非流动资产转入",
+            R("持有待售资产","11",held_for_sale_a, "其他应付款","44",oth_pay,
+              left_ys=held_for_sale_a_y, right_ys=oth_pay_y,
+              left_formula ="1481 持有待售资产 − |1482 持有待售资产减值准备|",
               right_formula="2241 贷方余额 + 1221 借方余额重分类"),
-            R("一年内到期的非流动资产","12",0,  "持有待售负债","45",0,
+            R("一年内到期的非流动资产","12",0,  "持有待售负债","45",held_for_sale_l,
+              right_ys=held_for_sale_l_y,
               left_formula ="重分类项目：将于一年内到期的长期资产转入",
-              right_formula="重分类项目：与持有待售资产相关的负债"),
+              right_formula="贷方余额 | 2245 持有待售负债"),
             R("其他流动资产","13",oth_cur_asset, "一年内到期的非流动负债","46",0,
               left_ys=oth_cur_asset_y,
-              left_formula ="1901 待处理财产损溢 + 1461 待摊费用\n+ 2221 借方余额重分类（留底税/待抵扣/待认证）",
+              left_formula ="1901 待处理财产损溢 + 1461 待摊费用 + 1321 代理业务资产\n+ 2221 借方余额重分类（留底税/待抵扣/待认证）",
               right_formula="重分类项目：将于一年内到期的长期负债转入"),
             R("流动资产合计","14",cur_asset,   "其他流动负债","47",oth_cur_liab,
               False,True, left_ys=cur_asset_y, right_ys=cur_liab_y,
               left_formula ="以上各流动资产项目合计",
-              right_formula="2221「待转销项税额」明细贷方余额"),
+              right_formula="2221「待转销项税额」明细贷方余额 + 2314/2315 代理及受托负债"),
             R("非流动资产：","","",            "流动负债合计","48",cur_liab,
               True,True, right_ys=cur_liab_y,
               right_formula="以上各流动负债项目合计"),
@@ -707,48 +746,53 @@ class ReportPage(QWidget):
               left_formula="借方余额 | 1503 可供出售金融资产"),
             R("持有至到期投资","16",held_to_mat,    "长期借款","49",lt_loan,
               left_ys=held_to_mat_y,  right_ys=lt_loan_y,
-              left_formula ="1501 持有至到期投资 − |1502 持有至到期投资减值准备|",
+              left_formula ="1501 持有至到期投资 − |1502 持有至到期投资减值准备|" if not is_small else "",
               right_formula="贷方余额 | 2501 长期借款"),
-            R("长期应收款","17",0,                  "应付债券","50",bonds_pay,
+            R("长期应收款","17",lt_recv,                  "应付债券","50",bonds_pay,
+              left_ys=lt_recv_y,      right_ys=bonds_pay_y,
               right_formula="贷方余额 | 2502 应付债券",
-              left_formula ="1231 长期应收款 − |1232 未实现融资收益|"),
+              left_formula ="1531 长期应收款 − |1532 未实现融资收益|"),
             R("长期股权投资","18",lt_eq_invest,     "其中：优先股","51",0,
               left_ys=lt_eq_invest_y,
-              left_formula="借方余额 | 1511 长期股权投资"),
+              left_formula="1511 长期股权投资 − |1512 减值准备|" if not is_small else "1501 长期股权投资 − |1502 减值准备|"),
             R("投资性房地产","19",invest_prop,       "永续债","52",0,
               left_ys=invest_prop_y,
               left_formula="借方余额 | 1521 投资性房地产"),
             R("固定资产","20",fa,              "长期应付款","53",lt_payable,
               left_ys=fa_y,           right_ys=lt_payable_y,
               left_formula ="1601 固定资产原值 − |1602 累计折旧| − |1603 固定资产减值准备|",
-              right_formula="贷方余额 | 2701 长期应付款"),
-            R("在建工程","21",wip,             "专项应付款","54",0,
-              left_ys=wip_y,
-              left_formula="借方余额 | 1604 在建工程"),
-            R("工程物资","22",0,               "预计负债","55",est_liab,
-              right_ys=est_liab_y,
-              left_formula ="借方余额 | 1605 工程物资",
-              right_formula="贷方余额 | 2801 预计负债"),
-            R("固定资产清理","23",0,            "递延收益","56",0,
+              right_formula="贷方余额 | 2701 长期应付款 − |2702 未确认融资费用|" if not is_small else "贷方余额 | 2601 长期应付款"),
+            R("在建工程","21",wip,             "专项应付款","54",spec_payable,
+              left_ys=wip_y,          right_ys=spec_payable_y,
+              left_formula="1604 在建工程 − |1608 在建工程减值准备|",
+              right_formula="贷方余额 | 2711 专项应付款"),
+            R("工程物资","22",eng_material,               "预计负债","55",est_liab,
+              left_ys=eng_material_y, right_ys=est_liab_y,
+              left_formula ="1605 工程物资 − |1609 工程物资减值准备|",
+              right_formula="贷方余额 | 2801 预计负债" if not is_small else "贷方余额 | 2701 预计负债"),
+            R("固定资产清理","23",fa_disposal,            "递延收益","56",deferred_rev,
+              left_ys=fa_disposal_y,  right_ys=deferred_rev_y,
               left_formula ="1606 固定资产清理净余额（借方为待处理损失，贷方为待转收益）",
               right_formula="贷方余额 | 2401 递延收益"),
-            R("生产性生物资产","24",0,          "递延所得税负债","57",deferred_l,
-              right_ys=deferred_l_y,
-              left_formula ="1611 生产性生物资产 − |1612 生产性生物资产累计折旧|",
+            R("生产性生物资产","24",bio_asset,          "递延所得税负债","57",deferred_l,
+              left_ys=bio_asset_y,    right_ys=deferred_l_y,
+              left_formula ="1621 生产性生物资产 − |1622 生产性生物资产累计折旧|",
               right_formula="贷方余额 | 2901 递延所得税负债"),
-            R("油气资产","25",0,               "其他非流动负债","58",0,
-              left_formula ="1621 油气资产 − |1622 油气资产折耗| − |1623 油气资产减值准备|",
+            R("油气资产","25",oil_asset,               "其他非流动负债","58",0,
+              left_ys=oil_asset_y,
+              left_formula ="1631 油气资产 − |1632 油气资产折耗|",
               right_formula="其他长期负债科目贷方余额"),
             R("无形资产","26",intangible,       "非流动负债合计","59",noncur_liab,
               False,True, left_ys=intangible_y, right_ys=noncur_liab_y,
               left_formula ="1701 无形资产原值 − |1702 累计摊销| − |1703 无形资产减值准备|",
               right_formula="以上各非流动负债项目合计"),
-            R("开发支出","27",0,               "负债合计","60",total_liab,
-              False,True, right_ys=total_liab_y,
-              left_formula ="借方余额 | 1712 研发支出（资本化部分）",
+            R("开发支出","27",dev_expense,               "负债合计","60",total_liab,
+              False,True, left_ys=dev_expense_y, right_ys=total_liab_y,
+              left_formula ="借方余额 | 5301 研发支出（资本化部分）" if not is_small else "借方余额 | 4301 研发支出",
               right_formula="流动负债合计 + 非流动负债合计"),
-            R("商誉","28",0,                   "所有者权益（或股东权益）：","","",True,
-              left_formula="借方余额 | 1711 商誉 − |商誉减值准备|"),
+            R("商誉","28",goodwill,                   "所有者权益（或股东权益）：","","",True,
+              left_ys=goodwill_y,
+              left_formula="借方余额 | 1711 商誉"),
             R("长期待摊费用","29",lt_prepaid,   "实收资本（或股本）","61",cap,
               left_ys=lt_prepaid_y,   right_ys=cap_y,
               left_formula ="借方余额 | 1801 长期待摊费用",
@@ -769,8 +813,9 @@ class ReportPage(QWidget):
               None if is_small else tsy_stock,
               right_ys=None if is_small else tsy_y,
               right_formula="" if is_small else tsy_fml),
-            R("","","",                        "其他综合收益","67",0,
-              right_formula="贷方余额 | 4003 其他综合收益（小企业：3003）"),
+            R("","","",                        "专项储备" if not is_small else "其他综合收益","67",spec_res if not is_small else 0,
+              right_ys=spec_res_y if not is_small else None,
+              right_formula="贷方余额 | 4301 专项储备" if not is_small else ""),
             R("","","",                        "盈余公积","68",surp_res,
               right_ys=surp_res_y, right_formula=surp_fml),
             R("","","",                        "未分配利润","69",profit,

@@ -35,7 +35,7 @@ _NAV_ITEMS = [
     ("系统管理",    7, "system.manage"),
 ]
 
-APP_VERSION = "v3.6.2-beta.1"
+APP_VERSION = "v3.6.3-beta.1"
 
 class MainWindow(QMainWindow):
     def __init__(self):
