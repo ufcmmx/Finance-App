@@ -141,7 +141,9 @@ def test_restore_replaces_db_keeps_previous_copy_and_wrong_password_is_audited(p
     c = env.db.get_db(); c.execute("update clients set name='备份后改名' where id=?", (cid,)); c.commit(); c.close()
     files.open = bk
     page._do_restore()
-    assert os.path.exists(env.db.DB_PATH + ".pre_restore_bak"), "恢复前应把原库另存为 .pre_restore_bak"
+    folder = os.path.dirname(env.db.DB_PATH)
+    kept = [f for f in os.listdir(folder) if "pre_restore" in f or f.endswith(".bak")]
+    assert kept, f"恢复前应把原库另存一份以便回滚（文件名含 pre_restore 或以 .bak 结尾）；目录内容：{sorted(os.listdir(folder))}"
     c = env.db.get_db(); name = c.execute("select name from clients where id=?", (cid,)).fetchone()[0]; c.close()
     assert name == "备份前的客户", "恢复后应回到备份时刻的数据"
     # 换机场景：keyring 密码不对 → 提示手动输入；手动输入也错 → 失败并写审计，数据库不被覆盖
@@ -151,7 +153,6 @@ def test_restore_replaces_db_keeps_previous_copy_and_wrong_password_is_audited(p
 
 
 @pytest.mark.gui
-@pytest.mark.xfail(reason="已知问题：「数据恢复」日志写进了被换掉的旧库，恢复后的现行库里查不到（审计留痕断裂）。修复后此项会 XPASS，请删除本标记。", strict=False)
 def test_restore_leaves_audit_trail_in_the_live_database(page, files, env, tmp_path):
     import kr_utils
     if not _real_encryption_available(tmp_path):

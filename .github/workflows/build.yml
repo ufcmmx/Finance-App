@@ -68,7 +68,9 @@ jobs:
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
-        pip install PySide6 openpyxl pandas xlrd reportlab pyinstaller argon2-cffi cryptography keyring cython
+        # PySide6 必须固定版本：Qt 6.12.0 起金额框内部输入区会被样式表压成 1 像素（数字看不见）。
+        # 6.11.0 = 本地 Mac 开发机上一直正常的版本，本地、CI、Windows 测试机都要与它一致。
+        pip install PySide6==6.11.0 openpyxl pandas xlrd reportlab pyinstaller argon2-cffi cryptography keyring cython
 
     - name: 清理 __pycache__（避免旧字节码被打包）
       shell: bash
@@ -194,6 +196,6 @@ jobs:
             --checksum-algorithm CRC32
           echo ""
           echo "✅ 正式版 R2 上传完成："
-          echo "   带版本：https://download.wisdomplyscn.com/wiseledger/${ZIP_FILE}"
+          echo "   带版本：https://download.wisdompluscn.com/wiseledger/${ZIP_FILE}"
           echo "   最新版：https://download.wisdompluscn.com/wiseledger/latest.zip"
         fi

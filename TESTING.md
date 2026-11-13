@@ -98,9 +98,11 @@ pytest tests/test_30_settle.py -q   # 也可以直接用 pytest
 
 | 项 | 位置 | 处理 |
 |---|---|---|
-| 资产负债表有 33 个一级科目不取数（企业 25、小企业 8，其中备抵类需复核） | `tests/known_issues.py` | 逐个补取数后，对应用例变 XPASS，从清单里删除 |
-| 恢复备份后，现行库里没有「数据恢复」日志 | `test_40_system.py` | 恢复完成后往新库补写一条 |
-| 粘贴全角/货币符号/超位小数被忽略（增强项，非缺陷） | `test_10_spinbox.py` | 需要时实现 |
+| 资产负债表还有 7 个一级科目不取数：企业 `1231 坏账准备` `1322 受托代销商品` `1532 未实现融资收益` `1623 公益性生物资产`；小企业 `1231 坏账准备` `4001 生产成本` `4101 制造费用` | `tests/known_issues.py` | 其中 `4001/4101` 应计入存货，制造业客户会用到，优先补；`1231` 是备抵科目，先用「应收账款 + 坏账准备」成对数据复核是否真是缺口 |
+| 粘贴 `1234.567`（超过两位小数）被忽略而不是取整 | `test_10_spinbox.py` | 增强项，非缺陷 |
+
+> 2026-11 第一次在真实仓库运行：此前登记的 33 个资产负债表缺口已修复 26 个，「恢复备份后现行库无审计日志」已修复，
+> 全角/货币符号粘贴已支持。对应的 XPASS 标记请从测试里删除，让它们变成硬性回归保护。
 
 ## 8. 发布门禁
 
@@ -137,3 +139,69 @@ pytest tests/test_30_settle.py -q   # 也可以直接用 pytest
 - 账套导入向导（用友/金蝶 XLS）、凭证录入弹窗的完整流程、PDF 导出。
 - PyInstaller 产物的冒烟测试（启动后自动打开主窗口并退出）。
 - 现金流量表、所有者权益变动表。
+
+## 12. 如何保证 Mac 和 Windows 用的是同一份代码
+
+**原则：git 是唯一的代码来源；Windows 上只读，不在那边改代码，也不手工拷文件。**
+需要改代码时：在 Mac 上改 → 提交 → 推送 → Windows `git pull`。
+
+### Windows 一次性设置（只做一次）
+
+1. 安装 Git for Windows。
+2. **不要在旧文件夹里补救**，在一个新位置克隆：
+   ```
+   git clone <你的仓库地址> D:\finance_win
+   cd D:\finance_win
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+3. 旧文件夹改名保留（如 `finance_old`），先别删。里面如果有只存在于本地、没提交到 git 的文件
+   （例如自己的 `accounting.db`、授权/配置文件），手工拷到新文件夹对应位置。
+   在 Mac 上执行 `git status --ignored` 可以看到哪些文件没有被 git 管理。
+4. 仓库根目录放一个 `.gitattributes`，让两边换行符一致：
+   ```
+   *.py   text eol=lf
+   *.yml  text eol=lf
+   *.md   text eol=lf
+   *.txt  text eol=lf
+   ```
+5. `.gitignore` 里确认有这些（不要提交运行产物）：
+   ```
+   .venv/
+   __pycache__/
+   tests/report/
+   build/
+   dist/
+   startup.log
+   input_debug.log
+   ```
+
+### 每次测试的固定动作
+
+| 机器 | 命令 |
+|---|---|
+| Mac | `git add -A && git commit -m "..." && git push` |
+| Windows | `git pull` → `python tests\run_all.py --gui` |
+| 任一台 | 报告头部会打印 **git 提交** 和 **代码指纹**；有未提交改动时会显示 ⚠️ |
+
+### 对比两台机器的结果
+
+每台机器运行后，`tests/report/` 里会生成 `results_<系统>.json`（Mac=`results_Darwin.json`，
+Windows=`results_Windows.json`），两台互不覆盖。把两份放到一起：
+
+```
+python tests/compare_runs.py results_Darwin.json results_Windows.json
+```
+
+它先回答「代码是不是同一份」（逐文件指出哪个不同；换行符差异不算不同），再列出
+**只在某一台失败**的测试——那些就是平台本身造成的问题。
+代码不同时，结果不能直接比较，先让两边 `git pull` 到同一个提交。
+
+### 关于「report 会不会被覆盖」
+
+- **`tests/report/`（测试结果目录）**：每次运行都会重写，但现在按系统分开命名，Mac 和 Windows 不会互相覆盖。
+  它不进 git。想长期留存就自己复制一份。
+- **`pages/report.py`（应用代码）**：解压测试压缩包**不会碰它**（压缩包里只有 `tests/`、`pytest.ini`、`TESTING.md`、
+  `requirements.txt`、`patches/`、`skills/`）。`git pull` 会把它更新成已提交的版本，这正是目的；
+  如果 Windows 上有未提交的本地改动，git 会**拒绝覆盖并报错**，不会静默丢失。

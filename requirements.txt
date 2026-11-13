@@ -1,7 +1,7 @@
 # 固定依赖版本：本地开发、CI、打包必须一致。
 # 已验证 Qt 6.6 ~ 6.11 正常；Qt 6.12.0 起金额框会被压扁（需应用 patches/utils_stylesheet_qt612.patch 后才可升级到 6.12）。
-# 请改成你 Mac 上 `pip show PySide6` 看到的、一直正常的版本：
-PySide6==6.8.3
+# 6.11.0 = 你 Mac 上 `pip show PySide6` 的版本（已验证正常）。CI 与 Windows 必须与它一致：
+PySide6==6.11.0
 openpyxl
 pandas
 xlrd

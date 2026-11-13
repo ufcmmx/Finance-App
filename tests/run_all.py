@@ -9,9 +9,9 @@
   python tests/run_all.py --root D:\\wiseledger   # 指定项目根目录
 
 退出码：0 = 无失败；1 = 有失败；2 = 环境问题（无法收集/运行）。
-报告：tests/report/summary.md 和 tests/report/results.json（每次覆盖）。
+报告：tests/report/summary_<系统>.md 与 results_<系统>.json（Mac=Darwin、Windows=Windows，互不覆盖；另有一份 results.json 总是最新的一次）。
 """
-import argparse, json, os, pathlib, sys, time
+import argparse, hashlib, json, os, pathlib, platform, subprocess, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 LAYERS = [
@@ -27,6 +27,50 @@ LAYERS = [
 ]
 
 
+SKIP_DIRS = {".venv", "venv", "build", "dist", "__pycache__", "report", ".git", "node_modules", ".idea", ".vscode"}
+
+
+def _git(root, *args):
+    try:
+        return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.DEVNULL, text=True, timeout=10).strip()
+    except Exception:
+        return None
+
+
+def _sha(path):
+    # 换行符统一后再算哈希：Windows 的 CRLF 与 Mac 的 LF 不应被当成「代码不同」
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:12]
+
+
+def fingerprint(root):
+    """代码指纹：把项目文件分成 app / tests / ci 三组各算一个总哈希，并记录每个文件的哈希，
+    两台机器的结果文件一对比，就能知道代码是否相同、哪个文件不同。"""
+    groups = {"app": {}, "tests": {}, "ci": {}}
+    for p in root.rglob("*"):
+        if not p.is_file() or any(part in SKIP_DIRS for part in p.parts):
+            continue
+        rel = p.relative_to(root).as_posix()
+        if p.suffix == ".py":
+            groups["tests" if rel.startswith("tests/") else "app"][rel] = _sha(p)
+        elif rel in ("pytest.ini", "requirements.txt") or (rel.startswith("tests/") and p.suffix in (".md", ".ini")):
+            groups["tests"][rel] = _sha(p)
+        elif rel.startswith(".github/workflows/") and p.suffix in (".yml", ".yaml"):
+            groups["ci"][rel] = _sha(p)
+    total = {g: hashlib.sha256("".join(f"{k}:{v}\n" for k, v in sorted(d.items())).encode()).hexdigest()[:12] for g, d in groups.items()}
+    return total, {k: v for d in groups.values() for k, v in d.items()}
+
+
+def env_info(root):
+    commit = _git(root, "rev-parse", "--short", "HEAD")
+    dirty = _git(root, "status", "--porcelain")
+    dirty_files = [l[3:] for l in dirty.splitlines()] if dirty else []
+    total, files = fingerprint(root)
+    return {"system": platform.system(), "node": platform.node(), "python": sys.version.split()[0],
+            "git_commit": commit, "git_branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
+            "git_dirty": [f for f in dirty_files if not f.startswith("tests/report")][:30],
+            "fingerprint": total, "files": files}
+
+
 class Collector:
     def __init__(self): self.rows = []
     def pytest_runtest_logreport(self, report):
@@ -37,8 +81,9 @@ class Collector:
             else: kind = "xfailed" if wasxfail else "skipped"
             msg = ""
             if report.outcome == "failed" and report.longrepr is not None:
-                lr = str(getattr(report.longrepr, "reprcrash", None) or report.longrepr)
-                msg = lr.strip().splitlines()[-1][:240] if lr.strip() else ""
+                rc = getattr(report.longrepr, "reprcrash", None)
+                lr = (getattr(rc, "message", None) or str(report.longrepr)).strip()
+                msg = " ⏎ ".join(l.strip() for l in lr.splitlines() if l.strip())[:900]
             elif kind in ("skipped", "xfailed"):
                 msg = str(getattr(report, "wasxfail", "") or (report.longrepr[2] if isinstance(report.longrepr, tuple) else ""))[:160]
             self.rows.append({"id": report.nodeid, "kind": kind, "msg": msg, "sec": round(report.duration, 3)})
@@ -68,11 +113,19 @@ def main():
 
     import PySide6
     from PySide6.QtCore import qVersion
+    root = pathlib.Path(os.environ.get("WL_PROJECT_ROOT") or HERE.parent).resolve()
+    info = env_info(root)
     cnt = lambda rows, k: sum(1 for r in rows if r["kind"] == k)
     out = []
     out.append("# WiseLedger 测试报告\n")
     out.append(f"- 时间：{time.strftime('%Y-%m-%d %H:%M:%S')}　耗时 {dur:.1f}s　Python {sys.version.split()[0]}　PySide6 {PySide6.__version__}　Qt {qVersion()}")
-    out.append(f"- 平台插件：{os.environ.get('QT_QPA_PLATFORM', '(系统默认，真实窗口)')}　项目根：{os.environ.get('WL_PROJECT_ROOT', '(上一级)')}\n")
+    out.append(f"- 平台插件：{os.environ.get('QT_QPA_PLATFORM', '(系统默认，真实窗口)')}　项目根：{root}")
+    out.append(f"- 机器：{info['system']} / {info['node']}　git：{info['git_branch'] or '(未使用 git)'} @ {info['git_commit'] or '-'}"
+               f"　代码指纹：app `{info['fingerprint']['app']}` / tests `{info['fingerprint']['tests']}` / ci `{info['fingerprint']['ci']}`")
+    if info["git_dirty"]:
+        out.append(f"- ⚠️ **有 {len(info['git_dirty'])} 个未提交的改动**（{', '.join(info['git_dirty'][:5])}{'…' if len(info['git_dirty']) > 5 else ''}）"
+                   "——这份结果不对应任何一个提交，无法与另一台机器的结果严格比较。")
+    out.append("")
     out.append("| 层级 | 覆盖 | 通过 | 失败 | 已知问题(xfail) | 跳过 | 结论 |\n|---|---|---|---|---|---|---|")
     for prefix, name, desc in LAYERS:
         rows = [r for r in col.rows if f"/{prefix}" in r["id"] or r["id"].startswith(f"tests/{prefix}") or f"{prefix}_" in r["id"]]
@@ -85,7 +138,7 @@ def main():
     fails = [r for r in col.rows if r["kind"] == "failed"]
     if fails:
         out.append("## 失败明细（前 30 条）\n")
-        for r in fails[:30]: out.append(f"- `{r['id']}`\n  - {r['msg']}")
+        for r in fails[:40]: out.append(f"- `{r['id']}`\n  - {r['msg']}")
         if any("test_00_env_canary" in r["id"] for r in fails):
             out.append("\n> ⚠️ **L0 金丝雀失败**：当前 Qt 版本与样式表不兼容，金额框内部输入区被压扁，界面上数字会看不见。"
                        "先解决 L0（固定/回退 PySide6 版本，或修复样式表），其余层级的失败多半是它的连带结果。详见 TESTING.md 第 4 节。")
@@ -99,9 +152,14 @@ def main():
         for r in sk[:15]: out.append(f"- `{r['id']}`：{r['msg']}")
     text = "\n".join(out)
     rep = HERE / "report"; rep.mkdir(exist_ok=True)
-    (rep / "summary.md").write_text(text, encoding="utf-8")
-    (rep / "results.json").write_text(json.dumps({"rows": col.rows, "failed": total_f, "qt": qVersion(), "pyside6": PySide6.__version__}, ensure_ascii=False, indent=1), encoding="utf-8")
+    payload = json.dumps({"rows": col.rows, "failed": total_f, "qt": qVersion(), "pyside6": PySide6.__version__, "env": info}, ensure_ascii=False, indent=1)
+    tag = platform.system()                       # Windows / Darwin / Linux：Mac 与 Windows 的结果互不覆盖
+    for name in ("results.json", f"results_{tag}.json"):
+        (rep / name).write_text(payload, encoding="utf-8")
+    for name in ("summary.md", f"summary_{tag}.md"):
+        (rep / name).write_text(text, encoding="utf-8")
     print("\n" + text)
+    print(f"\n结果文件：tests/report/results_{tag}.json（对比两台机器：python tests/compare_runs.py <Mac结果> <Windows结果>）")
     return 1 if total_f else 0
 
 
