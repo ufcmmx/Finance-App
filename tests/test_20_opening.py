@@ -2,7 +2,8 @@
 import pytest
 from datetime import datetime
 from helpers import press_release, type_text, spin_events, edit_of, APP
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from dialogs.client_dialogs import AccountInitDialog
 
 DEEP = [("1002.001", "银行存款-工行", "1002", 2), ("1002.001.001", "工行基本户", "1002.001", 3),
@@ -22,13 +23,23 @@ def open_dialog(cid, period="2026-04"):
     return d, {d.table.item(i, 0).text(): i for i in range(d.table.rowCount())}
 
 
+def commit_focus(d):
+    """让当前持有焦点的格子失去焦点——真人点「保存」按钮时就会发生这件事。
+    有的金额框只在失焦时才提交数值，测试若不模拟这一步，读到的永远是 0（这会是测试的误报，不是缺陷）。"""
+    fw = d.focusWidget()
+    if fw is not None:
+        fw.clearFocus()
+    spin_events()
+
+
 def enter(d, row, col, text):
-    """像用户一样：点击格子 → 敲键盘。"""
+    """像用户一样：点击格子 → 敲键盘 → 按 Tab 离开格子。"""
     w = d.table.cellWidget(row, col); le = edit_of(w)
     assert le.width() > 40, "金额格内部输入区被压扁（样式表/Qt 版本问题）——见 test_00_env_canary.py"
     w.setFocus(); spin_events()
     press_release(le, QPoint(le.width() - 4, le.height() // 2))
     type_text(le, text)
+    QTest.keyClick(le, Qt.Key_Tab); spin_events()
 
 
 def first_leaf(d, rm, prefix):
@@ -78,6 +89,7 @@ def test_save_persists_and_reopens_identically(dlg, msgs):
     cr = first_leaf(d, rm, "2")
     enter(d, rm["1002.001.001"], 2, "1234.56"); enter(d, rm["1002.001.002"], 2, "0.5")
     enter(d, rm["1002.002"], 2, "22"); enter(d, rm[cr], 3, "1257.06")
+    commit_focus(d)
     d._save()
     saved = env.opening(cid)
     assert saved["1002.001.001"][0] == pytest.approx(1234.56)
@@ -153,3 +165,16 @@ def test_preview_balance_bar(env, page):
     conn.execute("update accounts set opening_credit=1000 where client_id=? and code='4001'", (cid,)); conn.commit(); conn.close()
     pg, _ = page(cid); pg._load_preview()
     assert "借贷平衡" in pg.balance_lbl.text()
+
+
+@pytest.mark.gui
+def test_typing_then_saving_without_leaving_the_cell_still_saves(env, std):
+    """真人最常见的操作：敲完最后一个数，不按 Tab，直接点「保存」。最后一个格子的数也必须保存下来。"""
+    cid = env.client(std, start="2026-04"); add_deep_accounts(env, cid)
+    d, rm = open_dialog(cid)
+    w = d.table.cellWidget(rm["1002.002"], 2); le = edit_of(w)
+    w.setFocus(); spin_events()
+    press_release(le, QPoint(le.width() - 4, le.height() // 2)); type_text(le, "1234.56")   # 不按 Tab
+    commit_focus(d)                                                                             # = 点击「保存」按钮时焦点离开
+    d._save(); d.close()
+    assert env.opening(cid).get("1002.002", (0, 0))[0] == pytest.approx(1234.56), "敲完最后一个数直接保存，数字丢失"

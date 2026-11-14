@@ -157,11 +157,19 @@ class ClientPage(QWidget):
         if d.exec(): self.load()
 
     def _del(self,r):
-        if QMessageBox.question(self,"确认",f"删除 [{r['name']}]？所有账目数据一并删除。",
+        if QMessageBox.question(self,"确认",
+                                f"删除 [{r['name']}]？\n\n该客户的所有账目数据将一并删除，且无法恢复，建议先做一次数据备份。\n"
+                                "该客户的审计日志会保留（审计日志不可删改）。",
                                 QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             conn = get_db()
             try:
                 client_id = r['id']
+                # 删除前先统计：客户数据一旦删除，下面写入的这条审计日志就是它唯一的留痕
+                n_v  = conn.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=?", (client_id,)).fetchone()[0]
+                n_ok = conn.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=? AND status='已审核'", (client_id,)).fetchone()[0]
+                n_cl = conn.execute("SELECT COUNT(*) FROM periods WHERE client_id=? AND is_closed=1", (client_id,)).fetchone()[0]
+                pmin, pmax = conn.execute("SELECT MIN(period), MAX(period) FROM vouchers WHERE client_id=?", (client_id,)).fetchone()
+                meta = conn.execute("SELECT short_code, accounting_std, tax_id FROM clients WHERE id=?", (client_id,)).fetchone()
                 # Delete dependent rows explicitly because most FKs are NO ACTION.
                 conn.execute("DELETE FROM voucher_entries WHERE voucher_id IN (SELECT id FROM vouchers WHERE client_id=?)",
                              (client_id,))
@@ -171,11 +179,15 @@ class ClientPage(QWidget):
                 conn.execute("DELETE FROM aux_items WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM aux_dimensions WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM periods WHERE client_id=?", (client_id,))
-                conn.execute("DELETE FROM audit_log WHERE client_id=?", (client_id,))
+                # 注意：不删除 audit_log——审计日志不可删改（财会〔2024〕12号）。
                 conn.execute("DELETE FROM vouchers WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM accounts WHERE client_id=?", (client_id,))
                 conn.execute("DELETE FROM clients WHERE id=?", (client_id,))
-                log_action(conn, 0, "删除客户", "client", client_id, f"删除客户【{r['name']}】（ID={client_id}）及其所有账务数据")
+                log_action(conn, 0, "删除客户", "client", client_id,
+                           f"删除客户【{r['name']}】（ID={client_id}，助记码={(meta['short_code'] if meta else '') or '-'}，"
+                           f"制度={(meta['accounting_std'] if meta else '') or '-'}，税号={(meta['tax_id'] if meta else '') or '-'}）；"
+                           f"同时删除凭证 {n_v} 张（其中已审核 {n_ok} 张）、已结账期间 {n_cl} 个，"
+                           f"凭证期间 {pmin or '-'} ~ {pmax or '-'}。该客户此前的审计日志已保留。")
                 conn.commit()
             except Exception:
                 conn.rollback()

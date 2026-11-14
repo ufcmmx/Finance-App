@@ -227,3 +227,9 @@ def ime_type(le, s):
 
 def paste_clipboard(le, text):
     QApplication.clipboard().setText(text); QTest.keyClick(le, Qt.Key_V, Qt.ControlModifier); APP.processEvents()
+
+
+def delete_client(cid, name="测试客户"):
+    """走页面真实的删除流程（确认框已被 conftest 替换为自动点「是」）。"""
+    import pages.client as C
+    pg = C.ClientPage(); pg._del({"id": cid, "name": name})
