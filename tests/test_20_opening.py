@@ -32,14 +32,26 @@ def commit_focus(d):
     spin_events()
 
 
+def cell_state(d, w, le, before="", typed=""):
+    """现场快照：金额格的真实类型、内部输入控件、文本与数值、焦点——失败信息里带上它，不用再手工诊断。"""
+    fw = d.focusWidget()
+    return (f"[现场] 格子类型={[c.__name__ for c in type(w).__mro__[:4]]} 内部控件={type(le).__name__}({le.width()}x{le.height()}) "
+            f"键入前文本={before!r} 键入后文本={typed!r} 当前文本={le.text()!r} value()={w.value() if hasattr(w, 'value') else 'n/a'} "
+            f"焦点:格子={w.hasFocus()} 内部={le.hasFocus()} 弹窗焦点控件={type(fw).__name__ if fw else None} "
+            f"弹窗已激活={d.isActiveWindow()} 只读={getattr(w, 'isReadOnly', lambda: None)()}")
+
+
 def enter(d, row, col, text):
-    """像用户一样：点击格子 → 敲键盘 → 按 Tab 离开格子。"""
-    w = d.table.cellWidget(row, col); le = edit_of(w)
+    """像用户一样：点击格子 → 敲键盘 → 按 Tab 离开格子。键入没有生效时，直接抛出带现场快照的错误。"""
+    w = d.table.cellWidget(row, col); le = edit_of(w); before = le.text()
     assert le.width() > 40, "金额格内部输入区被压扁（样式表/Qt 版本问题）——见 test_00_env_canary.py"
     w.setFocus(); spin_events()
     press_release(le, QPoint(le.width() - 4, le.height() // 2))
     type_text(le, text)
+    typed = le.text()
     QTest.keyClick(le, Qt.Key_Tab); spin_events()
+    if hasattr(w, "value") and abs(w.value()) < 1e-9 and any(ch in "123456789" for ch in text):
+        raise AssertionError(f"在弹窗的金额格里键入 {text!r} 并按 Tab 离开后，数值仍为 0。" + cell_state(d, w, le, before, typed))
 
 
 def first_leaf(d, rm, prefix):
@@ -175,6 +187,97 @@ def test_typing_then_saving_without_leaving_the_cell_still_saves(env, std):
     w = d.table.cellWidget(rm["1002.002"], 2); le = edit_of(w)
     w.setFocus(); spin_events()
     press_release(le, QPoint(le.width() - 4, le.height() // 2)); type_text(le, "1234.56")   # 不按 Tab
+    typed = le.text()
     commit_focus(d)                                                                             # = 点击「保存」按钮时焦点离开
+    snap = cell_state(d, w, le, "", typed)
     d._save(); d.close()
-    assert env.opening(cid).get("1002.002", (0, 0))[0] == pytest.approx(1234.56), "敲完最后一个数直接保存，数字丢失"
+    assert env.opening(cid).get("1002.002", (0, 0))[0] == pytest.approx(1234.56), "敲完最后一个数直接保存，数字丢失。" + snap
+
+
+@pytest.mark.gui
+def test_parent_rollup_debit_credit_netting(env):
+    """验证用户反馈 Bug B：三级及多级科目同时有借贷余额时，二级和一级上级汇总科目必须借贷相抵轧差，只在较大的一方留余额。"""
+    cid = env.client("企业会计准则", start="2026-04")
+    conn = env.db.get_db()
+    # 建立三级科目结构：2221(一级) -> 2221.001(二级) -> 2221.001.001(三级进项), 2221.001.002(三级销项)
+    conn.execute("INSERT OR IGNORE INTO accounts(client_id,code,name,type,direction) VALUES(?,?,?,?,?)",
+                 (cid, "2221", "应交税费", "负债", "贷"))
+    conn.execute("INSERT OR IGNORE INTO accounts(client_id,code,name,type,direction) VALUES(?,?,?,?,?)",
+                 (cid, "2221.001", "应交增值税", "负债", "贷"))
+    conn.execute("INSERT OR IGNORE INTO accounts(client_id,code,name,type,direction) VALUES(?,?,?,?,?)",
+                 (cid, "2221.001.001", "进项税额", "负债", "借"))
+    conn.execute("INSERT OR IGNORE INTO accounts(client_id,code,name,type,direction) VALUES(?,?,?,?,?)",
+                 (cid, "2221.001.002", "销项税额", "负债", "贷"))
+    conn.commit(); conn.close()
+
+    d, rm = open_dialog(cid)
+    enter(d, rm["2221.001.001"], 2, "10000.00")  # 进项税借方 10,000
+    enter(d, rm["2221.001.002"], 3, "6000.00")   # 销项税贷方 6,000
+
+    v = lambda code, col: d.table.cellWidget(rm[code], col).value()
+    # 二级应交增值税：借 10000 - 贷 6000 = 净借方 4000，贷方为 0
+    assert v("2221.001", 2) == pytest.approx(4000.0), "二级汇总科目借贷相抵后，借方应为净额 4000"
+    assert v("2221.001", 3) == pytest.approx(0.0), "二级汇总科目贷方应轧差为 0"
+
+    # 一级应交税费：同理净借方 4000，贷方为 0（不能两边同时挂数）
+    assert v("2221", 2) == pytest.approx(4000.0), "一级汇总科目借贷相抵后，借方应为净额 4000"
+    assert v("2221", 3) == pytest.approx(0.0), "一级汇总科目贷方应轧差为 0"
+    d.close()
+
+
+@pytest.mark.gui
+def test_aux_opening_dialog_and_persistence(env):
+    """验证用户反馈 Bug A：已配置辅助核算的科目在期初录入时识别辅助项，录入后自动汇总回填并持久化到 account_opening_aux。"""
+    cid = env.client("小企业会计制度", start="2026-04")
+    conn = env.db.get_db()
+    # 创建辅助维度与项目：个人/员工（张三、李四）
+    conn.execute("INSERT INTO aux_dimensions(client_id, name, code) VALUES(?, '员工', 'EMP')", (cid,))
+    dim_id = conn.execute("SELECT id FROM aux_dimensions WHERE client_id=?", (cid,)).fetchone()[0]
+    conn.execute("INSERT INTO aux_items(client_id, dimension_id, name, code) VALUES(?, ?, '张三', '001')", (cid, dim_id))
+    conn.execute("INSERT INTO aux_items(client_id, dimension_id, name, code) VALUES(?, ?, '李四', '002')", (cid, dim_id))
+    i1 = conn.execute("SELECT id FROM aux_items WHERE client_id=? AND name='张三'", (cid,)).fetchone()[0]
+    i2 = conn.execute("SELECT id FROM aux_items WHERE client_id=? AND name='李四'", (cid,)).fetchone()[0]
+    # 配置科目 2241 (其他应付款) 挂接该维度
+    conn.execute("INSERT INTO account_aux_config(client_id, account_code, dimension_id) VALUES(?, '2241', ?)",
+                 (cid, dim_id))
+    conn.commit(); conn.close()
+
+    d, rm = open_dialog(cid)
+    # 验证科目名称带上了辅助核算标签
+    name_txt = d.table.item(rm["2241"], 1).text()
+    assert "员工" in name_txt, f"期初科目名称应展示辅助核算维度标签，实际得到: {name_txt}"
+
+    # 模拟辅助核算录入：张三贷方 5000，李四贷方 3000
+    d._aux_openings["2241"] = {i1: (0.0, 5000.0), i2: (0.0, 3000.0)}
+    dw = d.table.cellWidget(rm["2241"], 2)
+    cw = d.table.cellWidget(rm["2241"], 3)
+    cw.setValue(8000.0)
+    d._refresh_parents()
+
+    # 平衡保存（借方 1002 录入 8000）
+    enter(d, rm["1002"], 2, "8000.00")
+    d._save(); d.close()
+
+    # 验证 account_opening_aux 持久化数据
+    conn = env.db.get_db()
+    rows = conn.execute("""
+        SELECT ai.name, ao.debit, ao.credit
+        FROM account_opening_aux ao
+        JOIN aux_items ai ON ai.id = ao.aux_item_id
+        WHERE ao.client_id=? AND ao.account_code='2241'
+        ORDER BY ai.name
+    """, (cid,)).fetchall()
+    conn.close()
+
+    assert len(rows) == 2, f"应持久化 2 条辅助核算明细，实际: {len(rows)}"
+    assert rows[0]["name"] == "张三" and rows[0]["credit"] == 5000.0
+    assert rows[1]["name"] == "李四" and rows[1]["credit"] == 3000.0
+
+    # 验证重新打开弹窗时，数据成功回显
+    d2, rm2 = open_dialog(cid)
+    assert d2.table.cellWidget(rm2["2241"], 3).value() == pytest.approx(8000.0)
+    assert "2241" in d2._aux_openings
+    assert d2._aux_openings["2241"][i1] == (0.0, 5000.0)
+    assert d2._aux_openings["2241"][i2] == (0.0, 3000.0)
+    d2.close()
+

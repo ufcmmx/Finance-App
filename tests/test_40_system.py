@@ -21,6 +21,8 @@ def set_user(monkeypatch, user):
 @pytest.fixture
 def page(env, monkeypatch):
     import pages.system as S
+    assert S.DB_PATH == env.db.DB_PATH, (f"测试夹具没有把 pages.system.DB_PATH 指向本次的临时库：{S.DB_PATH} ≠ {env.db.DB_PATH}"
+                                          "（备份/恢复会作用到别的文件上，得到误导性的结果）")
     pg = S.SystemPage(); pg.resize(1100, 700); pg.show(); APP.processEvents()
     return pg
 

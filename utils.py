@@ -40,7 +40,11 @@ QPushButton#btn_gray:hover { background:#e8e8e8; }
 QLineEdit,QDateEdit,QComboBox,QDoubleSpinBox,QSpinBox,QTextEdit {
     background:#fff; border:1px solid #d9d9d9; border-radius:5px;
     padding:6px 10px; }
-QSpinBox,QDoubleSpinBox { qproperty-buttonSymbols: NoButtons; }
+/* 隐藏微调按钮：不要使用 qproperty-buttonSymbols:NoButtons。
+   Qt 6.12 起它与「带边框的样式表」组合，会把 spinbox 内部输入区压成 1px 宽（数字、光标都看不见，点击也落不到输入框）。
+   改为保留按钮但宽度设为 0，各 Qt 版本表现一致；键盘上下键仍可用，滚轮已由 NoScroll* 屏蔽。 */
+QSpinBox::up-button,QSpinBox::down-button,QDoubleSpinBox::up-button,QDoubleSpinBox::down-button {
+    width:0px; height:0px; border:none; margin:0; padding:0; }
 QLineEdit:focus,QDoubleSpinBox:focus { border:1.5px solid #3d6fdb; }
 /* QComboBox — 统一下拉箭头 */
 QComboBox { padding-right:26px; }

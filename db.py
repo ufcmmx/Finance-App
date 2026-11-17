@@ -123,6 +123,19 @@ def init_db():
         FOREIGN KEY(client_id) REFERENCES clients(id),
         FOREIGN KEY(dimension_id) REFERENCES aux_dimensions(id)
     );
+    CREATE TABLE IF NOT EXISTS account_opening_aux (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        account_code TEXT NOT NULL,
+        dimension_id INTEGER NOT NULL,
+        aux_item_id INTEGER NOT NULL,
+        debit REAL DEFAULT 0.0,
+        credit REAL DEFAULT 0.0,
+        UNIQUE(client_id, account_code, dimension_id, aux_item_id),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        FOREIGN KEY(dimension_id) REFERENCES aux_dimensions(id),
+        FOREIGN KEY(aux_item_id) REFERENCES aux_items(id)
+    );
     CREATE TABLE IF NOT EXISTS voucher_entry_aux (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entry_id INTEGER NOT NULL,

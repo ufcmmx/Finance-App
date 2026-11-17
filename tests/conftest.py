@@ -157,9 +157,13 @@ def env(tmp_path, monkeypatch, qapp):
     old = db.DB_PATH
     new = str(tmp_path / "test_accounting.db")
     assert new != old
-    for m in list(sys.modules.values()):          # 其它模块 from db import DB_PATH 得到的是旧值，必须一并替换
+    # 其它模块 `from db import DB_PATH` 在导入那一刻就拷贝了一个值，之后不会再跟着变。
+    # 不能只替换「值等于旧路径」的模块：模块若在第一个测试里才被导入，它记下的是第一个测试的临时路径，
+    # 此后每个测试里它都是过期的（备份/恢复会作用到别的文件上）。所以项目内所有带 DB_PATH 的模块一律替换。
+    for m in list(sys.modules.values()):
         try:
-            if getattr(m, "DB_PATH", None) == old:
+            f = getattr(m, "__file__", "") or ""
+            if m is not db and isinstance(getattr(m, "DB_PATH", None), str) and f.startswith(str(ROOT)):
                 monkeypatch.setattr(m, "DB_PATH", new)
         except Exception:
             pass

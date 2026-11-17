@@ -2,7 +2,7 @@
 from datetime import datetime
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QDate, QTimer, QEvent, Signal
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QFont, QPalette, QKeySequence, QGuiApplication
 
 from db import get_db, seed_client_accounts, log_action, VOUCHER_TEMPLATES, STANDARD_ACCOUNTS_SMALL
 from utils import (lbl, sep, card, fmt_amt, cn_amount,
@@ -47,6 +47,9 @@ class ClientDialog(QDialog):
         F.addRow("公司名称 *", self.name); F.addRow("助记码", self.code)
         F.addRow("客户类型", self.typ);   F.addRow("会计制度", self.std)
         F.addRow("启用年月", self.start_period)
+        self.sp_hint = QLabel(""); self.sp_hint.setWordWrap(True)
+        self.sp_hint.setStyleSheet("color:#fa8c16;font-size:12px;")
+        F.addRow("", self.sp_hint)
         F.addRow("税号", self.taxid)
         F.addRow("联系人", self.contact); F.addRow("电话", self.phone)
         L.addLayout(F)
@@ -74,6 +77,28 @@ class ClientDialog(QDialog):
                     self.start_period.setCurrentIndex(idx_sp)
         except Exception:
             pass
+        reason = self._start_period_locked_reason()
+        if reason:
+            self.start_period.setEnabled(False)
+            self.sp_hint.setText(f"{reason}，启用年月不可修改。")
+
+    def _start_period_locked_reason(self):
+        """账套已有凭证或已结账期间后，启用年月不可修改（与用友/金蝶一致：启用之后不能再改启用期间）。
+        可以修改时返回空串；新建客户时恒为空串。"""
+        if not self.client:
+            return ""
+        conn = get_db()
+        try:
+            cid = self.client["id"]
+            n_v = conn.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=?", (cid,)).fetchone()[0]
+            n_cl = conn.execute("SELECT COUNT(*) FROM periods WHERE client_id=? AND is_closed=1", (cid,)).fetchone()[0]
+        finally:
+            conn.close()
+        if n_v:
+            return f"该账套已录入 {n_v} 张凭证"
+        if n_cl:
+            return f"该账套已有 {n_cl} 个已结账期间"
+        return ""
 
     def _save(self):
         n = self.name.text().strip()
@@ -86,8 +111,14 @@ class ClientDialog(QDialog):
         if self.client:
             old_sp = self.client["start_period"] if "start_period" in self.client.keys() else None
             cid = self.client["id"]
-            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=?,start_period=? WHERE id=?",
-                      d+(cid,))
+            if self._start_period_locked_reason():
+                # 已锁定：不写启用年月（后端兜底，不依赖界面上控件是否被禁用）
+                c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=? WHERE id=?",
+                          d[:-1]+(cid,))
+                sp = old_sp or "未设置"
+            else:
+                c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=?,start_period=? WHERE id=?",
+                          d+(cid,))
             if old_sp and old_sp != sp:
                 detail = f"客户【{n}】信息更新。启用年月由【{old_sp}】变更为【{sp}】"
             else:
@@ -113,16 +144,19 @@ _FULL_TO_HALF = str.maketrans({
 class AccountOpeningSpinBox(QLineEdit):
     """专用于科目期初余额录入的金额输入框（继承 QLineEdit 避免嵌套 QDoubleSpinBox 样式塌陷）：
     1. 彻底解决文本不可见：直接单层控件，杜绝 Windows 下嵌套内层 QLineEdit padding 叠加导致高度被裁切（0.00 看不见）
-    2. 彻底解决 10 倍扩散问题：点击或聚焦时全选现有文本，输入数字直接覆盖，绝不在原 '0' 前后残留导致 2 变 20 或 22 变 220
+    2. 彻底解决 10 倍扩散与覆盖问题：点击或聚焦时全选现有文本；失焦重新聚焦或选区折叠时光标任意位置键入，自动全量覆盖旧值
     3. 中文标点与全角清洗：支持中文句号(。)、中圆点(·)、全角点(．)及千分位逗号自动转换并识别为小数点
     4. 回车/Tab 跳转：按回车键自动完成当前格式化并跳转到下一个可录入科目，非末级科目设为 NoFocus 自动跳过
     5. 失焦自动补齐：失焦时规范格式化为两位小数（例如 22 -> 22.00，空文本 -> 0.00）
+    6. 粘贴安全过滤：非法内容（负数、文本、nan、inf、双点等）自动拒绝并保留原值；支持带货币符号或千分位的合法金额
     """
     valueChanged = Signal(float)
 
     def __init__(self, editable=True, parent=None):
-        super().__init__(parent)
         self._value = 0.0
+        self._fresh_input = True
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
         self.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.setText("0.00")
         if editable:
@@ -151,10 +185,11 @@ class AccountOpeningSpinBox(QLineEdit):
         pass
 
     def value(self) -> float:
-        return self._value
+        return getattr(self, "_value", 0.0)
 
     def setText(self, t: str):
         super().setText(t)
+        self._fresh_input = True
         try:
             clean = str(t).strip().translate(_FULL_TO_HALF).replace(",", "")
             self._value = round(float(clean), 2)
@@ -163,6 +198,7 @@ class AccountOpeningSpinBox(QLineEdit):
 
     def setValue(self, val: float):
         self._value = round(float(val or 0.0), 2)
+        self._fresh_input = True
         super().setText(f"{self._value:.2f}")
 
     def cleanText(self) -> str:
@@ -199,29 +235,231 @@ class AccountOpeningSpinBox(QLineEdit):
         self.valueChanged.emit(v)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        if self.isReadOnly():
+            event.ignore()
+            return
+
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.focusNextChild()
             event.accept()
-        else:
+            return
+
+        if (key == Qt.Key.Key_V and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)) or \
+           (key == Qt.Key.Key_Insert and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)):
+            self.paste()
+            event.accept()
+            return
+
+        if key == Qt.Key.Key_Delete:
+            if self.hasSelectedText() or self._fresh_input:
+                self.clear()
+                self._value = 0.0
+                self._fresh_input = False
+                self.valueChanged.emit(0.0)
+                event.accept()
+                return
             super().keyPressEvent(event)
+            return
+
+        if key == Qt.Key.Key_Backspace:
+            if self.hasSelectedText() or (self._fresh_input and self.value() != 0.0):
+                self.clear()
+                self._value = 0.0
+                self._fresh_input = False
+                self.valueChanged.emit(0.0)
+                event.accept()
+                return
+            super().keyPressEvent(event)
+            return
+
+        raw_text = event.text()
+        if raw_text:
+            mapped = raw_text.translate(_FULL_TO_HALF)
+            is_digit_or_dot = any(c.isdigit() or c == '.' for c in mapped)
+            if is_digit_or_dot:
+                if self._fresh_input or self.text().strip() in ("0.00", "0.0", "0", ""):
+                    self._fresh_input = False
+                    super().setText("")
+                    insert_txt = "".join(c for c in mapped if c.isdigit() or c == '.')
+                    if insert_txt:
+                        self.insert(insert_txt)
+                        self._on_text_edited(self.text())
+                    event.accept()
+                    return
+                elif mapped != raw_text:
+                    insert_txt = "".join(c for c in mapped if c.isdigit() or c == '.')
+                    if insert_txt:
+                        self.insert(insert_txt)
+                        self._on_text_edited(self.text())
+                    event.accept()
+                    return
+                else:
+                    self._fresh_input = False
+
+        super().keyPressEvent(event)
+
+    def inputMethodEvent(self, event):
+        if self.isReadOnly():
+            event.ignore()
+            return
+        c_text = event.commitString()
+        if c_text:
+            mapped = c_text.translate(_FULL_TO_HALF)
+            if self._fresh_input or self.text().strip() in ("0.00", "0.0", "0", ""):
+                self._fresh_input = False
+                super().setText("")
+            filtered = ""
+            has_dot = "." in self.text()
+            dot_count = len(self.text().split(".")[1]) if has_dot else 0
+            for ch in mapped:
+                if ch.isdigit():
+                    if has_dot:
+                        if dot_count < 2:
+                            filtered += ch
+                            dot_count += 1
+                    else:
+                        filtered += ch
+                elif ch == "." and not has_dot:
+                    filtered += ch
+                    has_dot = True
+            if filtered:
+                self.insert(filtered)
+                self._on_text_edited(self.text())
+            event.accept()
+            return
+        super().inputMethodEvent(event)
+
+    def paste(self):
+        if self.isReadOnly():
+            return
+        clip = QGuiApplication.clipboard().text()
+        if not clip:
+            return
+        t = clip.strip().translate(_FULL_TO_HALF)
+        for pfx in ("￥", "¥", "$"):
+            if t.startswith(pfx):
+                t = t[len(pfx):].strip()
+        t = t.replace(",", "").strip()
+        import re
+        if not re.match(r'^\d+(\.\d+)?$', t):
+            return
+        try:
+            val = round(float(t), 2)
+            self._fresh_input = True
+            self.setValue(val)
+            self.valueChanged.emit(val)
+        except ValueError:
+            pass
 
     def focusInEvent(self, event):
         if event:
             super().focusInEvent(event)
+        self._fresh_input = True
         QTimer.singleShot(0, self.selectAll)
 
     def mousePressEvent(self, event):
         had_focus = self.hasFocus()
         if event:
             super().mousePressEvent(event)
+        self._fresh_input = True
         if not had_focus:
             self.selectAll()
 
     def focusOutEvent(self, event):
         if event:
             super().focusOutEvent(event)
+        self._fresh_input = True
         v = self.value()
         super().setText(f"{v:.2f}")
+
+
+class AuxOpeningDialog(QDialog):
+    """辅助核算期初录入对话框：针对已设置辅助核算的末级科目录入各辅助项的期初余额"""
+    def __init__(self, parent, client_id, acct_code, acct_name, dim_id, dim_name, existing_data=None):
+        super().__init__(parent)
+        self.client_id = client_id
+        self.acct_code = acct_code
+        self.dim_id = dim_id
+        self.existing_data = existing_data or {}
+        self.setWindowTitle(f"辅助核算期初录入 — {acct_code} {acct_name}（{dim_name}）")
+        self.setMinimumSize(560, 420)
+        self.result_data = {}
+        self.total_debit = 0.0
+        self.total_credit = 0.0
+        self._build()
+
+    def _build(self):
+        L = QVBoxLayout(self); L.setContentsMargins(16, 16, 16, 16); L.setSpacing(10)
+        hint = QLabel(f"  请录入【{self.acct_code}】下各辅助项的期初余额，保存后自动汇总回填至该科目主行。")
+        hint.setStyleSheet("background:#f6f8ff;color:#444;border-radius:5px;padding:8px 12px;font-size:12px;")
+        L.addWidget(hint)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["辅助项目", "期初借方", "期初贷方"])
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(2, 150)
+        self.table.verticalHeader().setVisible(False)
+
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT id, name, code FROM aux_items WHERE client_id=? AND dimension_id=? AND is_active=1 ORDER BY id",
+                  (self.client_id, self.dim_id))
+        items = c.fetchall(); conn.close()
+
+        self.table.setRowCount(len(items))
+        self._rows = []
+        for i, it in enumerate(items):
+            self.table.setRowHeight(i, 38)
+            item_id = it["id"]
+            code_str = f" [{it['code']}]" if it["code"] else ""
+            name_item = QTableWidgetItem(f"{it['name']}{code_str}")
+            name_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(i, 0, name_item)
+
+            d_val, cr_val = self.existing_data.get(item_id, (0.0, 0.0))
+            d_spin = AccountOpeningSpinBox(editable=True)
+            cr_spin = AccountOpeningSpinBox(editable=True)
+            d_spin.setValue(d_val)
+            cr_spin.setValue(cr_val)
+
+            d_spin.valueChanged.connect(self._recalc_totals)
+            cr_spin.valueChanged.connect(self._recalc_totals)
+
+            self.table.setCellWidget(i, 1, d_spin)
+            self.table.setCellWidget(i, 2, cr_spin)
+            self._rows.append((item_id, d_spin, cr_spin))
+
+        L.addWidget(self.table)
+
+        self.total_lbl = QLabel()
+        self.total_lbl.setStyleSheet("font-size:13px;padding:6px 12px;background:#f0f5ff;color:#1e2130;border-radius:4px;font-weight:bold;")
+        L.addWidget(self.total_lbl)
+        self._recalc_totals()
+
+        row = QHBoxLayout(); row.addStretch()
+        bc = QPushButton("取消"); bc.clicked.connect(self.reject)
+        bs = QPushButton("确定"); bs.setObjectName("btn_primary"); bs.clicked.connect(self._on_confirm)
+        row.addWidget(bc); row.addWidget(bs)
+        L.addLayout(row)
+
+    def _recalc_totals(self):
+        td = sum(d_spin.value() for _, d_spin, _ in self._rows)
+        tc = sum(cr_spin.value() for _, _, cr_spin in self._rows)
+        self.total_debit = round(td, 2)
+        self.total_credit = round(tc, 2)
+        self.total_lbl.setText(f"借方合计: ¥ {self.total_debit:,.2f}    贷方合计: ¥ {self.total_credit:,.2f}")
+
+    def _on_confirm(self):
+        self._recalc_totals()
+        self.result_data = {
+            item_id: (d_spin.value(), cr_spin.value())
+            for item_id, d_spin, cr_spin in self._rows
+            if d_spin.value() > 0 or cr_spin.value() > 0
+        }
+        self.accept()
 
 
 class AccountInitDialog(QDialog):
@@ -268,7 +506,8 @@ class AccountInitDialog(QDialog):
 
     @staticmethod
     def _rollup(acct_map):
-        """从末级科目向上累加期初余额，返回 {code: (debit, credit)} 汇总字典。"""
+        """从末级科目向上累加期初余额，返回 {code: (debit, credit)} 汇总字典。
+        非末级科目（汇总科目）借贷相抵轧差，只在较大的一方保留净额。"""
         totals = {code: [a['opening_debit'] or 0, a['opening_credit'] or 0]
                   for code, a in acct_map.items()}
         all_codes = set(acct_map.keys())
@@ -287,13 +526,47 @@ class AccountInitDialog(QDialog):
                 if parent in totals:
                     totals[parent][0] += d
                     totals[parent][1] += cr
+
+        # 借贷相抵轧差：非末级科目只在较大的一方保留净余额
+        for code in all_codes - leaf_codes:
+            d, cr = totals[code]
+            if d > cr:
+                totals[code] = [round(d - cr, 2), 0.0]
+            elif cr > d:
+                totals[code] = [0.0, round(cr - d, 2)]
+            else:
+                totals[code] = [0.0, 0.0]
+
         return totals
 
     def _load(self):
         conn = get_db(); c = conn.cursor()
         c.execute("SELECT id,code,name,opening_debit,opening_credit FROM accounts WHERE client_id=? ORDER BY code",
                   (self.client_id,))
-        rows = c.fetchall(); conn.close()
+        rows = c.fetchall()
+
+        # 加载账套科目辅助核算配置
+        c.execute("""
+            SELECT ac.account_code, ac.dimension_id, ad.name AS dim_name
+            FROM account_aux_config ac
+            JOIN aux_dimensions ad ON ad.id = ac.dimension_id
+            WHERE ac.client_id=?
+        """, (self.client_id,))
+        self._aux_config = {r["account_code"]: (r["dimension_id"], r["dim_name"]) for r in c.fetchall()}
+
+        # 加载已有辅助核算期初余额
+        self._aux_openings = {}
+        try:
+            c.execute("""
+                SELECT account_code, aux_item_id, debit, credit
+                FROM account_opening_aux
+                WHERE client_id=?
+            """, (self.client_id,))
+            for r in c.fetchall():
+                self._aux_openings.setdefault(r["account_code"], {})[r["aux_item_id"]] = (r["debit"] or 0.0, r["credit"] or 0.0)
+        except Exception:
+            pass
+        conn.close()
 
         # Build maps
         all_codes = {r['code'] for r in rows}
@@ -305,13 +578,21 @@ class AccountInitDialog(QDialog):
         for i, r in enumerate(rows):
             self.table.setRowHeight(i, 42)
             self._ids.append(r["id"])
-            is_leaf = r['code'] in leaf_codes
+            code = r['code']
+            is_leaf = code in leaf_codes
             self._leaf_flags.append(is_leaf)
 
-            code_it = QTableWidgetItem(r["code"])
-            name_it = QTableWidgetItem(r["name"])
+            has_aux = code in self._aux_config
+            dim_name = self._aux_config[code][1] if has_aux else ""
+
+            code_it = QTableWidgetItem(code)
+            display_name = f"{r['name']} [{dim_name}]" if has_aux else r["name"]
+            name_it = QTableWidgetItem(display_name)
             if is_leaf:
                 code_it.setForeground(QColor("#3d6fdb"))
+                if has_aux:
+                    name_it.setForeground(QColor("#1890ff"))
+                    name_it.setToolTip(f"该科目已启用【{dim_name}】辅助核算，点击借/贷输入框可录入明细")
             else:
                 code_it.setForeground(QColor("#aaa"))
                 name_it.setForeground(QColor("#aaa"))
@@ -327,15 +608,46 @@ class AccountInitDialog(QDialog):
             d_spin.setValue(r["opening_debit"] or 0)
             cr_spin.setValue(r["opening_credit"] or 0)
 
-            # Connect leaf spinboxes to auto-refresh parent totals
             if is_leaf:
-                d_spin.valueChanged.connect(self._refresh_parents)
-                cr_spin.valueChanged.connect(self._refresh_parents)
+                if has_aux:
+                    # 辅助核算科目：点击时弹出辅助核算期初录入弹窗
+                    d_spin.setToolTip("点击录入辅助核算期初明细")
+                    cr_spin.setToolTip("点击录入辅助核算期初明细")
+                    d_spin.mousePressEvent = lambda e, row_idx=i, ac=code: self._open_aux_dialog(row_idx, ac)
+                    cr_spin.mousePressEvent = lambda e, row_idx=i, ac=code: self._open_aux_dialog(row_idx, ac)
+                else:
+                    d_spin.valueChanged.connect(self._refresh_parents)
+                    cr_spin.valueChanged.connect(self._refresh_parents)
 
             self.table.setCellWidget(i, 2, d_spin)
             self.table.setCellWidget(i, 3, cr_spin)
 
         self._refresh_parents()
+
+    def _open_aux_dialog(self, row: int, code: str):
+        """弹出辅助核算期初明细录入弹窗，确认后回填并汇总"""
+        dim_info = self._aux_config.get(code)
+        if not dim_info:
+            return
+        dim_id, dim_name = dim_info
+        name_item = self.table.item(row, 1)
+        acct_name = name_item.text().split(" [")[0] if name_item else ""
+        existing = self._aux_openings.get(code, {})
+
+        dlg = AuxOpeningDialog(self, self.client_id, code, acct_name, dim_id, dim_name, existing)
+        if dlg.exec():
+            self._aux_openings[code] = dlg.result_data
+            dw = self.table.cellWidget(row, 2)
+            cw = self.table.cellWidget(row, 3)
+            if dw:
+                dw.blockSignals(True)
+                dw.setValue(dlg.total_debit)
+                dw.blockSignals(False)
+            if cw:
+                cw.blockSignals(True)
+                cw.setValue(dlg.total_credit)
+                cw.blockSignals(False)
+            self._refresh_parents()
 
     def _refresh_parents(self):
         """Recompute and display rolled-up totals for all parent rows."""
@@ -354,7 +666,6 @@ class AccountInitDialog(QDialog):
 
         # Bubble up to parents
         parent_totals = {}
-        all_leaf_codes = set(leaf_vals.keys())
         for code, (d, cr) in leaf_vals.items():
             parts = code.split('.')
             for depth in range(1, len(parts)):
@@ -363,6 +674,16 @@ class AccountInitDialog(QDialog):
                     parent_totals[parent] = [0.0, 0.0]
                 parent_totals[parent][0] += d
                 parent_totals[parent][1] += cr
+
+        # 借贷相抵轧差：上级汇总科目只在较大的一方显示净余额
+        for p in parent_totals:
+            d, cr = parent_totals[p]
+            if d > cr:
+                parent_totals[p] = [round(d - cr, 2), 0.0]
+            elif cr > d:
+                parent_totals[p] = [0.0, round(cr - d, 2)]
+            else:
+                parent_totals[p] = [0.0, 0.0]
 
         # Update parent rows in table
         for i, (aid, is_leaf) in enumerate(zip(self._ids, self._leaf_flags)):
@@ -430,12 +751,34 @@ class AccountInitDialog(QDialog):
             cr = cw.value() if cw else 0
             c.execute("UPDATE accounts SET opening_debit=?,opening_credit=? WHERE id=?",
                       (d, cr, aid))
+
+        # 保存辅助核算期初明细
+        if hasattr(self, "_aux_openings") and self._aux_openings:
+            for code, items in self._aux_openings.items():
+                dim_info = self._aux_config.get(code)
+                if not dim_info:
+                    continue
+                dim_id = dim_info[0]
+                c.execute("DELETE FROM account_opening_aux WHERE client_id=? AND account_code=?",
+                          (self.client_id, code))
+                for item_id, (d_val, cr_val) in items.items():
+                    if d_val > 0 or cr_val > 0:
+                        c.execute("""
+                            INSERT INTO account_opening_aux(client_id, account_code, dimension_id, aux_item_id, debit, credit)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (self.client_id, code, dim_id, item_id, d_val, cr_val))
+
         if self.period:
-            # 仅在账套尚未设定启用年月时作为兜底填充，绝不覆盖已有建账期（避免录入年初数或查看期初时把建账期推后）
-            c.execute(
-                "UPDATE clients SET start_period=? WHERE id=? AND (start_period IS NULL OR start_period='')",
-                (self.period, self.client_id)
-            )
+            cur = c.execute("SELECT start_period FROM clients WHERE id=?", (self.client_id,)).fetchone()
+            cur_sp = cur[0] if cur and cur[0] else ""
+            if not cur_sp:
+                c.execute("UPDATE clients SET start_period=? WHERE id=?", (self.period, self.client_id))
+            elif self.period < cur_sp:
+                # 建账期前移：更新并记录审计日志
+                c.execute("UPDATE clients SET start_period=? WHERE id=?", (self.period, self.client_id))
+                log_action(conn, self.client_id, "调整建账期", "client", self.client_id,
+                           f"建账期由【{cur_sp}】变更为【{self.period}】")
+
         log_action(conn, self.client_id, "保存期初余额", "client", self.client_id,
                    f"期间: {self.period}, 录入/修改科目期初余额")
         conn.commit(); conn.close()

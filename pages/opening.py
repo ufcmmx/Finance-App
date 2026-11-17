@@ -38,8 +38,8 @@ class OpeningBalancePage(QWidget):
         # ── 说明 ──
         hint = QLabel(
             "  期初余额录入说明：\n"
-            "  ① 首次建账：默认从当前月开始，您也可以选择任意月份作为建账起始期初\n"
-            "  ② 日常维护：每年的第一个期间（1月）可用于年初结转")
+            "  期初余额对应账套的「启用年月」，建账后不可更改。\n"
+            "  启用年月在新建客户时选择；账套还没有凭证时，可在「编辑客户」里调整。")
         hint.setStyleSheet(
             "background:#f6f8ff;color:#444;border-radius:6px;"
             "padding:10px 14px;font-size:12px;")
@@ -138,6 +138,7 @@ class OpeningBalancePage(QWidget):
         earliest_voucher = row[0] if row and row[0] else None
         start_period = get_client_start_period(conn, self.client_id)
         conn.close()
+
 
         allowed = set()
         now = datetime.now()

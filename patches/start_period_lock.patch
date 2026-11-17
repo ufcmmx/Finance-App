@@ -1,0 +1,82 @@
+--- a/dialogs/client_dialogs.py	2026-11-16 01:19:22.547170640 +0000
++++ b/dialogs/client_dialogs.py	2026-11-16 01:19:22.711963760 +0000
+@@ -47,6 +47,9 @@
+         F.addRow("公司名称 *", self.name); F.addRow("助记码", self.code)
+         F.addRow("客户类型", self.typ);   F.addRow("会计制度", self.std)
+         F.addRow("启用年月", self.start_period)
++        self.sp_hint = QLabel(""); self.sp_hint.setWordWrap(True)
++        self.sp_hint.setStyleSheet("color:#fa8c16;font-size:12px;")
++        F.addRow("", self.sp_hint)
+         F.addRow("税号", self.taxid)
+         F.addRow("联系人", self.contact); F.addRow("电话", self.phone)
+         L.addLayout(F)
+@@ -74,6 +77,28 @@
+                     self.start_period.setCurrentIndex(idx_sp)
+         except Exception:
+             pass
++        reason = self._start_period_locked_reason()
++        if reason:
++            self.start_period.setEnabled(False)
++            self.sp_hint.setText(f"{reason}，启用年月不可修改。")
++
++    def _start_period_locked_reason(self):
++        """账套已有凭证或已结账期间后，启用年月不可修改（与用友/金蝶一致：启用之后不能再改启用期间）。
++        可以修改时返回空串；新建客户时恒为空串。"""
++        if not self.client:
++            return ""
++        conn = get_db()
++        try:
++            cid = self.client["id"]
++            n_v = conn.execute("SELECT COUNT(*) FROM vouchers WHERE client_id=?", (cid,)).fetchone()[0]
++            n_cl = conn.execute("SELECT COUNT(*) FROM periods WHERE client_id=? AND is_closed=1", (cid,)).fetchone()[0]
++        finally:
++            conn.close()
++        if n_v:
++            return f"该账套已录入 {n_v} 张凭证"
++        if n_cl:
++            return f"该账套已有 {n_cl} 个已结账期间"
++        return ""
+ 
+     def _save(self):
+         n = self.name.text().strip()
+@@ -86,8 +111,14 @@
+         if self.client:
+             old_sp = self.client["start_period"] if "start_period" in self.client.keys() else None
+             cid = self.client["id"]
+-            c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=?,start_period=? WHERE id=?",
+-                      d+(cid,))
++            if self._start_period_locked_reason():
++                # 已锁定：不写启用年月（后端兜底，不依赖界面上控件是否被禁用）
++                c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=? WHERE id=?",
++                          d[:-1]+(cid,))
++                sp = old_sp or "未设置"
++            else:
++                c.execute("UPDATE clients SET name=?,short_code=?,client_type=?,accounting_std=?,tax_id=?,contact=?,phone=?,start_period=? WHERE id=?",
++                          d+(cid,))
+             if old_sp and old_sp != sp:
+                 detail = f"客户【{n}】信息更新。启用年月由【{old_sp}】变更为【{sp}】"
+             else:
+--- a/pages/opening.py	2026-11-16 01:19:22.676832041 +0000
++++ b/pages/opening.py	2026-11-16 01:19:22.712112540 +0000
+@@ -38,8 +38,8 @@
+         # ── 说明 ──
+         hint = QLabel(
+             "  期初余额录入说明：\n"
+-            "  ① 首次建账：默认从当前月开始，您也可以选择任意月份作为建账起始期初\n"
+-            "  ② 日常维护：每年的第一个期间（1月）可用于年初结转")
++            "  期初余额对应账套的「启用年月」，建账后不可更改。\n"
++            "  启用年月在新建客户时选择；账套还没有凭证时，可在「编辑客户」里调整。")
+         hint.setStyleSheet(
+             "background:#f6f8ff;color:#444;border-radius:6px;"
+             "padding:10px 14px;font-size:12px;")
+@@ -139,6 +139,10 @@
+         start_period = get_client_start_period(conn, self.client_id)
+         conn.close()
+ 
++        # 期初余额只对应账套的启用年月（accounts 表里每个科目只有一份期初），因此只提供这一个期间。
++        # 此前这里开放了任意月份和每年 1 月，容易让人误以为可以按所选月份分别录入期初。
++        if start_period:
++            return [start_period]
+         allowed = set()
+         now = datetime.now()
+         min_year = min(2018, int(start_period[:4])) if (start_period and len(start_period) >= 4) else 2018
